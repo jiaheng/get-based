@@ -93,7 +93,7 @@ Content-Type: application/json
 - **Max response size**: 32 KB (larger responses are rejected)
 - **Max chunks**: 10 (client truncates)
 - **CORS**: your server must send `Access-Control-Allow-Origin: *` (or the getbased origin)
-- **Timeout**: 5 seconds — slower responses fall back to unenriched AI
+- **Timeout**: 15 seconds — slower responses fall back to unenriched AI
 - **No redirects**: 3xx responses are rejected (prevents Bearer header leaking)
 
 ### Example server (FastAPI)

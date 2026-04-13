@@ -9,7 +9,7 @@ const CONFIG_KEY = 'labcharts-lens-config';
 const SECRET_KEY = 'labcharts-lens-key';
 
 const DEFAULT_CONFIG = { name: '', url: '', enabled: false, topK: 5 };
-const TIMEOUT_MS = 5000;
+const TIMEOUT_MS = 15000;
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const CACHE_MAX = 20;
 const MAX_CHUNKS = 10;
