@@ -716,10 +716,37 @@ export function getContextSummary() {
   return areas;
 }
 
+// ═══════════════════════════════════════════════
+// LENS INJECTION — fold retrieved chunks into the Interpretive Lens block
+// ═══════════════════════════════════════════════
+export function injectLensChunks(ctx, lensResult) {
+  if (!lensResult || !Array.isArray(lensResult.chunks) || !lensResult.chunks.length) return ctx;
+  const snippet = _formatLensChunks(lensResult);
+  const openTag = '[section:interpretiveLens]';
+  const closeTag = '[/section:interpretiveLens]';
+  const closeIdx = ctx.indexOf(closeTag);
+  if (closeIdx !== -1) {
+    return ctx.slice(0, closeIdx) + '\n\n' + snippet + '\n' + ctx.slice(closeIdx);
+  }
+  const block = `${openTag}\n## Interpretive Lens\n${snippet}\n${closeTag}\n\n`;
+  return block + ctx;
+}
+
+function _formatLensChunks(result) {
+  const lines = [`### Retrieved from your knowledge source (${result.sourceName || 'Lens'}):`];
+  result.chunks.forEach((c, i) => {
+    const cite = c.source ? ` — ${c.source}` : '';
+    lines.push(`${i + 1}. ${c.text}${cite}`);
+  });
+  lines.push('When your interpretation draws on these excerpts, cite the source. When it does not, say so.');
+  return lines.join('\n');
+}
+
 Object.assign(window, {
   buildLabContext,
   invalidateLabContextCache,
   getContextSummary,
   isGroupInAIContext,
   setGroupInAIContext,
+  injectLensChunks,
 });

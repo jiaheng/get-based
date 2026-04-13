@@ -129,6 +129,10 @@
             <input type="checkbox" id="chat-websearch-checkbox" aria-label="Toggle web search" onchange="setChatWebSearchEnabled(this.checked)">
             <span class="chat-toggle-slider"></span>
           </label>
+          <button type="button" class="chat-lens-indicator" id="chat-lens-indicator" onclick="openSettingsModal('ai')" title="Custom Knowledge Source" style="display:none">
+            <span class="chat-lens-dot" id="chat-lens-dot"></span>
+            <span class="chat-lens-label">Lens</span>
+          </button>
           <button class="chat-summary-btn" onclick="summarizeThread()" title="Summarize this conversation">Summary</button>
           <button class="chat-clear-btn" onclick="clearChatHistory()" title="Clear history">Clear</button>
           <button class="chat-close-btn" onclick="closeChatPanel()" aria-label="Close chat">&times;</button>

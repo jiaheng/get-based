@@ -37,6 +37,7 @@ const TEST_FILES = [
   'tests/test-dna-recommendations.js',
   'tests/test-cashu-wallet.js',
   'tests/test-custom-api.js',
+  'tests/test-custom-lens.js',
   'tests/test-adapters.js',
   'tests/test-biostarks-adapter.js',
   'tests/test-provenance.js',

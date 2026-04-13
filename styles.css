@@ -2050,6 +2050,23 @@ details[open] > .cl-archived-header::before { content: '\25BE '; }
   transform: translateX(12px);
 }
 
+/* Custom Knowledge Source indicator */
+.chat-lens-indicator {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: 12px;
+  background: var(--bg-primary); border: 1px solid var(--border);
+  color: var(--text-muted); font-size: 11px; cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.chat-lens-indicator:hover { background: var(--bg-hover); }
+.chat-lens-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--text-muted);
+  transition: background 0.15s;
+}
+.chat-lens-indicator.active .chat-lens-dot { background: #22c55e; }
+.chat-lens-indicator.error .chat-lens-dot { background: #fbbf24; }
+
 /* Personality selector bar */
 .chat-personality-bar {
   flex-shrink: 0; border-bottom: 1px solid var(--border);

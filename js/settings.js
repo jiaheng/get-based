@@ -130,6 +130,12 @@ export function openSettingsModal(tab) {
         ${renderPrivacySection()}
       </div>
 
+      <div class="settings-group-title">Custom Knowledge Source</div>
+
+      <div class="settings-section" id="custom-lens-section">
+        ${window.renderCustomLensSection ? window.renderCustomLensSection() : ''}
+      </div>
+
       <div class="settings-group-title">AI Usage</div>
 
       <div class="settings-section" id="ai-usage-section">
