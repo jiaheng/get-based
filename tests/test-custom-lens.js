@@ -73,6 +73,24 @@ return (async function() {
   assert('rejects empty string', window.isValidLensUrl('') === false);
   assert('rejects garbage', window.isValidLensUrl('not-a-url') === false);
   assert('rejects ftp://', window.isValidLensUrl('ftp://example.com') === false);
+  // Private/LAN ranges (non-routable, http:// OK)
+  assert('accepts http://192.168.1.5:8000', window.isValidLensUrl('http://192.168.1.5:8000') === true);
+  assert('accepts http://192.168.222.119:8321/query', window.isValidLensUrl('http://192.168.222.119:8321/query') === true);
+  assert('accepts http://10.0.0.1', window.isValidLensUrl('http://10.0.0.1') === true);
+  assert('accepts http://172.16.0.1', window.isValidLensUrl('http://172.16.0.1') === true);
+  assert('accepts http://172.31.255.254', window.isValidLensUrl('http://172.31.255.254') === true);
+  assert('rejects http://172.15.0.1 (outside /12)', window.isValidLensUrl('http://172.15.0.1') === false);
+  assert('rejects http://172.32.0.1 (outside /12)', window.isValidLensUrl('http://172.32.0.1') === false);
+  assert('accepts http://nas.local:8000', window.isValidLensUrl('http://nas.local:8000') === true);
+  assert('accepts http://nas.local.', window.isValidLensUrl('http://nas.local.') === true);
+  assert('accepts http://100.64.0.1 (Tailscale CGNAT)', window.isValidLensUrl('http://100.64.0.1') === true);
+  assert('accepts http://100.127.255.254 (Tailscale CGNAT)', window.isValidLensUrl('http://100.127.255.254') === true);
+  assert('rejects http://100.63.0.1 (outside CGNAT)', window.isValidLensUrl('http://100.63.0.1') === false);
+  assert('rejects http://100.128.0.1 (outside CGNAT)', window.isValidLensUrl('http://100.128.0.1') === false);
+  assert('accepts http://169.254.169.254 (link-local)', window.isValidLensUrl('http://169.254.169.254') === true);
+  assert('accepts http://[::1]:8000', window.isValidLensUrl('http://[::1]:8000') === true);
+  assert('rejects http://8.8.8.8 (public)', window.isValidLensUrl('http://8.8.8.8') === false);
+  assert('rejects http://256.1.1.1 (invalid octet)', window.isValidLensUrl('http://256.1.1.1') === false);
 
   // ─── 4. Config round-trip ───
   console.log('\n4. Config round-trip');

@@ -89,7 +89,7 @@ Content-Type: application/json
 ```
 
 **Constraints:**
-- **HTTPS required** except for `localhost` / `127.0.0.1`
+- **HTTPS required** for public hosts. Plain `http://` is accepted for hosts that can't leak your Bearer token over the public internet: loopback (`localhost`, `127.0.0.1`, `[::1]`), RFC1918 LAN (`10.x`, `172.16–31.x`, `192.168.x`), link-local (`169.254.x`), Tailscale CGNAT (`100.64–127.x`), and mDNS (`*.local`). Anything else must be `https://`.
 - **Max response size**: 32 KB (larger responses are rejected)
 - **Max chunks**: 10 (client truncates)
 - **CORS**: your server must send `Access-Control-Allow-Origin: *` (or the getbased origin)

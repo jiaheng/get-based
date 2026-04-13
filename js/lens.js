@@ -58,12 +58,33 @@ export function hasLens() {
 }
 
 // ─── URL validation ───────────────────────────────────────────
+// http:// is accepted for hosts that can't leak the Bearer token across the
+// public internet: loopback, RFC1918 LAN, link-local, Tailscale CGNAT, mDNS.
+// Everything else must be https://.
+function _isPrivateHost(host) {
+  if (!host) return false;
+  if (host === 'localhost') return true;
+  if (host === '::1' || host === '[::1]') return true;
+  if (host.endsWith('.local') || host.endsWith('.local.')) return true;
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (!m) return false;
+  const a = +m[1], b = +m[2], c = +m[3], d = +m[4];
+  if (a > 255 || b > 255 || c > 255 || d > 255) return false;
+  if (a === 10) return true;                           // 10.0.0.0/8
+  if (a === 127) return true;                          // loopback
+  if (a === 169 && b === 254) return true;             // link-local 169.254.0.0/16
+  if (a === 172 && b >= 16 && b <= 31) return true;    // 172.16.0.0/12
+  if (a === 192 && b === 168) return true;             // 192.168.0.0/16
+  if (a === 100 && b >= 64 && b <= 127) return true;   // Tailscale CGNAT 100.64.0.0/10
+  return false;
+}
+
 export function isValidLensUrl(url) {
   if (typeof url !== 'string' || !url) return false;
   let u;
   try { u = new URL(url); } catch { return false; }
   if (u.protocol === 'https:') return true;
-  if (u.protocol === 'http:' && (u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname === '[::1]')) return true;
+  if (u.protocol === 'http:') return _isPrivateHost(u.hostname);
   return false;
 }
 
@@ -324,7 +345,7 @@ export async function handleSaveLensConfig() {
   const enabled = !!document.getElementById('lens-enabled-toggle')?.checked;
 
   if (!url) { showNotification('Please enter an endpoint URL', 'error'); return; }
-  if (!isValidLensUrl(url)) { showNotification('URL must be https:// (or http://localhost for dev)', 'error'); return; }
+  if (!isValidLensUrl(url)) { showNotification('URL must be https:// (or http:// to localhost / LAN / .local)', 'error'); return; }
 
   const key = (keyRaw === '••••••••') ? getLensKey() : keyRaw.trim();
   if (!key) { showNotification('Please enter an API key', 'error'); return; }
