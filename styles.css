@@ -121,12 +121,13 @@ body {
   background: var(--bg-secondary);
   border-right: 1px solid var(--border);
   padding: 16px 0;
-  flex-shrink: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  position: sticky;
+  position: fixed;
   top: 57px;
+  left: 0;
   height: calc(100vh - 57px);
+  z-index: 10;
 }
 .sidebar-title {
   font-size: 11px; font-weight: 600; text-transform: uppercase;
@@ -174,7 +175,7 @@ body {
   margin-left: auto; font-size: 10px; transition: transform 0.15s;
 }
 .sidebar-group-header:not(.collapsed) .sidebar-group-arrow { transform: rotate(90deg); }
-.main { flex: 1; padding: 24px 32px; max-width: calc(100vw - 260px); }
+.main { flex: 1; padding: 24px 32px; margin-left: 260px; max-width: calc(100vw - 260px); }
 .app-footer { border-top: 1px solid var(--border); padding: 32px; }
 .app-footer-row { max-width: 1200px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; }
 .app-footer-logo { font-family: var(--font-display); font-weight: 800; font-size: 18px; background: var(--accent-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
@@ -468,7 +469,7 @@ body {
     display: none; cursor: pointer;
   }
   .sidebar-backdrop.show { display: block; }
-  .main { max-width: 100%; padding: 20px; }
+  .main { max-width: 100%; padding: 20px; margin-left: 0; }
   .charts-grid { grid-template-columns: 1fr; }
   .charts-grid-4col { grid-template-columns: repeat(2, 1fr); }
 }
