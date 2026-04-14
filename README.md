@@ -23,6 +23,7 @@
 - **Manual entry** — add results without a PDF, create custom biomarkers
 - **Marker glossary** — searchable reference for all markers with values and ranges
 - **Interpretive lens** — frame AI analysis through specific scientific paradigms or experts
+- **Custom Knowledge Source** — connect your own document collection (research papers, clinical guides, any texts) to ground AI analysis in real sources. The AI searches your knowledge base for relevant passages before interpreting your labs, and cites them back to you
 - **9 lifestyle context cards** — diet & digestion, sleep, exercise, stress, light & circadian, environment, EMF assessment (Baubiologie SBM-2015), and more — each gets an AI health rating and enriches all interpretations
 - **Menstrual cycle tracking** — phase-aware reference ranges, cycle phase bands on charts, perimenopause detection, symptom tracking
 - **Supplement & medication timeline** — overlaid on charts to correlate with biomarker changes
@@ -74,8 +75,9 @@ Switch providers anytime. All non-AI features work without a provider configured
 | Biomarkers | 287+ standard + unlimited custom | Limited set |
 | Specialty labs | OAT, fatty acids + custom marker pipeline for any test | Blood only |
 | DNA raw data | 42 curated SNPs, APOE, 5 providers | No |
-| Lifestyle context | 9 cards inform all AI analysis | None or basic |
-| Account required | No | Yes |
+|| Lifestyle context | 9 cards inform all AI analysis | None or basic |
+|| Custom knowledge base | Bring-your-own RAG endpoint, any documents | No |
+|| Account required | No | Yes |
 
 ---
 

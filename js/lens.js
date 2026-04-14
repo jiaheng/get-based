@@ -1,4 +1,4 @@
-// lens.js — Custom Knowledge Source (Lens Corpus)
+// lens.js — Custom Knowledge Source
 // User-configured RAG endpoint that backs the Interpretive Lens with retrieved chunks.
 
 import { state } from './state.js';
@@ -236,9 +236,10 @@ export async function testLensConnection() {
 // ═══════════════════════════════════════════════
 export function updateLensIndicator() {
   const btn = document.getElementById('chat-lens-indicator');
+  const live = document.getElementById('chat-lens-status');
   if (!btn) return;
   btn.classList.remove('active', 'error');
-  if (!hasLens()) { btn.style.display = 'none'; return; }
+  if (!hasLens()) { btn.style.display = 'none'; if (live) live.textContent = ''; return; }
   btn.style.display = '';
   const s = getLensStatus();
   if (s.state === 'active') btn.classList.add('active');
@@ -250,6 +251,7 @@ export function updateLensIndicator() {
       ? `Knowledge source active${cfg.name ? ': ' + cfg.name : ''} · ${s.lastChunkCount || 0} passages`
       : `Knowledge source ready${cfg.name ? ': ' + cfg.name : ''}`;
   btn.title = tip;
+  if (live) live.textContent = tip;
 }
 
 subscribeLensStatus(updateLensIndicator);
