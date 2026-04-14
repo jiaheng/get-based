@@ -225,7 +225,8 @@ export async function testLensConnection() {
   if (!cfg.url || !key) return { ok: false, error: 'URL and API key required' };
   clearLensCache();
   updateLensStatus({ state: 'idle', lastError: null });
-  const result = await _doQuery(cfg.url, key, cfg.topK, cfg.name || 'Lens', 'test query', {});
+  // Use a domain-relevant probe — 'test query' is too generic to pass typical similarity floors.
+  const result = await _doQuery(cfg.url, key, Math.max(cfg.topK, 3), cfg.name || 'Lens', 'vitamin D deficiency supplementation', {});
   if (!result) return { ok: false, error: getLensStatus().lastError || 'unknown error' };
   return { ok: true, chunkCount: result.chunks.length, firstSource: result.chunks[0]?.source || '' };
 }
