@@ -38,36 +38,48 @@ Click the card to open the editor. Type or paste your lens text, then click **Sa
 
 The Interpretive Lens is included in your [JSON export](/guide/json-export-import) and restored on import.
 
-## Custom Knowledge Source (RAG)
+## Custom Knowledge Source
 
-The lens text is a name-level bias. If you want the AI to reason from actual framework excerpts — textbook passages, essays, clinical notes — point it at your own Retrieval-Augmented Generation (RAG) endpoint.
+The lens text above tells the AI *which perspective* to use. A Knowledge Source takes this further by giving the AI *actual passages* to reason from — excerpts from research papers, clinical guides, textbook chapters, or any documents you've collected.
 
-When configured, every chat question and focus card insight triggers a query to your endpoint. getbased sends the question verbatim, receives the most relevant framework chunks, and splices them into the Interpretive Lens block before the AI reads your lab data. The AI then interprets your results through those excerpts and cites them back to you.
+When connected, every chat question and focus card insight triggers a search of your knowledge base. getbased sends the question, receives the most relevant passages, and includes them alongside your lab data. The AI then interprets your results grounded in those sources and cites them back to you.
+
+### What you need
+
+A Knowledge Source is a server (run by you or someone you trust) that accepts a question and returns relevant passages from a document collection. Under the hood this uses **RAG** (Retrieval-Augmented Generation) — a technique where the AI first searches a curated document set for relevant content, then uses those results to inform its answer.
+
+::: tip
+Think of it like a research assistant: you ask a question, they pull the most relevant pages from your library, and the AI reads those pages before answering.
+:::
 
 ### Setup
 
-1. Open **Settings → AI → Custom Knowledge Source**
-2. Toggle **Enable Custom Knowledge Source**
-3. Enter a display name (e.g., *Bredesen Protocol*)
-4. Enter your endpoint URL (HTTPS, or `http://localhost` for development)
-5. Enter your API key (encrypted at rest)
-6. Set the number of chunks to retrieve per query (`top_k`, default 5)
-7. Click **Save & Test** — a check query runs and confirms connectivity
+1. Open **Settings → AI → Knowledge Source**
+2. Toggle **Enable Knowledge Source**
+3. Enter a display name (e.g., *Functional Medicine Library*)
+4. Enter your server URL (HTTPS, or `http://localhost` for local servers)
+5. Enter your API key (encrypted at rest on your device)
+6. Set how many passages to retrieve per query (1–10, default 5)
+7. Click **Save & Test** — a test query runs to confirm the connection works
 
-When active, a **Lens** badge appears in the chat header. Click it to jump to settings.
+When active, a **badge** appears in the chat header showing the knowledge source is being used.
 
 ### What leaves your browser
 
-Each AI question (the user message in chat, or a compact summary of your focus card state) is sent to your endpoint with `Bearer` auth. No lab values, profile details, or other private data go to the RAG — only the question itself. Choose an endpoint you control or trust.
+Each AI question (the user message in chat, or a compact summary of your focus card state) is sent to your server with authentication. No lab values, profile details, or other private data go to the knowledge source — only the question itself. Choose a server you control or trust.
 
-### Endpoint contract
+### Disabling
 
-Your server must implement a single `POST` route returning relevant chunks.
+Toggle **Enable Knowledge Source** off to pause without losing your config. The badge disappears from the chat header, and subsequent AI calls use only the lens text above.
+
+### For developers: endpoint contract
+
+If you're setting up your own knowledge source server, it must implement a single `POST` route returning relevant passages.
 
 **Request:**
 ```http
 POST /your-endpoint
-Authorization: Bearer <your-api-key>
+Authorization: Bearer ***
 Content-Type: application/json
 
 { "version": 1, "query": "what could drive a rising ferritin?", "top_k": 5 }
@@ -77,7 +89,7 @@ Content-Type: application/json
 ```json
 {
   "chunks": [
-    { "text": "Elevated ferritin in the absence of anemia often...", "source": "Bredesen 2020, p.142" },
+    { "text": "Elevated ferritin in the absence of anemia often...", "source": "Clinical Guide p.142" },
     { "text": "Inflammatory ferritin elevation is typically...", "source": "Case study #47" }
   ]
 }
@@ -91,9 +103,9 @@ Content-Type: application/json
 **Constraints:**
 - **HTTPS required** for public hosts. Plain `http://` is accepted for hosts that can't leak your Bearer token over the public internet: loopback (`localhost`, `127.0.0.1`, `[::1]`), RFC1918 LAN (`10.x`, `172.16–31.x`, `192.168.x`), link-local (`169.254.x`), Tailscale CGNAT (`100.64–127.x`), and mDNS (`*.local`). Anything else must be `https://`.
 - **Max response size**: 32 KB (larger responses are rejected)
-- **Max chunks**: 10 (client truncates)
+- **Max passages**: 10 (client truncates)
 - **CORS**: your server must send `Access-Control-Allow-Origin: *` (or the getbased origin)
-- **Timeout**: 15 seconds — slower responses fall back to unenriched AI
+- **Timeout**: 30 seconds — slower responses fall back to unenriched AI
 - **No redirects**: 3xx responses are rejected (prevents Bearer header leaking)
 
 ### Example server (FastAPI)
@@ -106,7 +118,7 @@ from pydantic import BaseModel
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["POST"], allow_headers=["*"])
 
-API_KEY = "your-shared-secret"
+API_KEY = "your-secret"
 
 class Query(BaseModel):
     version: int = 1
@@ -132,7 +144,7 @@ const app = express();
 app.use(cors({ origin: '*', methods: ['POST'] }));
 app.use(express.json());
 
-const API_KEY = 'your-shared-secret';
+const API_KEY = 'your-secret';
 
 app.post('/query', (req, res) => {
   const auth = req.headers.authorization;
@@ -149,7 +161,3 @@ app.listen(8000);
 ### Caching
 
 getbased caches each query for 5 minutes (up to 20 entries, scoped per profile). Switching profiles, changing the config, or clicking **Clear cache** in settings flushes the cache.
-
-### Disabling
-
-Toggle **Enable Custom Knowledge Source** off to pause retrieval without losing your config. The lens badge disappears from the chat header, and subsequent AI calls use only the name-level lens text above.

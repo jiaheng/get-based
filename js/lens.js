@@ -245,10 +245,10 @@ export function updateLensIndicator() {
   else if (s.state === 'error') btn.classList.add('error');
   const cfg = getLensConfig();
   const tip = s.state === 'error'
-    ? `Lens error: ${s.lastError || 'unknown'}`
+    ? `Knowledge source error: ${s.lastError || 'unknown'}`
     : s.state === 'active'
-      ? `Lens active${cfg.name ? ': ' + cfg.name : ''} · ${s.lastChunkCount || 0} chunks`
-      : `Lens ready${cfg.name ? ': ' + cfg.name : ''}`;
+      ? `Knowledge source active${cfg.name ? ': ' + cfg.name : ''} · ${s.lastChunkCount || 0} passages`
+      : `Knowledge source ready${cfg.name ? ': ' + cfg.name : ''}`;
   btn.title = tip;
 }
 
@@ -272,33 +272,33 @@ export function renderCustomLensSection() {
   const lastInfo = status.state === 'error' && status.lastError
     ? `<div style="font-size:11px;color:#fbbf24;margin-top:4px">Last error: ${escapeHTML(status.lastError)}</div>`
     : connected && status.lastChunkCount
-      ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Last query: ${status.lastChunkCount} chunk${status.lastChunkCount !== 1 ? 's' : ''}${status.sourceName ? ' from ' + escapeHTML(status.sourceName) : ''}</div>`
+      ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Last query: ${status.lastChunkCount} passage${status.lastChunkCount !== 1 ? 's' : ''}${status.sourceName ? ' from ' + escapeHTML(status.sourceName) : ''}</div>`
       : '';
 
   return `<div class="ai-provider-panel">
-    <div class="ai-provider-desc">Back your Interpretive Lens with a RAG endpoint. When configured, each chat question is sent to your endpoint; retrieved framework chunks inform the AI's interpretation of your lab data. <a href="/docs/guide/interpretive-lens#custom-knowledge-source-rag" target="_blank" rel="noopener" style="color:var(--accent)">Contract spec &rarr;</a></div>
+    <div class="ai-provider-desc">Connect a knowledge base to ground the AI's analysis in real sources — research papers, clinical guides, or any documents you choose. When enabled, the AI searches your knowledge base for relevant passages before interpreting your labs. <a href="/docs/guide/interpretive-lens#custom-knowledge-source-rag" target="_blank" rel="noopener" style="color:var(--accent)">Setup guide &rarr;</a></div>
     <div class="api-key-status" id="lens-status-chip">${statusChip}${lastInfo}</div>
     <div style="margin-top:8px;display:flex;align-items:center;gap:10px">
       <label class="toggle-switch">
         <input type="checkbox" id="lens-enabled-toggle" ${cfg.enabled ? 'checked' : ''} onchange="handleToggleLens(this.checked)">
         <span class="toggle-slider"></span>
       </label>
-      <span style="font-size:13px">Enable Custom Knowledge Source</span>
+      <span style="font-size:13px">Enable Knowledge Source</span>
     </div>
     <div style="margin-top:10px">
       <label style="font-size:12px;color:var(--text-muted)">Display name</label>
-      <input type="text" class="api-key-input" id="lens-name-input" value="${escapeAttr(cfg.name)}" placeholder="Bredesen Protocol RAG" style="margin-top:4px">
+      <input type="text" class="api-key-input" id="lens-name-input" value="${escapeAttr(cfg.name)}" placeholder="e.g. Functional Medicine Library" style="margin-top:4px">
     </div>
     <div style="margin-top:8px">
       <label style="font-size:12px;color:var(--text-muted)">Endpoint URL</label>
-      <input type="text" class="api-key-input" id="lens-url-input" value="${escapeAttr(cfg.url)}" placeholder="https://your-rag.example.com/query" style="margin-top:4px">
+      <input type="text" class="api-key-input" id="lens-url-input" value="${escapeAttr(cfg.url)}" placeholder="https://your-server.example.com/query" style="margin-top:4px">
     </div>
     <div style="margin-top:8px">
       <label style="font-size:12px;color:var(--text-muted)">API key</label>
-      <input type="password" class="api-key-input" id="lens-key-input" value="${escapeAttr(keySet ? '••••••••' : '')}" placeholder="Bearer token" style="margin-top:4px">
+      <input type="password" class="api-key-input" id="lens-key-input" value="${escapeAttr(keySet ? '••••••••' : '')}" placeholder="Your access key" style="margin-top:4px">
     </div>
     <div style="margin-top:8px">
-      <label style="font-size:12px;color:var(--text-muted)">Chunks per query (top_k)</label>
+      <label style="font-size:12px;color:var(--text-muted)">Passages per query</label>
       <input type="number" class="api-key-input" id="lens-topk-input" value="${cfg.topK || 5}" min="1" max="10" style="margin-top:4px;width:100px">
     </div>
     <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
@@ -306,7 +306,7 @@ export function renderCustomLensSection() {
       ${connected ? '<button class="import-btn import-btn-secondary" onclick="handleClearLensCache()">Clear cache</button>' : ''}
       ${connected ? '<button class="import-btn import-btn-secondary" onclick="handleRemoveLens()">Remove</button>' : ''}
     </div>
-    <div class="api-key-notice" style="margin-top:12px">Queries are sent verbatim to the endpoint you configure. Only connect to endpoints you control or trust. Your key is encrypted at rest.</div>
+    <div class="api-key-notice" style="margin-top:12px">Your questions are sent directly to the server you configure. Only connect to servers you control or trust. Your key is encrypted at rest on this device.</div>
   </div>`;
 }
 
@@ -333,7 +333,7 @@ function _updateLensStatusChip() {
   const lastInfo = status.state === 'error' && status.lastError
     ? `<div style="font-size:11px;color:#fbbf24;margin-top:4px">Last error: ${escapeHTML(status.lastError)}</div>`
     : connected && status.lastChunkCount
-      ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Last query: ${status.lastChunkCount} chunk${status.lastChunkCount !== 1 ? 's' : ''}${status.sourceName ? ' from ' + escapeHTML(status.sourceName) : ''}</div>`
+      ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Last query: ${status.lastChunkCount} passage${status.lastChunkCount !== 1 ? 's' : ''}${status.sourceName ? ' from ' + escapeHTML(status.sourceName) : ''}</div>`
       : '';
   chip.innerHTML = statusChip + lastInfo;
 }
@@ -357,9 +357,9 @@ export async function handleSaveLensConfig() {
   const result = await testLensConnection();
   _rerenderLensSection();
   if (result.ok) {
-    showNotification(`Connected — ${result.chunkCount} chunk${result.chunkCount !== 1 ? 's' : ''} returned`, 'success');
+    showNotification(`Connected — ${result.chunkCount} passage${result.chunkCount !== 1 ? 's' : ''} returned`, 'success');
   } else {
-    showNotification(`Lens test failed: ${result.error}`, 'error');
+    showNotification(`Connection failed: ${result.error}`, 'error');
   }
 }
 
@@ -377,7 +377,7 @@ export function handleClearLensCache() {
 }
 
 export function handleRemoveLens() {
-  showConfirmDialog('Remove Custom Knowledge Source? Your endpoint URL and API key will be deleted.', async () => {
+  showConfirmDialog('Remove Knowledge Source? Your server URL and API key will be deleted.', async () => {
     await removeLens();
     _rerenderLensSection();
     showNotification('Lens removed', 'info');
