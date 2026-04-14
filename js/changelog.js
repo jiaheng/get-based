@@ -5,6 +5,13 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.19.2', date: '2026-04-14', title: 'Sync Context Fix',
+    items: [
+      'Specialty lab data (Fatty Acids, OAT, etc.) now syncs completely even when excluded from AI chat',
+      'Fixed a bug where sync silently failed to push lab data to the gateway',
+    ]
+  },
+  {
     version: '1.19.0', date: '2026-04-12', title: 'Precise Supplement Dosing',
     items: [
       'New "Doses/day" field on supplements \u2014 set once as the default multiplier for every ingredient in a combo product',
