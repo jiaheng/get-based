@@ -75,9 +75,9 @@ Switch providers anytime. All non-AI features work without a provider configured
 | Biomarkers | 287+ standard + unlimited custom | Limited set |
 | Specialty labs | OAT, fatty acids + custom marker pipeline for any test | Blood only |
 | DNA raw data | 42 curated SNPs, APOE, 5 providers | No |
-|| Lifestyle context | 9 cards inform all AI analysis | None or basic |
-|| Custom knowledge base | Bring-your-own RAG endpoint, any documents | No |
-|| Account required | No | Yes |
+| Lifestyle context | 9 cards inform all AI analysis | None or basic |
+| Custom knowledge base | Bring-your-own knowledge source endpoint, any documents | No |
+| Account required | No | Yes |
 
 ---
 

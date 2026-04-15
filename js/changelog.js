@@ -7,10 +7,10 @@ const CHANGELOG = [
   {
     version: '1.20.0', date: '2026-04-15', title: 'Custom Knowledge Source + Bug fixes',
     items: [
-      'Back your Interpretive Lens with a RAG endpoint \u2014 the AI interprets your labs through framework excerpts you retrieved from your own knowledge base',
+      'Back your Interpretive Lens with a Custom Knowledge Source \u2014 the AI interprets your labs through framework excerpts you retrieved from your own knowledge base',
       'Plug in any HTTPS endpoint that accepts a simple { query, top_k } POST \u2014 FastAPI and Express examples in the docs',
-      'Works across chat, multi-persona discussions, and the focus card \u2014 retrieved chunks fold into the existing Interpretive Lens context',
-      'Chat-header Lens badge shows when retrieval is active and how many chunks came back',
+      'Works across chat, multi-persona discussions, and the focus card \u2014 retrieved passages fold into the existing Interpretive Lens context',
+      'Chat-header Lens badge shows when retrieval is active and how many passages came back',
       'Encrypted at rest, syncs across devices via Evolu, cached 5 min per query to keep costs down',
       'OpenAI GPT-5 family and o-series reasoning models now work via the Custom API provider \u2014 switched to max_completion_tokens (#114)',
       'Custom API key, URL, and selected model now survive backup/restore and sync across devices (#116)',

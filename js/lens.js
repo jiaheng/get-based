@@ -281,26 +281,26 @@ export function renderCustomLensSection() {
     <div class="ai-provider-desc">Connect a knowledge base to ground the AI's analysis in real sources — research papers, clinical guides, or any documents you choose. When enabled, the AI searches your knowledge base for relevant passages before interpreting your labs. <a href="/docs/guide/interpretive-lens#custom-knowledge-source-rag" target="_blank" rel="noopener" style="color:var(--accent)">Setup guide &rarr;</a></div>
     <div class="api-key-status" id="lens-status-chip">${statusChip}${lastInfo}</div>
     <div style="margin-top:8px;display:flex;align-items:center;gap:10px">
-      <label class="toggle-switch">
+      <label class="toggle-switch" for="lens-enabled-toggle">
         <input type="checkbox" id="lens-enabled-toggle" ${cfg.enabled ? 'checked' : ''} onchange="handleToggleLens(this.checked)">
         <span class="toggle-slider"></span>
+        <span style="font-size:13px;margin-left:8px">Enable Knowledge Source</span>
       </label>
-      <span style="font-size:13px">Enable Knowledge Source</span>
     </div>
     <div style="margin-top:10px">
-      <label style="font-size:12px;color:var(--text-muted)">Display name</label>
+      <label style="font-size:12px;color:var(--text-muted)" for="lens-name-input">Display name</label>
       <input type="text" class="api-key-input" id="lens-name-input" value="${escapeAttr(cfg.name)}" placeholder="e.g. Functional Medicine Library" style="margin-top:4px">
     </div>
     <div style="margin-top:8px">
-      <label style="font-size:12px;color:var(--text-muted)">Endpoint URL</label>
+      <label style="font-size:12px;color:var(--text-muted)" for="lens-url-input">Endpoint URL</label>
       <input type="text" class="api-key-input" id="lens-url-input" value="${escapeAttr(cfg.url)}" placeholder="https://your-server.example.com/query" style="margin-top:4px">
     </div>
     <div style="margin-top:8px">
-      <label style="font-size:12px;color:var(--text-muted)">API key</label>
+      <label style="font-size:12px;color:var(--text-muted)" for="lens-key-input">API key</label>
       <input type="password" class="api-key-input" id="lens-key-input" value="${escapeAttr(keySet ? '••••••••' : '')}" placeholder="Your access key" style="margin-top:4px">
     </div>
     <div style="margin-top:8px">
-      <label style="font-size:12px;color:var(--text-muted)">Passages per query</label>
+      <label style="font-size:12px;color:var(--text-muted)" for="lens-topk-input">Passages per query</label>
       <input type="number" class="api-key-input" id="lens-topk-input" value="${cfg.topK || 5}" min="1" max="10" style="margin-top:4px;width:100px">
     </div>
     <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
