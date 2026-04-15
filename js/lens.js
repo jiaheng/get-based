@@ -284,8 +284,8 @@ export function renderCustomLensSection() {
       <label class="toggle-switch" for="lens-enabled-toggle">
         <input type="checkbox" id="lens-enabled-toggle" ${cfg.enabled ? 'checked' : ''} onchange="handleToggleLens(this.checked)">
         <span class="toggle-slider"></span>
-        <span style="font-size:13px;margin-left:8px">Enable Knowledge Source</span>
       </label>
+      <label for="lens-enabled-toggle" style="font-size:13px;cursor:pointer">Enable Knowledge Source</label>
     </div>
     <div style="margin-top:10px">
       <label style="font-size:12px;color:var(--text-muted)" for="lens-name-input">Display name</label>
