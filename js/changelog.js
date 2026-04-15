@@ -5,6 +5,14 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.19.3', date: '2026-04-15', title: 'Bug fixes — OpenAI GPT-5, Custom API backup, dev-server origin',
+    items: [
+      'OpenAI GPT-5 family and o-series reasoning models now work via the Custom API provider \u2014 switched to max_completion_tokens (#114)',
+      'Custom API key, URL, and selected model now survive backup/restore and sync across devices (#116)',
+      'Hardened dev-server same-origin guard \u2014 forged Referer/Origin substrings can no longer bypass the /api/* check (#119)',
+    ]
+  },
+  {
     version: '1.19.2', date: '2026-04-14', title: 'Sync Context Fix',
     items: [
       'Specialty lab data (Fatty Acids, OAT, etc.) now syncs completely even when excluded from AI chat',
