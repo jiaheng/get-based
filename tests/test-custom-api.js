@@ -316,6 +316,44 @@ return (async function() {
   assert('_customApiFetchModels uses proxy', apiSrc.includes('function _customApiFetchModels('));
   assert('_customApiFetchModels sends method GET via proxy', apiSrc.includes("method: 'GET'"));
 
+  // ─── 18. needsMaxCompletionTokens — GPT-5 / o-series detection (#114) ───
+  console.log('\n18. needsMaxCompletionTokens (#114)');
+  assert('needsMaxCompletionTokens exists', typeof window.needsMaxCompletionTokens === 'function');
+  // Positive: GPT-5 family
+  assert('detects gpt-5', window.needsMaxCompletionTokens('gpt-5') === true);
+  assert('detects gpt-5.4', window.needsMaxCompletionTokens('gpt-5.4') === true);
+  assert('detects gpt-5-codex', window.needsMaxCompletionTokens('gpt-5-codex') === true);
+  assert('detects openai/gpt-5 (prefixed)', window.needsMaxCompletionTokens('openai/gpt-5') === true);
+  assert('detects openai/gpt-5.4 (prefixed)', window.needsMaxCompletionTokens('openai/gpt-5.4') === true);
+  // Positive: o-series reasoning models
+  assert('detects o1', window.needsMaxCompletionTokens('o1') === true);
+  assert('detects o1-mini', window.needsMaxCompletionTokens('o1-mini') === true);
+  assert('detects o3', window.needsMaxCompletionTokens('o3') === true);
+  assert('detects o3-mini', window.needsMaxCompletionTokens('o3-mini') === true);
+  assert('detects o4-mini', window.needsMaxCompletionTokens('o4-mini') === true);
+  assert('detects openai/o3 (prefixed)', window.needsMaxCompletionTokens('openai/o3') === true);
+  // Negative: older models that still use max_tokens
+  assert('rejects gpt-4', window.needsMaxCompletionTokens('gpt-4') === false);
+  assert('rejects gpt-4o', window.needsMaxCompletionTokens('gpt-4o') === false);
+  assert('rejects gpt-4-turbo', window.needsMaxCompletionTokens('gpt-4-turbo') === false);
+  assert('rejects gpt-3.5-turbo', window.needsMaxCompletionTokens('gpt-3.5-turbo') === false);
+  assert('rejects claude-opus-4-6', window.needsMaxCompletionTokens('claude-opus-4-6') === false);
+  assert('rejects llama-3.3-70b', window.needsMaxCompletionTokens('llama-3.3-70b') === false);
+  assert('rejects gemini-3-pro', window.needsMaxCompletionTokens('gemini-3-pro') === false);
+  assert('rejects deepseek-r1', window.needsMaxCompletionTokens('deepseek-r1') === false);
+  // Edge cases
+  assert('rejects empty string', window.needsMaxCompletionTokens('') === false);
+  assert('rejects null', window.needsMaxCompletionTokens(null) === false);
+  assert('rejects undefined', window.needsMaxCompletionTokens(undefined) === false);
+  // False-positive guards: must not match "gpt-5x" style malformed substrings or "ox" identifiers
+  assert('rejects gpt-50 (not GPT-5)', window.needsMaxCompletionTokens('gpt-50') === false);
+  assert('rejects ozone (no o[1-9] at start)', window.needsMaxCompletionTokens('ozone') === false);
+  assert('rejects openai/gpt-50', window.needsMaxCompletionTokens('openai/gpt-50') === false);
+  // callOpenAICompatibleAPI uses the helper to pick the field
+  assert('callOpenAICompatibleAPI uses needsMaxCompletionTokens', apiSrc.includes('needsMaxCompletionTokens(model)'));
+  assert('body uses dynamic tokenLimitField', apiSrc.includes('[tokenLimitField]:'));
+  assert('tokenLimitField defaults to max_tokens', apiSrc.includes("? 'max_completion_tokens' : 'max_tokens'"));
+
   // ═══ SUMMARY ═══
   console.log('\n' + results.join('\n'));
   console.log(`\n=== ${passed} passed, ${failed} failed, ${passed + failed} total ===`);

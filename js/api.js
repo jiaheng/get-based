@@ -589,6 +589,15 @@ export async function callOllamaChat({ system, messages, maxTokens, onStream, si
 // ═══════════════════════════════════════════════
 // SHARED OPENAI-COMPATIBLE API HELPER
 // ═══════════════════════════════════════════════
+// GPT-5 family + o-series reasoning models reject `max_tokens` and require `max_completion_tokens`.
+// Matches bare ids (gpt-5.4, o1-mini) and provider-prefixed (openai/gpt-5, openai/o3).
+export function needsMaxCompletionTokens(modelId) {
+  if (!modelId) return false;
+  const id = String(modelId).toLowerCase();
+  const bare = id.includes('/') ? id.split('/').pop() : id;
+  return /^(gpt-5|o[1-9])([-.]|$)/.test(bare);
+}
+
 async function callOpenAICompatibleAPI(endpoint, key, model, providerName, { system, messages, maxTokens, onStream, signal }, extraHeaders = {}, { useProxy = true, extraBody = {} } = {}) {
   const apiMessages = [];
   if (system) apiMessages.push({ role: 'system', content: system });
@@ -598,7 +607,8 @@ async function callOpenAICompatibleAPI(endpoint, key, model, providerName, { sys
   // to give room for thinking while still constraining total output
   const isThinkingModel = /deepseek-r1|kimi-k|qwq|glm-[45]|claude-.*sonnet|claude-.*opus|:cloud/.test(model);
   const effectiveMaxTokens = isThinkingModel && maxTokens && maxTokens < 4096 ? Math.min(maxTokens * 5, 4096) : maxTokens;
-  const body = { model, messages: apiMessages, max_tokens: effectiveMaxTokens || 4096, ...extraBody };
+  const tokenLimitField = needsMaxCompletionTokens(model) ? 'max_completion_tokens' : 'max_tokens';
+  const body = { model, messages: apiMessages, [tokenLimitField]: effectiveMaxTokens || 4096, ...extraBody };
   if (onStream) { body.stream = true; body.stream_options = { include_usage: true }; }
 
   let res;
@@ -1194,5 +1204,6 @@ Object.assign(window, {
   getCustomApiUrl, setCustomApiUrl, getCustomApiKey, saveCustomApiKey, hasCustomApiKey,
   getCustomApiModel, setCustomApiModel, getCustomApiModelDisplay,
   fetchCustomApiModels, callCustomAPI,
-  callOllamaChat, callOpenAICompatibleLocalAPI, callVeniceAPI, callOpenRouterAPI, callRoutstrAPI, callPpqAPI, callClaudeAPI
+  callOllamaChat, callOpenAICompatibleLocalAPI, callVeniceAPI, callOpenRouterAPI, callRoutstrAPI, callPpqAPI, callClaudeAPI,
+  needsMaxCompletionTokens
 });

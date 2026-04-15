@@ -40,9 +40,18 @@ function serveFile(res, filePath) {
   });
 }
 
+const ALLOWED_ORIGINS = new Set([
+  `http://127.0.0.1:${PORT}`,
+  `http://localhost:${PORT}`,
+  `http://[::1]:${PORT}`,
+]);
 function isSameOrigin(req) {
-  const origin = req.headers.origin || req.headers.referer || '';
-  return origin.includes(`localhost:${PORT}`) || origin.includes(`127.0.0.1:${PORT}`);
+  if (req.headers.origin) return ALLOWED_ORIGINS.has(req.headers.origin);
+  if (req.headers.referer) {
+    try { return ALLOWED_ORIGINS.has(new URL(req.headers.referer).origin); }
+    catch { return false; }
+  }
+  return false;
 }
 
 const server = http.createServer((req, res) => {
