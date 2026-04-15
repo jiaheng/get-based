@@ -35,4 +35,5 @@ cleanup() {
 }
 trap cleanup EXIT
 
+PORT=$PORT node "$DIR/tests/test-dev-server-origin.js" || exit 1
 PORT=$PORT NODE_PATH="$NODE_PATH_EXTRA" node "$DIR/run-tests.js"
