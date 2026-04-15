@@ -606,7 +606,9 @@ async function callOpenAICompatibleAPI(endpoint, key, model, providerName, { sys
   // Thinking models burn reasoning tokens against max_tokens — scale up low caps
   // to give room for thinking while still constraining total output
   const isThinkingModel = /deepseek-r1|kimi-k|qwq|glm-[45]|claude-.*sonnet|claude-.*opus|:cloud/.test(model);
-  const effectiveMaxTokens = isThinkingModel && maxTokens && maxTokens < 4096 ? Math.min(maxTokens * 5, 4096) : maxTokens;
+  const effectiveMaxTokens = isThinkingModel
+    ? Math.max(maxTokens || 4096, 16384)  // thinking models burn reasoning against max_tokens; give real headroom
+    : (maxTokens || 4096);
   const tokenLimitField = needsMaxCompletionTokens(model) ? 'max_completion_tokens' : 'max_tokens';
   const body = { model, messages: apiMessages, [tokenLimitField]: effectiveMaxTokens || 4096, ...extraBody };
   if (onStream) { body.stream = true; body.stream_options = { include_usage: true }; }
