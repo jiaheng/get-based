@@ -1,0 +1,340 @@
+// test-custom-lens.js — Custom Knowledge Source (Lens Corpus) feature
+// Run: fetch('tests/test-custom-lens.js').then(r=>r.text()).then(s=>Function(s)())
+return (async function() {
+  const results = [];
+  let passed = 0, failed = 0;
+  function assert(name, condition, detail) {
+    if (condition) { passed++; results.push(`  PASS: ${name}`); }
+    else { failed++; results.push(`  FAIL: ${name}${detail ? ' — ' + detail : ''}`); }
+  }
+
+  console.log('=== Custom Lens Tests ===\n');
+
+  // ─── 1. lens.js source inspection ───
+  console.log('1. lens.js source inspection');
+  const lensSrc = await fetch('js/lens.js').then(r => r.text());
+  assert('getLensConfig exists', lensSrc.includes('function getLensConfig()'));
+  assert('saveLensConfig exists', lensSrc.includes('function saveLensConfig('));
+  assert('getLensKey exists', lensSrc.includes('function getLensKey()'));
+  assert('saveLensKey exists', lensSrc.includes('function saveLensKey('));
+  assert('hasLens exists', lensSrc.includes('function hasLens()'));
+  assert('queryLens exists', lensSrc.includes('function queryLens('));
+  assert('buildLensSnippet exists', lensSrc.includes('function buildLensSnippet('));
+  assert('testLensConnection exists', lensSrc.includes('function testLensConnection()'));
+  assert('clearLensCache exists', lensSrc.includes('function clearLensCache()'));
+  assert('isValidLensUrl exists', lensSrc.includes('function isValidLensUrl('));
+  assert('renderCustomLensSection exists', lensSrc.includes('function renderCustomLensSection()'));
+  assert('handleSaveLensConfig exists', lensSrc.includes('function handleSaveLensConfig()'));
+  assert('handleRemoveLens exists', lensSrc.includes('function handleRemoveLens()'));
+  assert('handleToggleLens exists', lensSrc.includes('function handleToggleLens('));
+  assert('handleClearLensCache exists', lensSrc.includes('function handleClearLensCache()'));
+  assert('updateLensIndicator exists', lensSrc.includes('function updateLensIndicator()'));
+  // Fetch options present
+  assert("fetch uses credentials:'omit'", lensSrc.includes("credentials: 'omit'"));
+  assert("fetch uses referrerPolicy:'no-referrer'", lensSrc.includes("referrerPolicy: 'no-referrer'"));
+  assert("fetch uses redirect:'error'", lensSrc.includes("redirect: 'error'"));
+  // Request body includes version
+  assert('request body includes version field', lensSrc.includes('version: 1'));
+  assert('request body includes query field', lensSrc.includes('query: hint'));
+  assert('request body includes top_k field', lensSrc.includes('top_k: topK'));
+  // Bearer auth
+  assert('sends Bearer auth header', lensSrc.includes('`Bearer ${key}`'));
+  // Cache key includes profileId
+  assert('cache key includes profileId', lensSrc.includes('profileId'));
+  // Encrypted key storage
+  assert("saveLensKey uses encryptedSetItem", lensSrc.includes("encryptedSetItem('labcharts-lens-key'") || lensSrc.includes('encryptedSetItem(SECRET_KEY'));
+  assert("getLensKey uses getCachedKey", lensSrc.includes('getCachedKey(SECRET_KEY)') || lensSrc.includes("getCachedKey('labcharts-lens-key')"));
+
+  // ─── 2. Window function exports ───
+  console.log('\n2. Window function exports');
+  assert('window.getLensConfig is function', typeof window.getLensConfig === 'function');
+  assert('window.saveLensConfig is function', typeof window.saveLensConfig === 'function');
+  assert('window.getLensKey is function', typeof window.getLensKey === 'function');
+  assert('window.saveLensKey is function', typeof window.saveLensKey === 'function');
+  assert('window.hasLens is function', typeof window.hasLens === 'function');
+  assert('window.queryLens is function', typeof window.queryLens === 'function');
+  assert('window.buildLensSnippet is function', typeof window.buildLensSnippet === 'function');
+  assert('window.testLensConnection is function', typeof window.testLensConnection === 'function');
+  assert('window.clearLensCache is function', typeof window.clearLensCache === 'function');
+  assert('window.isValidLensUrl is function', typeof window.isValidLensUrl === 'function');
+  assert('window.renderCustomLensSection is function', typeof window.renderCustomLensSection === 'function');
+  assert('window.handleSaveLensConfig is function', typeof window.handleSaveLensConfig === 'function');
+  assert('window.handleRemoveLens is function', typeof window.handleRemoveLens === 'function');
+  assert('window.updateLensIndicator is function', typeof window.updateLensIndicator === 'function');
+  assert('window.subscribeLensStatus is function', typeof window.subscribeLensStatus === 'function');
+
+  // ─── 3. URL validation ───
+  console.log('\n3. URL validation');
+  assert('accepts https://example.com', window.isValidLensUrl('https://example.com') === true);
+  assert('accepts https://rag.example.com/query', window.isValidLensUrl('https://rag.example.com/query') === true);
+  assert('accepts http://localhost:8000', window.isValidLensUrl('http://localhost:8000') === true);
+  assert('accepts http://127.0.0.1:8000', window.isValidLensUrl('http://127.0.0.1:8000') === true);
+  assert('rejects http://evil.com', window.isValidLensUrl('http://evil.com') === false);
+  assert('rejects empty string', window.isValidLensUrl('') === false);
+  assert('rejects garbage', window.isValidLensUrl('not-a-url') === false);
+  assert('rejects ftp://', window.isValidLensUrl('ftp://example.com') === false);
+  // Private/LAN ranges (non-routable, http:// OK)
+  assert('accepts http://192.168.1.5:8000', window.isValidLensUrl('http://192.168.1.5:8000') === true);
+  assert('accepts http://192.168.222.119:8321/query', window.isValidLensUrl('http://192.168.222.119:8321/query') === true);
+  assert('accepts http://10.0.0.1', window.isValidLensUrl('http://10.0.0.1') === true);
+  assert('accepts http://172.16.0.1', window.isValidLensUrl('http://172.16.0.1') === true);
+  assert('accepts http://172.31.255.254', window.isValidLensUrl('http://172.31.255.254') === true);
+  assert('rejects http://172.15.0.1 (outside /12)', window.isValidLensUrl('http://172.15.0.1') === false);
+  assert('rejects http://172.32.0.1 (outside /12)', window.isValidLensUrl('http://172.32.0.1') === false);
+  assert('accepts http://nas.local:8000', window.isValidLensUrl('http://nas.local:8000') === true);
+  assert('accepts http://nas.local.', window.isValidLensUrl('http://nas.local.') === true);
+  assert('accepts http://100.64.0.1 (Tailscale CGNAT)', window.isValidLensUrl('http://100.64.0.1') === true);
+  assert('accepts http://100.127.255.254 (Tailscale CGNAT)', window.isValidLensUrl('http://100.127.255.254') === true);
+  assert('rejects http://100.63.0.1 (outside CGNAT)', window.isValidLensUrl('http://100.63.0.1') === false);
+  assert('rejects http://100.128.0.1 (outside CGNAT)', window.isValidLensUrl('http://100.128.0.1') === false);
+  assert('accepts http://169.254.169.254 (link-local)', window.isValidLensUrl('http://169.254.169.254') === true);
+  assert('accepts http://[::1]:8000', window.isValidLensUrl('http://[::1]:8000') === true);
+  assert('rejects http://8.8.8.8 (public)', window.isValidLensUrl('http://8.8.8.8') === false);
+  assert('rejects http://256.1.1.1 (invalid octet)', window.isValidLensUrl('http://256.1.1.1') === false);
+
+  // ─── 4. Config round-trip ───
+  console.log('\n4. Config round-trip');
+  const oldConfig = localStorage.getItem('labcharts-lens-config');
+  localStorage.removeItem('labcharts-lens-config');
+  const def = window.getLensConfig();
+  assert('default config has enabled:false', def.enabled === false);
+  assert('default config has topK:5', def.topK === 5);
+  assert('default config has empty url', def.url === '');
+  window.saveLensConfig({ name: 'Test Lens', url: 'https://test.example.com', enabled: true, topK: 7 });
+  const saved = window.getLensConfig();
+  assert('saved name persists', saved.name === 'Test Lens');
+  assert('saved url persists', saved.url === 'https://test.example.com');
+  assert('saved enabled persists', saved.enabled === true);
+  assert('saved topK persists', saved.topK === 7);
+  // Restore
+  if (oldConfig) localStorage.setItem('labcharts-lens-config', oldConfig);
+  else localStorage.removeItem('labcharts-lens-config');
+
+  // ─── 5. hasLens truth table ───
+  console.log('\n5. hasLens truth table');
+  const oldCfg = localStorage.getItem('labcharts-lens-config');
+  const oldKey = localStorage.getItem('labcharts-lens-key');
+  localStorage.removeItem('labcharts-lens-config');
+  localStorage.removeItem('labcharts-lens-key');
+  window.updateKeyCache && window.updateKeyCache('labcharts-lens-key', '');
+  assert('hasLens false with nothing', window.hasLens() === false);
+  window.saveLensConfig({ url: 'https://x.com', enabled: false, topK: 5 });
+  window.updateKeyCache && window.updateKeyCache('labcharts-lens-key', 'k');
+  assert('hasLens false when disabled', window.hasLens() === false);
+  window.saveLensConfig({ enabled: true });
+  assert('hasLens true when enabled+url+key', window.hasLens() === true);
+  window.saveLensConfig({ url: '' });
+  assert('hasLens false without url', window.hasLens() === false);
+  window.saveLensConfig({ url: 'https://x.com' });
+  window.updateKeyCache && window.updateKeyCache('labcharts-lens-key', '');
+  assert('hasLens false without key', window.hasLens() === false);
+  // Restore
+  if (oldCfg) localStorage.setItem('labcharts-lens-config', oldCfg);
+  else localStorage.removeItem('labcharts-lens-config');
+  if (oldKey) localStorage.setItem('labcharts-lens-key', oldKey);
+  else localStorage.removeItem('labcharts-lens-key');
+  window.updateKeyCache && window.updateKeyCache('labcharts-lens-key', '');
+
+  // ─── 6. buildLensSnippet formatting ───
+  console.log('\n6. buildLensSnippet formatting');
+  const snip1 = window.buildLensSnippet({
+    chunks: [{ text: 'chunk one text' }, { text: 'chunk two', source: 'Book p.42' }],
+    sourceName: 'Test Framework',
+  });
+  assert('snippet includes sourceName', snip1.includes('Test Framework'));
+  assert('snippet numbers chunks', snip1.includes('1. chunk one') && snip1.includes('2. chunk two'));
+  assert('snippet includes source citation when present', snip1.includes('Book p.42'));
+  assert('snippet includes citation instruction', snip1.includes('cite the source'));
+  const empty = window.buildLensSnippet(null);
+  assert('snippet empty for null', empty === '');
+  const noChunks = window.buildLensSnippet({ chunks: [], sourceName: 'X' });
+  assert('snippet empty for no chunks', noChunks === '');
+
+  // ─── 7. injectLensChunks behavior ───
+  console.log('\n7. injectLensChunks behavior');
+  const lensResult = { chunks: [{ text: 'lens fact one' }], sourceName: 'MyLens' };
+  const ctxWithLens = `[section:interpretiveLens]\n## Interpretive Lens\nBredesen framework\n[/section:interpretiveLens]\n\nLab data...`;
+  const enriched1 = window.injectLensChunks(ctxWithLens, lensResult);
+  assert('retains original lens text', enriched1.includes('Bredesen framework'));
+  assert('injects chunk inside block', enriched1.indexOf('lens fact one') < enriched1.indexOf('[/section:interpretiveLens]'));
+  assert('chunk appears after original lens text', enriched1.indexOf('lens fact one') > enriched1.indexOf('Bredesen framework'));
+  const ctxWithoutLens = `Profile info\n\nLab data...`;
+  const enriched2 = window.injectLensChunks(ctxWithoutLens, lensResult);
+  assert('creates block when none exists', enriched2.includes('[section:interpretiveLens]') && enriched2.includes('[/section:interpretiveLens]'));
+  assert('new block at top when none existed', enriched2.indexOf('[section:interpretiveLens]') < enriched2.indexOf('Profile info'));
+  const passthrough = window.injectLensChunks(ctxWithLens, null);
+  assert('null lens result is passthrough', passthrough === ctxWithLens);
+
+  // ─── 8. Status pub/sub ───
+  console.log('\n8. Status pub/sub');
+  let received = null;
+  const unsub = window.subscribeLensStatus(s => { received = { ...s }; });
+  window.getLensStatus(); // ensure function works
+  // Trigger an update via a helper — simulate via queryLens will go to cache/error paths. Use direct getLensStatus to sanity.
+  assert('subscribeLensStatus returns function', typeof unsub === 'function');
+  unsub();
+
+  // ─── 9. Wiring: chat.js main send ───
+  console.log('\n9. chat.js wiring');
+  const chatSrc = await fetch('js/chat.js').then(r => r.text());
+  assert("imports hasLens from './lens.js'", chatSrc.includes("from './lens.js'"));
+  assert('imports queryLens', chatSrc.includes('queryLens'));
+  assert('imports injectLensChunks', chatSrc.includes('injectLensChunks'));
+  assert('imports updateLensIndicator', chatSrc.includes('updateLensIndicator'));
+  assert('main send calls hasLens()', chatSrc.includes('if (hasLens())'));
+  assert('main send calls queryLens with user text', /await queryLens\(text,/.test(chatSrc));
+  assert('multi-persona calls queryLens with msgText', /await queryLens\(msgText,/.test(chatSrc));
+  assert('openChatPanel calls updateLensIndicator', chatSrc.includes('updateLensIndicator()'));
+
+  // ─── 10. Wiring: views.js focus card ───
+  console.log('\n10. views.js wiring');
+  const viewsSrc = await fetch('js/views.js').then(r => r.text());
+  assert('views imports hasLens + queryLens', viewsSrc.includes('hasLens') && viewsSrc.includes('queryLens'));
+  assert('views imports injectLensChunks', viewsSrc.includes('injectLensChunks'));
+  assert('focus card calls hasLens', /if \(hasLens\(\)\) \{[\s\S]{0,800}await queryLens/.test(viewsSrc));
+
+  // ─── 11. Wiring: lab-context.js helper ───
+  console.log('\n11. lab-context.js helper');
+  const lcSrc = await fetch('js/lab-context.js').then(r => r.text());
+  assert('exports injectLensChunks', lcSrc.includes('export function injectLensChunks('));
+  assert('injectLensChunks handles close tag', lcSrc.includes('[/section:interpretiveLens]'));
+  assert('window exports injectLensChunks', lcSrc.includes('injectLensChunks,'));
+
+  // ─── 12. Wiring: sync.js registration ───
+  console.log('\n12. sync.js registration');
+  const syncSrc = await fetch('js/sync.js').then(r => r.text());
+  assert('AI_SETTINGS_KEYS includes lens-config', syncSrc.includes("'labcharts-lens-config'"));
+  assert('AI_SETTINGS_KEYS includes lens-key', syncSrc.includes("'labcharts-lens-key'"));
+  assert('ENCRYPTED_AI_KEYS includes lens-key', /ENCRYPTED_AI_KEYS[\s\S]{0,500}labcharts-lens-key/.test(syncSrc));
+
+  // ─── 13. Wiring: crypto.js sensitive pattern ───
+  console.log('\n13. crypto.js sensitive pattern');
+  const cryptoSrc = await fetch('js/crypto.js').then(r => r.text());
+  assert('SENSITIVE_PATTERNS includes lens-key', cryptoSrc.includes('labcharts-lens-key'));
+  assert('API_KEY_LS_KEYS includes lens-key', /API_KEY_LS_KEYS[\s\S]{0,500}labcharts-lens-key/.test(cryptoSrc));
+
+  // ─── 14. Wiring: main.js imports lens ───
+  console.log('\n14. main.js imports lens');
+  const mainSrc = await fetch('js/main.js').then(r => r.text());
+  assert("main.js imports './lens.js'", mainSrc.includes("import './lens.js'"));
+
+  // ─── 15. Chat header indicator in DOM ───
+  console.log('\n15. Chat header indicator');
+  const indicator = document.getElementById('chat-lens-indicator');
+  assert('chat-lens-indicator element exists', !!indicator);
+  assert('chat-lens-dot element exists', !!document.getElementById('chat-lens-dot'));
+  // Force no-lens state and verify indicator hides
+  const _savedCfg = localStorage.getItem('labcharts-lens-config');
+  const _savedKey = localStorage.getItem('labcharts-lens-key');
+  localStorage.removeItem('labcharts-lens-config');
+  window.updateKeyCache && window.updateKeyCache('labcharts-lens-key', '');
+  window.updateLensIndicator();
+  assert('indicator hidden when no lens configured', indicator.style.display === 'none');
+  if (_savedCfg) localStorage.setItem('labcharts-lens-config', _savedCfg);
+  if (_savedKey) localStorage.setItem('labcharts-lens-key', _savedKey);
+
+  // ─── 16. Settings DOM renders lens section ───
+  console.log('\n16. Settings DOM');
+  window.openSettingsModal('ai');
+  await new Promise(r => setTimeout(r, 100));
+  const lensSection = document.getElementById('custom-lens-section');
+  assert('custom-lens-section exists in DOM', !!lensSection);
+  if (lensSection) {
+    assert('lens section has url input', !!document.getElementById('lens-url-input'));
+    assert('lens section has key input', !!document.getElementById('lens-key-input'));
+    assert('lens section has topk input', !!document.getElementById('lens-topk-input'));
+    assert('lens section has enabled toggle', !!document.getElementById('lens-enabled-toggle'));
+    assert('lens section has Save & Test button', lensSection.innerHTML.includes('handleSaveLensConfig'));
+  }
+  window.closeSettingsModal();
+
+  // ─── 17. saveLensConfig clears cache ───
+  console.log('\n17. Cache clear on config change');
+  // We can't easily inspect the internal Map but we can verify clearLensCache is a no-throw.
+  window.clearLensCache();
+  assert('clearLensCache callable', true);
+
+  // ─── 18. CSS classes for indicator states ───
+  console.log('\n18. CSS classes');
+  const cssSrc = await fetch('styles.css').then(r => r.text());
+  assert('styles include .chat-lens-indicator', cssSrc.includes('.chat-lens-indicator'));
+  assert('styles include .chat-lens-dot', cssSrc.includes('.chat-lens-dot'));
+  assert('styles include active state', cssSrc.includes('.chat-lens-indicator.active'));
+  assert('styles include error state', cssSrc.includes('.chat-lens-indicator.error'));
+
+  // ─── 19. BUG 1 regression: handleRemoveLens uses callback form ───
+  console.log('\n19. handleRemoveLens callback form');
+  assert('handleRemoveLens is not async (uses callback)', !/async function handleRemoveLens/.test(lensSrc));
+  assert('handleRemoveLens passes callback to showConfirmDialog', /showConfirmDialog\([^)]+,\s*async\s*\(\)\s*=>/.test(lensSrc));
+
+  // ─── 20. BUG 2 regression: testLensConnection works when disabled ───
+  console.log('\n20. testLensConnection disabled-toggle flow');
+  assert('testLensConnection does not gate on hasLens()', !/function testLensConnection[\s\S]{0,100}if \(!hasLens/.test(lensSrc));
+  assert('testLensConnection checks url + key directly', /cfg\.url[\s\S]{0,100}key/.test(lensSrc.split('function testLensConnection')[1] || ''));
+  assert('_doQuery helper exists (factored path)', lensSrc.includes('function _doQuery('));
+
+  // ─── 21. BUG 3 regression: toggle does not re-render inputs ───
+  console.log('\n21. Toggle does not re-render section');
+  assert('handleToggleLens does NOT call _rerenderLensSection', !/function handleToggleLens[\s\S]{0,300}_rerenderLensSection/.test(lensSrc));
+  assert('handleToggleLens calls _updateLensStatusChip', /function handleToggleLens[\s\S]{0,300}_updateLensStatusChip/.test(lensSrc));
+  assert('_updateLensStatusChip exists', lensSrc.includes('function _updateLensStatusChip()'));
+
+  // ─── 22. BUG 4 regression: cache only clears on URL/topK change ───
+  console.log('\n22. Cache survives toggle-only save');
+  assert('saveLensConfig guards clearLensCache by urlChanged/topKChanged', /urlChanged[\s\S]{0,200}if \(urlChanged \|\| topKChanged\) clearLensCache/.test(lensSrc));
+
+  // ─── 23. BUG 5 regression: status chip reflects error state ───
+  console.log('\n23. Chip shows error state');
+  assert('renderCustomLensSection chip branches on status.state === "error"', /status\.state === 'error'[\s\S]{0,300}Error/.test(lensSrc));
+  assert('_updateLensStatusChip also branches on error', lensSrc.split('function _updateLensStatusChip')[1]?.includes("status.state === 'error'"));
+
+  // ─── 24. Indicator clears stale classes ───
+  console.log('\n24. Indicator clears stale classes');
+  assert('updateLensIndicator removes both classes before branching', /classList\.remove\('active', 'error'\)/.test(lensSrc));
+
+  // ─── 25. Functional: cache preserved on enable toggle ───
+  console.log('\n25. Functional: cache preserved on toggle');
+  const _preCfg = localStorage.getItem('labcharts-lens-config');
+  const _preKey = localStorage.getItem('labcharts-lens-key');
+  window.saveLensConfig({ name: 'X', url: 'https://a.example.com', enabled: true, topK: 5 });
+  window.updateKeyCache && window.updateKeyCache('labcharts-lens-key', 'k');
+  // Seed the cache by invoking an internal _doQuery via hashString convenience:
+  //   we can't easily read the Map, but we can verify saveLensConfig({enabled:false}) does NOT clear
+  //   by checking source behavior.
+  const beforeCfg = window.getLensConfig();
+  window.saveLensConfig({ enabled: false });
+  const afterCfg = window.getLensConfig();
+  assert('enabled toggle persists', afterCfg.enabled === false && beforeCfg.enabled === true);
+  // URL change DOES clear (can't easily observe without internal state, but the source check above covers it)
+  // Restore
+  if (_preCfg) localStorage.setItem('labcharts-lens-config', _preCfg);
+  else localStorage.removeItem('labcharts-lens-config');
+  if (_preKey) localStorage.setItem('labcharts-lens-key', _preKey);
+  else localStorage.removeItem('labcharts-lens-key');
+  window.updateKeyCache && window.updateKeyCache('labcharts-lens-key', '');
+
+  // ─── 26. Audit: a11y — labels have for= attributes ───
+  console.log('\n26. Accessibility: label–input associations');
+  assert('Display name label has for="lens-name-input"', lensSrc.includes('for="lens-name-input"'));
+  assert('Endpoint URL label has for="lens-url-input"', lensSrc.includes('for="lens-url-input"'));
+  assert('API key label has for="lens-key-input"', lensSrc.includes('for="lens-key-input"'));
+  assert('Passages per query label has for="lens-topk-input"', lensSrc.includes('for="lens-topk-input"'));
+  assert('Enable toggle label has for="lens-enabled-toggle"', lensSrc.includes('for="lens-enabled-toggle"'));
+
+  // ─── 27. Audit: UX copy uses "passages" not "chunks" in user-facing text ───
+  console.log('\n27. UX copy: passages not chunks');
+  const changelogSrc = await fetch('js/changelog.js').then(r => r.text());
+  assert('changelog avoids developer jargon (chunks)', !changelogSrc.includes('chunks came back') && !changelogSrc.includes('chunks fold'));
+
+  // ─── 28. Audit: README table formatting ───
+  console.log('\n28. README table: no broken || cells');
+  const readmeSrc = await fetch('README.md').then(r => r.text());
+  assert('README table has no || row-start patterns', !readmeSrc.includes('|| Lifestyle') && !readmeSrc.includes('|| Custom'));
+  assert('README uses "knowledge source" not "RAG endpoint"', !readmeSrc.includes('RAG endpoint'));
+
+  // ═══ SUMMARY ═══
+  console.log('\n' + results.join('\n'));
+  console.log(`\n=== ${passed} passed, ${failed} failed, ${passed + failed} total ===`);
+  if (failed === 0) console.log('ALL TESTS PASSED');
+  else console.warn(`${failed} test(s) failed`);
+})();

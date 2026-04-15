@@ -10,7 +10,8 @@ import { getProfileLocation, setProfileLocation, getLatitudeFromLocation, getLoc
 import { callClaudeAPI, hasAIProvider, isAIPaused, setAIPaused, getAIProvider, getActiveModelId, getActiveModelDisplay, supportsVision, supportsWebSearch, isVeniceE2EEActive } from './api.js';
 import { resizeImage, isValidImageType, formatImageBlock, buildVisionContent } from './image-utils.js';
 import { onChatSaved } from './sync.js';
-import { buildLabContext, invalidateLabContextCache, getContextSummary, isGroupInAIContext } from './lab-context.js';
+import { buildLabContext, invalidateLabContextCache, getContextSummary, isGroupInAIContext, injectLensChunks } from './lab-context.js';
+import { hasLens, queryLens, updateLensIndicator } from './lens.js';
 import { applyInlineMarkdown, renderMarkdown } from './markdown.js';
 
 // ═══════════════════════════════════════════════
@@ -2080,6 +2081,7 @@ export async function openChatPanel(prefillMessage) {
   }
   loadChatPersonality();
   updateChatHeaderTitle();
+  updateLensIndicator();
   updatePersonalityBar();
   // Sync web search toggle
   const wsCb = document.getElementById('chat-websearch-checkbox');
@@ -2568,7 +2570,11 @@ export async function sendChatMessage() {
   const webSearchEnabled = getChatWebSearchEnabled() && supportsWebSearch();
 
   try {
-    const labContext = buildLabContext();
+    let labContext = buildLabContext();
+    if (hasLens()) {
+      const lensResult = await queryLens(text, { signal: _chatAbortController ? _chatAbortController.signal : undefined });
+      if (lensResult) labContext = injectLensChunks(labContext, lensResult);
+    }
     const personality = getActivePersonality();
     let personalityPrompt = '';
     if (personality.id && personality.id.startsWith('custom_')) {
@@ -2909,7 +2915,11 @@ async function runDiscussionRound(personas, steerPrompt, opts = {}) {
       container.appendChild(typingEl);
       container.scrollTop = container.scrollHeight;
 
-      const labContext = buildLabContext();
+      let labContext = buildLabContext();
+      if (hasLens()) {
+        const lensResult = await queryLens(msgText, { signal: _chatAbortController.signal });
+        if (lensResult) labContext = injectLensChunks(labContext, lensResult);
+      }
       const personality = getActivePersonality();
       let personalityPrompt = '';
       if (personality.id && personality.id.startsWith('custom_')) {

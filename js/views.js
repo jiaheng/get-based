@@ -13,7 +13,8 @@ import { renderMenstrualCycleSection } from './cycle.js';
 import { renderProfileContextCards, renderInterpretiveLensSection, loadContextHealthDots, closeSuggestionsOnClickOutside } from './context-cards.js';
 import { callClaudeAPI, hasAIProvider, isAIPaused, getAIProvider, getActiveModelId } from './api.js';
 import { setupDropZone } from './pdf-import.js';
-import { buildLabContext } from './lab-context.js';
+import { buildLabContext, injectLensChunks } from './lab-context.js';
+import { hasLens, queryLens } from './lens.js';
 import { applyInlineMarkdown } from './markdown.js';
 
 function markerHasData(m) { return m.values?.some(v => v !== null) ?? false; }
@@ -395,10 +396,18 @@ export async function loadFocusCard() {
   }
   el.innerHTML = `<span class="focus-card-text" style="color:var(--text-muted)">🔍 Looking into your results\u2026</span>`;
   try {
-    const ctx = buildFocusContext();
+    let ctx = buildFocusContext();
     if (!ctx) {
       el.innerHTML = `<span class="focus-card-text" style="color:var(--text-muted)">No insight available</span>`;
       return;
+    }
+    if (hasLens()) {
+      const data = getActiveData();
+      const goals = (state.importedData.healthGoals || []).map(g => g.text).slice(0, 3).join('; ');
+      const flags = getAllFlaggedMarkers(data).slice(0, 5).map(f => f.name).join(', ');
+      const hint = [goals && 'Goals: ' + goals, flags && 'Flagged: ' + flags].filter(Boolean).join(' | ') || 'prioritize and summarize lab findings';
+      const lensResult = await queryLens(hint);
+      if (lensResult) ctx = injectLensChunks(ctx, lensResult);
     }
     const focusSystem = `You summarize blood work for a health dashboard card. Write 3-5 sentences, no more. Rules:
 - Start with the single most critical finding and why it matters for this person's goals/conditions

@@ -5,11 +5,11 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
-    version: '1.19.3', date: '2026-04-15', title: 'Bug fixes — OpenAI GPT-5, Custom API backup, dev-server origin',
+    version: '1.20.0', date: '2026-04-15', title: 'Custom Knowledge Source',
     items: [
-      'OpenAI GPT-5 family and o-series reasoning models now work via the Custom API provider \u2014 switched to max_completion_tokens (#114)',
-      'Custom API key, URL, and selected model now survive backup/restore and sync across devices (#116)',
-      'Hardened dev-server same-origin guard \u2014 forged Referer/Origin substrings can no longer bypass the /api/* check (#119)',
+      'Connect a RAG knowledge endpoint to your Interpretive Lens — the AI grounds its analysis in your own research, clinical guides, or documents',
+      'Works across chat, multi-persona discussions, and the focus card',
+      'Bugfixes: GPT-5/o-series support in Custom API (#114), Custom API settings now persist across backup + sync (#116), dev-server origin guard hardened (#119)',
     ]
   },
   {

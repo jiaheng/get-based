@@ -86,6 +86,7 @@
 :focus { outline: none; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 html { overflow-x: hidden; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background: var(--bg-primary);
@@ -121,12 +122,13 @@ body {
   background: var(--bg-secondary);
   border-right: 1px solid var(--border);
   padding: 16px 0;
-  flex-shrink: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  position: sticky;
+  position: fixed;
   top: 57px;
+  left: 0;
   height: calc(100vh - 57px);
+  z-index: 10;
 }
 .sidebar-title {
   font-size: 11px; font-weight: 600; text-transform: uppercase;
@@ -174,7 +176,7 @@ body {
   margin-left: auto; font-size: 10px; transition: transform 0.15s;
 }
 .sidebar-group-header:not(.collapsed) .sidebar-group-arrow { transform: rotate(90deg); }
-.main { flex: 1; padding: 24px 32px; max-width: calc(100vw - 260px); }
+.main { flex: 1; padding: 24px 32px; margin-left: 260px; max-width: calc(100vw - 260px); }
 .app-footer { border-top: 1px solid var(--border); padding: 32px; }
 .app-footer-row { max-width: 1200px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; }
 .app-footer-logo { font-family: var(--font-display); font-weight: 800; font-size: 18px; background: var(--accent-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
@@ -468,7 +470,7 @@ body {
     display: none; cursor: pointer;
   }
   .sidebar-backdrop.show { display: block; }
-  .main { max-width: 100%; padding: 20px; }
+  .main { max-width: 100%; padding: 20px; margin-left: 0; }
   .charts-grid { grid-template-columns: 1fr; }
   .charts-grid-4col { grid-template-columns: repeat(2, 1fr); }
 }
@@ -2049,6 +2051,23 @@ details[open] > .cl-archived-header::before { content: '\25BE '; }
 .chat-websearch-toggle-label input:checked + .chat-toggle-slider::before {
   transform: translateX(12px);
 }
+
+/* Custom Knowledge Source indicator */
+.chat-lens-indicator {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: 12px;
+  background: var(--bg-primary); border: 1px solid var(--border);
+  color: var(--text-muted); font-size: 11px; cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.chat-lens-indicator:hover { background: var(--bg-hover); }
+.chat-lens-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--text-muted);
+  transition: background 0.15s;
+}
+.chat-lens-indicator.active .chat-lens-dot { background: #22c55e; }
+.chat-lens-indicator.error .chat-lens-dot { background: #fbbf24; }
 
 /* Personality selector bar */
 .chat-personality-bar {

@@ -160,7 +160,7 @@ return (async function() {
   // Verify that _buildLabContextInner doesn't early-return before section 1
   // (buildLabContext wrapper may return cached context — that's intentional)
   assert('buildLabContext has no early return before section 1', (() => {
-    const fnStart = labCtxSrc.indexOf('function _buildLabContextInner()');
+    const fnStart = labCtxSrc.indexOf('function _buildLabContextInner');
     const section1 = labCtxSrc.indexOf('// ── 1. Health Goals', fnStart);
     const between = labCtxSrc.substring(fnStart, section1);
     // Should not have a bare return statement (only conditional ctx assignment)
@@ -169,7 +169,7 @@ return (async function() {
   })(), 'No early return between inner function start and section 1');
 
   assert('buildLabContext ends with return ctx', (() => {
-    const fnStart = labCtxSrc.indexOf('function _buildLabContextInner()');
+    const fnStart = labCtxSrc.indexOf('function _buildLabContextInner');
     const fnEnd = labCtxSrc.indexOf('\n// ═══', fnStart + 100);
     const fnBody = labCtxSrc.substring(fnStart, fnEnd);
     return fnBody.includes('return ctx;\n}');
