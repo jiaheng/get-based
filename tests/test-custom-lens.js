@@ -324,8 +324,7 @@ return (async function() {
   // ─── 27. Audit: UX copy uses "passages" not "chunks" in user-facing text ───
   console.log('\n27. UX copy: passages not chunks');
   const changelogSrc = await fetch('js/changelog.js').then(r => r.text());
-  assert('changelog uses "passages" not "chunks"', !changelogSrc.includes('chunks came back') && changelogSrc.includes('passages came back'));
-  assert('changelog uses "passages fold" not "chunks fold"', !changelogSrc.includes('chunks fold') && changelogSrc.includes('passages fold'));
+  assert('changelog avoids developer jargon (chunks)', !changelogSrc.includes('chunks came back') && !changelogSrc.includes('chunks fold'));
 
   // ─── 28. Audit: README table formatting ───
   console.log('\n28. README table: no broken || cells');

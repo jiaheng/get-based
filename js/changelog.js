@@ -9,7 +9,7 @@ const CHANGELOG = [
     items: [
       'Connect a RAG knowledge endpoint to your Interpretive Lens — the AI grounds its analysis in your own research, clinical guides, or documents',
       'Works across chat, multi-persona discussions, and the focus card',
-      'Bugfixes and improvements (#114, #116, #119)',
+      'Bugfixes: GPT-5/o-series support in Custom API (#114), Custom API settings now persist across backup + sync (#116), dev-server origin guard hardened (#119)',
     ]
   },
   {
