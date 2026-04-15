@@ -49,7 +49,7 @@ No build system, no bundler, no package manager. Native ES modules (`<script typ
   - `sync.js` — Evolu CRDT sync layer, push/pull, mnemonic identity, AI settings sync, debounced `onDataSaved` hook, sync status indicator (header badge + popover)
   - `settings.js` — settings modal, privacy section, sync setup modal
   - `provider-panels.js` — AI provider panel rendering, model dropdowns, wallet UI (extracted from settings.js)
-  - `lens.js` — Custom Knowledge Source (RAG endpoint) that backs the Interpretive Lens. `queryLens` retrieves top-K framework chunks from a user-configured endpoint; `injectLensChunks` folds them into the `[section:interpretiveLens]` block in lab context. LRU cache (20 entries, 5-min TTL, scoped per profile), 15s timeout, `credentials:'omit'`/`referrerPolicy:'no-referrer'`/`redirect:'error'` fetch options. Chat-header indicator + Settings panel + Evolu sync
+  - `lens.js` — Custom Knowledge Source (knowledge base endpoint) that backs the Interpretive Lens. `queryLens` retrieves top-K passages from a user-configured endpoint; `injectLensChunks` folds them into the `[section:interpretiveLens]` block in lab context. LRU cache (20 entries, 5-min TTL, scoped per profile), 15s timeout, `credentials:'omit'`/`referrerPolicy:'no-referrer'`/`redirect:'error'` fetch options. Chat-header indicator + Settings panel + Evolu sync
   - `glossary.js` — marker glossary modal
   - `feedback.js` — feedback modal (bug reports, feature requests)
   - `tour.js` — guided tour (spotlight walkthrough, auto-triggers after first data import) + cycle tour

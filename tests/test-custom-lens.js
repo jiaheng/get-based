@@ -313,6 +313,26 @@ return (async function() {
   else localStorage.removeItem('labcharts-lens-key');
   window.updateKeyCache && window.updateKeyCache('labcharts-lens-key', '');
 
+  // ─── 26. Audit: a11y — labels have for= attributes ───
+  console.log('\n26. Accessibility: label–input associations');
+  assert('Display name label has for="lens-name-input"', lensSrc.includes('for="lens-name-input"'));
+  assert('Endpoint URL label has for="lens-url-input"', lensSrc.includes('for="lens-url-input"'));
+  assert('API key label has for="lens-key-input"', lensSrc.includes('for="lens-key-input"'));
+  assert('Passages per query label has for="lens-topk-input"', lensSrc.includes('for="lens-topk-input"'));
+  assert('Enable toggle label has for="lens-enabled-toggle"', lensSrc.includes('for="lens-enabled-toggle"'));
+
+  // ─── 27. Audit: UX copy uses "passages" not "chunks" in user-facing text ───
+  console.log('\n27. UX copy: passages not chunks');
+  const changelogSrc = await fetch('js/changelog.js').then(r => r.text());
+  assert('changelog uses "passages" not "chunks"', !changelogSrc.includes('chunks came back') && changelogSrc.includes('passages came back'));
+  assert('changelog uses "passages fold" not "chunks fold"', !changelogSrc.includes('chunks fold') && changelogSrc.includes('passages fold'));
+
+  // ─── 28. Audit: README table formatting ───
+  console.log('\n28. README table: no broken || cells');
+  const readmeSrc = await fetch('README.md').then(r => r.text());
+  assert('README table has no || row-start patterns', !readmeSrc.includes('|| Lifestyle') && !readmeSrc.includes('|| Custom'));
+  assert('README uses "knowledge source" not "RAG endpoint"', !readmeSrc.includes('RAG endpoint'));
+
   // ═══ SUMMARY ═══
   console.log('\n' + results.join('\n'));
   console.log(`\n=== ${passed} passed, ${failed} failed, ${passed + failed} total ===`);
