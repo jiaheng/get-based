@@ -12,6 +12,7 @@ const isEncryptedValue = (v) => typeof v === 'string' && v.startsWith('v1:');
 // ═══════════════════════════════════════════════
 const GLOBAL_SETTINGS_KEYS = [
   'labcharts-venice-key', 'labcharts-openrouter-key', 'labcharts-routstr-key', 'labcharts-ppq-key',
+  'labcharts-custom-key', 'labcharts-custom-url', 'labcharts-custom-model', 'labcharts-custom-models',
   'labcharts-ai-provider',
   'labcharts-ppq-credit-id',
   'labcharts-venice-model', 'labcharts-openrouter-model', 'labcharts-routstr-model', 'labcharts-ppq-model',

@@ -367,6 +367,47 @@ return (async function() {
   assert('Bundle export always includes chat', exportSrc.includes('if (chat) entry.chat = chat'));
 
   // ═══════════════════════════════════════
+  // 13b. Backup includes Custom API settings (regression: #116)
+  // ═══════════════════════════════════════
+  console.log('%c 13b. Backup includes Custom API settings (#116) ', 'font-weight:bold;color:#f59e0b');
+
+  const backupSrc = await fetch('/js/backup.js').then(r => r.text());
+  assert('GLOBAL_SETTINGS_KEYS includes labcharts-custom-key', backupSrc.includes("'labcharts-custom-key'"));
+  assert('GLOBAL_SETTINGS_KEYS includes labcharts-custom-url', backupSrc.includes("'labcharts-custom-url'"));
+  assert('GLOBAL_SETTINGS_KEYS includes labcharts-custom-model', backupSrc.includes("'labcharts-custom-model'"));
+  assert('GLOBAL_SETTINGS_KEYS includes labcharts-custom-models', backupSrc.includes("'labcharts-custom-models'"));
+
+  // Functional roundtrip: seed Custom API settings → snapshot → wipe → restore
+  const _origCustomKey = localStorage.getItem('labcharts-custom-key');
+  const _origCustomUrl = localStorage.getItem('labcharts-custom-url');
+  const _origCustomModel = localStorage.getItem('labcharts-custom-model');
+  localStorage.setItem('labcharts-custom-key', 'sk-roundtrip-test');
+  localStorage.setItem('labcharts-custom-url', 'https://api.example.com/v1');
+  localStorage.setItem('labcharts-custom-model', 'gpt-test');
+
+  const snap = window.buildBackupSnapshot && window.buildBackupSnapshot();
+  assert('buildBackupSnapshot exposed', !!snap, 'window.buildBackupSnapshot missing');
+  if (snap) {
+    assert('snapshot.settings carries custom-key', snap.settings['labcharts-custom-key'] === 'sk-roundtrip-test');
+    assert('snapshot.settings carries custom-url', snap.settings['labcharts-custom-url'] === 'https://api.example.com/v1');
+    assert('snapshot.settings carries custom-model', snap.settings['labcharts-custom-model'] === 'gpt-test');
+  }
+
+  // Restore originals
+  if (_origCustomKey !== null) localStorage.setItem('labcharts-custom-key', _origCustomKey);
+  else localStorage.removeItem('labcharts-custom-key');
+  if (_origCustomUrl !== null) localStorage.setItem('labcharts-custom-url', _origCustomUrl);
+  else localStorage.removeItem('labcharts-custom-url');
+  if (_origCustomModel !== null) localStorage.setItem('labcharts-custom-model', _origCustomModel);
+  else localStorage.removeItem('labcharts-custom-model');
+
+  // Sync also picks them up (cross-device parity)
+  const syncSrc = await fetch('/js/sync.js').then(r => r.text());
+  assert('AI_SETTINGS_KEYS includes labcharts-custom-key', /AI_SETTINGS_KEYS[\s\S]{0,800}labcharts-custom-key/.test(syncSrc));
+  assert('AI_SETTINGS_KEYS includes labcharts-custom-url', /AI_SETTINGS_KEYS[\s\S]{0,800}labcharts-custom-url/.test(syncSrc));
+  assert('ENCRYPTED_AI_KEYS includes labcharts-custom-key', /ENCRYPTED_AI_KEYS[\s\S]{0,400}labcharts-custom-key/.test(syncSrc));
+
+  // ═══════════════════════════════════════
   // 14. Window exports
   // ═══════════════════════════════════════
   console.log('%c 14. Window exports ', 'font-weight:bold;color:#f59e0b');

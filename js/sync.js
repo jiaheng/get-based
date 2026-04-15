@@ -364,6 +364,10 @@ const AI_SETTINGS_KEYS = [
   'labcharts-routstr-key',       // Routstr key (encrypted)
   'labcharts-ppq-key',           // PPQ key (encrypted)
   'labcharts-ppq-credit-id',     // PPQ credit ID (for balance/topup)
+  'labcharts-custom-key',        // Custom API key (encrypted)
+  'labcharts-custom-url',        // Custom API base URL
+  'labcharts-custom-model',      // Custom API selected model
+  'labcharts-custom-models',     // Custom API model list cache
   'labcharts-ollama',            // Local AI server config (encrypted)
   'labcharts-openrouter-model',
   'labcharts-venice-model',
@@ -387,7 +391,7 @@ async function collectAISettings() {
   return settings;
 }
 
-const ENCRYPTED_AI_KEYS = ['labcharts-openrouter-key', 'labcharts-venice-key', 'labcharts-routstr-key', 'labcharts-ppq-key', 'labcharts-ollama', 'labcharts-cashu-wallet-mnemonic'];
+const ENCRYPTED_AI_KEYS = ['labcharts-openrouter-key', 'labcharts-venice-key', 'labcharts-routstr-key', 'labcharts-ppq-key', 'labcharts-custom-key', 'labcharts-ollama', 'labcharts-cashu-wallet-mnemonic'];
 
 async function applyAISettings(settings) {
   if (!settings) return;
