@@ -187,7 +187,7 @@ async function pickFiles() {
         multiple: true,
         directory: false,
         filters: [
-          { name: 'Documents', extensions: ['txt', 'md', 'markdown', 'rst', 'json', 'pdf', 'docx'] },
+          { name: 'Documents', extensions: ['txt', 'md', 'markdown', 'rst', 'json', 'pdf', 'docx', 'zip'] },
         ],
       },
     });
@@ -268,6 +268,25 @@ export async function handleDeleteDocument(source) {
     _renderSection();
   } catch (e) {
     showNotification(`Delete failed: ${e}`, 'error');
+  }
+}
+
+export async function handleClearAllDocuments() {
+  if (!isTauri() || _state.ingesting) return;
+  const docCount = (_state.stats?.documents || []).length;
+  const chunkCount = _state.stats?.total_chunks || 0;
+  if (docCount === 0) return;
+  const confirmed = window.confirm(
+    `Remove all ${docCount} document${docCount !== 1 ? 's' : ''} (${chunkCount} chunk${chunkCount !== 1 ? 's' : ''}) from your knowledge base? This cannot be undone.`
+  );
+  if (!confirmed) return;
+  try {
+    const deleted = await invoke('clear_knowledge');
+    showNotification(`Removed ${deleted} chunks (all documents)`, 'success');
+    _state.stats = await fetchStats();
+    _renderSection();
+  } catch (e) {
+    showNotification(`Clear failed: ${e}`, 'error');
   }
 }
 
@@ -380,7 +399,10 @@ function _innerHtml() {
   const docList = chunkCount === 0
     ? ''
     : `<div style="margin-top:14px">
-        <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Indexed documents</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Indexed documents</div>
+          <button class="kb-clear-all" onclick="handleClearAllDocuments()" title="Remove every document from this knowledge base" ${_state.ingesting ? 'disabled' : ''}>Remove all</button>
+        </div>
         <div class="kb-doc-list">
           ${stats.documents.map(d => `
             <div class="kb-doc-row">
@@ -430,6 +452,7 @@ Object.assign(window, {
   handleAddFiles,
   handleAddFolder,
   handleDeleteDocument,
+  handleClearAllDocuments,
   autoConfigureCustomLens,
   startKbSetup,
 });

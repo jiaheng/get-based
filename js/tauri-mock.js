@@ -83,6 +83,11 @@
         _mockDocs = _mockDocs.filter((d) => d.source !== src);
         return Promise.resolve(doc ? doc.chunks : 0);
       }
+      case 'clear_knowledge': {
+        const total = _mockDocs.reduce((n, d) => n + d.chunks, 0);
+        _mockDocs = [];
+        return Promise.resolve(total);
+      }
 
       // ── Updater ──────────────────────────────────────────────────
       case 'check_for_update':

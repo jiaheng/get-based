@@ -2151,6 +2151,27 @@ details[open] > .cl-archived-header::before { content: '\25BE '; }
   color: #ef4444;
   background: var(--bg-hover);
 }
+.kb-clear-all {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  padding: 3px 10px;
+  border-radius: 4px;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.kb-clear-all:hover:not(:disabled) {
+  color: #ef4444;
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.08);
+}
+.kb-clear-all:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 
 /* Personality selector bar */
 .chat-personality-bar {

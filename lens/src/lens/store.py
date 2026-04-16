@@ -118,6 +118,21 @@ class Store:
         except Exception:
             return 0
 
+    def clear(self) -> int:
+        """Drop every chunk from the collection. Returns the pre-clear count.
+
+        The collection itself is deleted; ensure_collection() will recreate it
+        on the next ingest. This is cheaper than scrolling + deleting by ID
+        for corpora with thousands of chunks.
+        """
+        self._ensure_client()
+        count = self.count()
+        try:
+            self._client.delete_collection(self._config.collection)
+        except Exception as e:  # noqa: BLE001
+            log.warning("delete_collection failed, collection may not exist: %s", e)
+        return count
+
     def list_sources(self) -> list[dict]:
         """Aggregate by source: returns [{source, chunks}, ...] sorted by source.
 

@@ -183,6 +183,19 @@ async fn delete_document(source: String) -> Result<u32, String> {
     Ok(parsed["deleted_chunks"].as_u64().unwrap_or(0) as u32)
 }
 
+/// Drop every chunk from the knowledge base (destructive — for the
+/// "Remove all" button in Settings → AI → Local Knowledge Base).
+#[tauri::command]
+async fn clear_knowledge() -> Result<u32, String> {
+    let (stdout, stderr, ok) = lens::run_lens_command(&["clear", "--json", "--yes"])?;
+    if !ok {
+        return Err(format!("Clear failed: {}", stderr));
+    }
+    let parsed: serde_json::Value = serde_json::from_str(stdout.trim())
+        .map_err(|e| format!("Bad clear JSON: {}", e))?;
+    Ok(parsed["deleted_chunks"].as_u64().unwrap_or(0) as u32)
+}
+
 // ── Setup commands ─────────────────────────────────────────────────
 
 #[tauri::command]
@@ -289,6 +302,7 @@ async fn main() {
             ingest_documents,
             get_knowledge_stats,
             delete_document,
+            clear_knowledge,
             // Auto-updater
             check_for_update,
             install_update,

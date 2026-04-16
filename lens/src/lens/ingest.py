@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import logging
+import tempfile
+import zipfile
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 from uuid import uuid4
@@ -15,6 +18,30 @@ log = logging.getLogger("lens.ingest")
 
 # File loaders — heavy deps are imported lazily so the lens core doesn't pull them
 SUPPORTED_EXTS = {".txt", ".md", ".markdown", ".rst", ".json", ".pdf", ".docx"}
+
+
+@contextmanager
+def _expand_zip_if_needed(source: Path):
+    """Yield the real path to walk. If `source` is a .zip, extract to a
+    temp dir and yield that; cleanup happens when the context closes.
+    Otherwise yield `source` unchanged. Rejects absolute paths and ".."
+    components inside the archive to prevent zip-slip writes outside tmp.
+    """
+    if not (source.is_file() and source.suffix.lower() == ".zip"):
+        yield source
+        return
+
+    with tempfile.TemporaryDirectory(prefix="lens-zip-") as tmp:
+        tmp_path = Path(tmp).resolve()
+        with zipfile.ZipFile(source) as zf:
+            for member in zf.namelist():
+                # zip-slip guard: refuse absolute or parent-walking entries
+                target = (tmp_path / member).resolve()
+                if not str(target).startswith(str(tmp_path)):
+                    raise RuntimeError(f"Unsafe zip entry: {member}")
+            zf.extractall(tmp_path)
+        log.info("Extracted zip %s into %s", source.name, tmp_path)
+        yield tmp_path
 
 
 def _read_text(path: Path) -> str:
@@ -52,10 +79,18 @@ def _walk(root: Path) -> Iterator[Path]:
 
 
 def ingest_path(config: LensConfig, source: Path) -> dict:
-    """Ingest a file or directory into the lens store. Returns summary stats."""
+    """Ingest a file or directory into the lens store. Returns summary stats.
+    A .zip input is auto-extracted into a temp directory and ingested as if
+    the user had passed that directory; the temp dir is removed on exit.
+    """
     if not source.exists():
         raise FileNotFoundError(f"No such path: {source}")
 
+    with _expand_zip_if_needed(source) as walk_root:
+        return _ingest_walk(config, walk_root)
+
+
+def _ingest_walk(config: LensConfig, source: Path) -> dict:
     embedder = create_embedder(config)
     store = Store(config)
     store.ensure_collection(embedder.dimension())

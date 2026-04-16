@@ -153,6 +153,32 @@ def delete(
 
 
 @app.command()
+def clear(
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip interactive confirmation"),
+):
+    """Delete ALL chunks from the knowledge base (drops the collection)."""
+    import json as _json
+    from .store import Store
+
+    config = LensConfig.from_env()
+    store = Store(config)
+
+    if not yes and not json_out:
+        console.print(f"[yellow]This will delete all chunks from[/] {config.qdrant_path}")
+        confirm = typer.confirm("Proceed?")
+        if not confirm:
+            console.print("Aborted.")
+            raise typer.Exit(0)
+
+    deleted = store.clear()
+    if json_out:
+        print(_json.dumps({"deleted_chunks": deleted}))
+        return
+    console.print(f"Cleared {deleted} chunks.")
+
+
+@app.command()
 def info():
     """Show current configuration + status."""
     config = LensConfig.from_env()
