@@ -1,13 +1,39 @@
 """Configuration for getbased Lens."""
 
 import os
+import sys
 from pathlib import Path
 from dataclasses import dataclass, field
 
 
 def _default_data_dir() -> Path:
-    """Default data directory — ~/.getbased/lens/"""
-    return Path.home() / ".getbased" / "lens"
+    """Default data directory — platform-specific, matches what Tauri's
+    dirs::data_dir() crate returns so the CLI and the desktop app share one
+    location. A user running `lens serve` from their shell sees the same DB
+    that the Tauri app writes to.
+
+      Linux:   $XDG_DATA_HOME/getbased/lens  or  ~/.local/share/getbased/lens
+      macOS:   ~/Library/Application Support/getbased/lens
+      Windows: %APPDATA%\\getbased\\lens
+
+    If the legacy ~/.getbased/lens/ exists (pre-v1.21 installs) and the new
+    path does not, we honor the legacy path to avoid orphaning user data.
+    """
+    home = Path.home()
+    legacy = home / ".getbased" / "lens"
+
+    if sys.platform == "darwin":
+        new_default = home / "Library" / "Application Support" / "getbased" / "lens"
+    elif sys.platform.startswith("win"):
+        appdata = os.environ.get("APPDATA")
+        new_default = (Path(appdata) if appdata else home / "AppData" / "Roaming") / "getbased" / "lens"
+    else:
+        xdg = os.environ.get("XDG_DATA_HOME")
+        new_default = (Path(xdg) if xdg else home / ".local" / "share") / "getbased" / "lens"
+
+    if not new_default.exists() and legacy.exists():
+        return legacy
+    return new_default
 
 
 @dataclass
