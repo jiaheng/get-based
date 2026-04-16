@@ -202,41 +202,47 @@ return (async function() {
   const pricing = window.renderModelPricingHint('custom', 'any-model');
   assert('custom pricing returns empty (unknown endpoint)', pricing === '');
 
-  // ─── 12. settings.js source inspection ───
-  console.log('\n12. settings.js source inspection');
+  // ─── 12. settings.js + provider-panels.js source inspection ───
+  // Provider UI (including Custom) was extracted from settings.js into
+  // provider-panels.js during v1.18.5 refactor. settings.js still holds the
+  // provider-button row and the switchAIProvider wiring.
+  console.log('\n12. settings.js + provider-panels.js source inspection');
   const settingsSrc = await fetch('js/settings.js').then(r => r.text());
-  assert('imports getCustomApiUrl', settingsSrc.includes('getCustomApiUrl'));
-  assert('imports setCustomApiUrl', settingsSrc.includes('setCustomApiUrl'));
-  assert('imports getCustomApiKey', settingsSrc.includes('getCustomApiKey'));
-  assert('imports saveCustomApiKey', settingsSrc.includes('saveCustomApiKey'));
-  assert('imports hasCustomApiKey', settingsSrc.includes('hasCustomApiKey'));
-  assert('imports getCustomApiModel', settingsSrc.includes('getCustomApiModel'));
-  assert('imports setCustomApiModel', settingsSrc.includes('setCustomApiModel'));
-  assert('imports getCustomApiModelDisplay', settingsSrc.includes('getCustomApiModelDisplay'));
-  assert('imports fetchCustomApiModels', settingsSrc.includes('fetchCustomApiModels'));
-  assert('imports validateCustomApiKey', settingsSrc.includes('validateCustomApiKey'));
-  assert('6th provider button with data-provider="custom"', settingsSrc.includes('data-provider="custom"'));
-  assert('switchAIProvider(\'custom\') in onclick', settingsSrc.includes("switchAIProvider('custom')"));
-  assert('renderAIProviderPanel handles custom', settingsSrc.includes("provider === 'custom'"));
-  assert('handleSaveCustomApi exists', settingsSrc.includes('function handleSaveCustomApi()'));
-  assert('handleRemoveCustomApi exists', settingsSrc.includes('function handleRemoveCustomApi()'));
-  assert('renderCustomApiModelDropdown exists', settingsSrc.includes('function renderCustomApiModelDropdown('));
-  assert('applyCustomApiManualModel exists', settingsSrc.includes('function applyCustomApiManualModel()'));
-  assert('custom-url-input element', settingsSrc.includes('custom-url-input'));
-  assert('custom-key-input element', settingsSrc.includes('custom-key-input'));
-  assert('custom-model-area element', settingsSrc.includes('custom-model-area'));
-  assert('custom-model-select element', settingsSrc.includes('custom-model-select'));
-  assert('custom-manual-model element', settingsSrc.includes('custom-manual-model'));
-  assert('initSettingsModelFetch handles custom', settingsSrc.includes('fetchCustomApiModels(customUrl, customKey)'));
-  // Window exports
-  assert('window exports handleSaveCustomApi', settingsSrc.includes('handleSaveCustomApi,'));
-  assert('window exports handleRemoveCustomApi', settingsSrc.includes('handleRemoveCustomApi,'));
-  assert('window exports renderCustomApiModelDropdown', settingsSrc.includes('renderCustomApiModelDropdown,'));
-  assert('window exports applyCustomApiManualModel', settingsSrc.includes('applyCustomApiManualModel,'));
-  // Custom panel before Local AI
-  const customPanelIdx = settingsSrc.indexOf("// Custom API panel");
-  const localPanelIdx = settingsSrc.indexOf("// Local AI panel");
-  assert('Custom API panel before Local AI panel', customPanelIdx < localPanelIdx, `custom@${customPanelIdx}, local@${localPanelIdx}`);
+  const panelsSrc = await fetch('js/provider-panels.js').then(r => r.text());
+  // settings.js still owns the provider switcher row
+  assert('settings.js has data-provider="custom" button', settingsSrc.includes('data-provider="custom"'));
+  assert('settings.js wires switchAIProvider(\'custom\')', settingsSrc.includes("switchAIProvider('custom')"));
+  // provider-panels.js owns the Custom panel: getters/setters + handlers
+  assert('provider-panels imports getCustomApiUrl', panelsSrc.includes('getCustomApiUrl'));
+  assert('provider-panels imports setCustomApiUrl', panelsSrc.includes('setCustomApiUrl'));
+  assert('provider-panels imports getCustomApiKey', panelsSrc.includes('getCustomApiKey'));
+  assert('provider-panels imports saveCustomApiKey', panelsSrc.includes('saveCustomApiKey'));
+  // hasCustomApiKey / getCustomApiModelDisplay stay in api.js (covered by section 1);
+  // the panel uses local `currentKey`/`customModel` vars directly.
+  assert('provider-panels imports getCustomApiModel', panelsSrc.includes('getCustomApiModel'));
+  assert('provider-panels imports setCustomApiModel', panelsSrc.includes('setCustomApiModel'));
+  assert('provider-panels imports fetchCustomApiModels', panelsSrc.includes('fetchCustomApiModels'));
+  assert('provider-panels imports validateCustomApiKey', panelsSrc.includes('validateCustomApiKey'));
+  assert('renderAIProviderPanel handles custom', panelsSrc.includes("provider === 'custom'"));
+  assert('handleSaveCustomApi exists', panelsSrc.includes('function handleSaveCustomApi()'));
+  assert('handleRemoveCustomApi exists', panelsSrc.includes('function handleRemoveCustomApi()'));
+  assert('renderCustomApiModelDropdown exists', panelsSrc.includes('function renderCustomApiModelDropdown('));
+  assert('applyCustomApiManualModel exists', panelsSrc.includes('function applyCustomApiManualModel()'));
+  assert('custom-url-input element', panelsSrc.includes('custom-url-input'));
+  assert('custom-key-input element', panelsSrc.includes('custom-key-input'));
+  assert('custom-model-area element', panelsSrc.includes('custom-model-area'));
+  assert('custom-model-select element', panelsSrc.includes('custom-model-select'));
+  assert('custom-manual-model element', panelsSrc.includes('custom-manual-model'));
+  assert('initSettingsModelFetch handles custom', panelsSrc.includes('fetchCustomApiModels(customUrl, customKey)'));
+  // Window exports (provider-panels.js)
+  assert('window exports handleSaveCustomApi', panelsSrc.includes('handleSaveCustomApi,'));
+  assert('window exports handleRemoveCustomApi', panelsSrc.includes('handleRemoveCustomApi,'));
+  assert('window exports renderCustomApiModelDropdown', panelsSrc.includes('renderCustomApiModelDropdown,'));
+  assert('window exports applyCustomApiManualModel', panelsSrc.includes('applyCustomApiManualModel,'));
+  // Custom panel before Local AI (in provider-panels.js)
+  const customPanelIdx = panelsSrc.indexOf('// Custom API panel');
+  const localPanelIdx = panelsSrc.indexOf('// Local AI panel');
+  assert('Custom API panel before Local AI panel', customPanelIdx >= 0 && localPanelIdx >= 0 && customPanelIdx < localPanelIdx, `custom@${customPanelIdx}, local@${localPanelIdx}`);
 
   // ─── 13. Settings modal DOM ───
   console.log('\n13. Settings modal DOM');

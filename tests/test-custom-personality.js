@@ -241,12 +241,13 @@ return (async function() {
   assert('saveChatHistory has personalityIcon', saveSrc.includes('personalityIcon'));
 
   // ── 15. Backup compat ──
+  // PER_PROFILE_PREF_SUFFIXES moved from crypto.js to backup.js in the v1.18.5 extraction.
   console.log('%c▶ 15. Backup compat', 'font-weight:bold');
   try {
-    const cryptoSrc = await fetchWithRetry('js/crypto.js');
-    assert('PER_PROFILE_PREF_SUFFIXES has chatPersonalityCustom', cryptoSrc.includes('chatPersonalityCustom'));
+    const backupSrc = await fetchWithRetry('js/backup.js');
+    assert('PER_PROFILE_PREF_SUFFIXES has chatPersonalityCustom', backupSrc.includes('chatPersonalityCustom'));
   } catch {
-    assert('Could read crypto.js', false);
+    assert('Could read backup.js', false);
   }
 
   // ── 16. Service worker cache version ──
