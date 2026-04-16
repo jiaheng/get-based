@@ -58,8 +58,9 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   let pathname = decodeURIComponent(url.pathname);
 
-  // Same-origin guard for proxy/API endpoints
-  if (pathname.startsWith('/api/') && !isSameOrigin(req)) {
+  // Same-origin guard for proxy/API endpoints. Blocks SSRF via forged
+  // Origin/Referer from browser tabs on malicious sites. See #119.
+  if ((pathname.startsWith('/api/') || pathname === '/proxy') && !isSameOrigin(req)) {
     res.writeHead(403); res.end('Forbidden'); return;
   }
 
