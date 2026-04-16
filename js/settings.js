@@ -7,7 +7,7 @@ import { formatCost, getProfileUsage, getGlobalUsage, resetProfileUsage } from '
 import { getAIProvider, isAIPaused, getOllamaPIIUrl, getOllamaPIIModel } from './api.js';
 import { isOllamaPIIEnabled, setOllamaPIIEnabled, getOllamaConfig, checkOpenAICompatible } from './pii.js';
 import { renderEncryptionSection, renderBackupSection, loadBackupSnapshots, updateKeyCache } from './crypto.js';
-import { isSyncEnabled, enableSync, disableSync, getMnemonic, getMnemonicResolutionError, restoreFromMnemonic, getSyncRelay, setSyncRelay, checkRelayConnection, isMessengerEnabled, getMessengerToken, generateMessengerToken, revokeMessengerToken, pushContextToGateway } from './sync.js';
+import { isSyncEnabled, enableSync, disableSync, getMnemonic, getMnemonicResolutionError, getSyncBlocker, restoreFromMnemonic, getSyncRelay, setSyncRelay, checkRelayConnection, isMessengerEnabled, getMessengerToken, generateMessengerToken, revokeMessengerToken, pushContextToGateway } from './sync.js';
 import './provider-panels.js';
 
 
@@ -365,14 +365,26 @@ export function closeSettingsModal() {
 function renderSyncSection() {
   const enabled = isSyncEnabled();
   const relay = getSyncRelay();
+  const blocker = getSyncBlocker();
+  // Banner appears in place of the toggle when the underlying webview can't
+  // run Evolu (typically Tauri-on-Linux missing navigator.storage / OPFS).
+  // Lets the user see "this is broken and here's why" instead of clicking a
+  // dead toggle and waiting 30s for a cryptic timeout toast.
+  const blockerBanner = blocker ? `
+    <div style="margin-bottom:16px;padding:10px 12px;border:1px solid #fbbf24;background:rgba(251,191,36,0.08);border-radius:6px;color:#fbbf24;font-size:12px;line-height:1.45">
+      <strong>Sync unavailable in this build.</strong><br>
+      ${escapeHTML(blocker)}<br>
+      <a href="https://app.getbased.health" target="_blank" rel="noopener" style="color:#fbbf24;text-decoration:underline">Open the web version</a> to sync across devices and copy AI keys back here manually.
+    </div>` : '';
   return `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${enabled ? '16' : '8'}px">
+    ${blockerBanner}
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${enabled ? '16' : '8'}px;${blocker ? 'opacity:0.5;pointer-events:none' : ''}">
       <div>
         <div style="font-size:13px;font-weight:600;color:var(--text-primary)">Cross-device sync</div>
         <div style="font-size:12px;color:var(--text-muted);margin-top:2px">E2E encrypted via Evolu CRDT</div>
       </div>
       <label class="chat-websearch-toggle-label" style="display:flex" aria-label="Toggle cross-device sync">
-        <input type="checkbox" ${enabled ? 'checked' : ''} onchange="toggleSync(this.checked)" style="display:none">
+        <input type="checkbox" ${enabled ? 'checked' : ''} onchange="toggleSync(this.checked)" style="display:none" ${blocker ? 'disabled' : ''}>
         <span class="chat-toggle-slider"></span>
       </label>
     </div>

@@ -100,9 +100,39 @@ export function checkRelayConnection(timeout = 4000) {
 // INIT
 // ═══════════════════════════════════════════════
 
+/**
+ * Returns null when sync is supported, or a human-readable reason string
+ * when it isn't. Used to fail-fast with a clear message instead of letting
+ * Evolu's worker hang for 30s on a missing primitive.
+ *
+ * Observed Tauri-on-Linux gotcha: wry/webkit2gtk on some distros doesn't
+ * expose navigator.storage at all (the entire StorageManager API), even
+ * though webkit2gtk 2.42+ supports OPFS. Without StorageManager, Evolu's
+ * worker boots but can't persist the owner record, so appOwner resolves
+ * to undefined and sync silently no-ops.
+ */
+export function getSyncBlocker() {
+  if (typeof SharedWorker === 'undefined') return 'SharedWorker not available in this webview';
+  if (!navigator.locks?.request) return 'navigator.locks not available — webview missing Web Locks API';
+  if (!navigator.storage) return 'navigator.storage not available — webview missing StorageManager API. On Linux, this is a known wry/webkit2gtk gating issue. Use the web version of getbased for cross-device sync.';
+  if (!navigator.storage.getDirectory) return 'OPFS (Origin Private File System) not available. Webkit2gtk 2.42+ supports it but your build is older. Use the web version of getbased for sync.';
+  if (!crypto?.subtle) return 'crypto.subtle (WebCrypto) not available';
+  return null;
+}
+
 export async function initSync() {
   _syncEnabled = localStorage.getItem(SYNC_STORAGE_KEY) === 'true';
   if (!_syncEnabled) return;
+
+  // Fail fast if the webview doesn't have what Evolu needs. Otherwise the
+  // worker hangs forever on appOwner and the toggle/restore flow looks
+  // mysteriously broken — exactly the rabbit hole we just spent an hour in.
+  const blocker = getSyncBlocker();
+  if (blocker) {
+    _appOwnerError = blocker;
+    console.warn('[sync] Cannot init:', blocker);
+    return;
+  }
 
   // Re-entrancy guard — don't create duplicate Evolu instances
   if (evolu) return;
@@ -217,6 +247,13 @@ export async function initSync() {
 // ═══════════════════════════════════════════════
 
 export async function enableSync({ skipPush = false } = {}) {
+  // Reject early if the webview can't actually run Evolu — no point flipping
+  // the persisted flag and starting init only to time out at 30s.
+  const blocker = getSyncBlocker();
+  if (blocker) {
+    showNotification(`Sync unavailable in this build: ${blocker}`, 'error');
+    return;
+  }
   localStorage.setItem(SYNC_STORAGE_KEY, 'true');
   _syncEnabled = true;
   _appOwnerError = null;
@@ -225,7 +262,7 @@ export async function enableSync({ skipPush = false } = {}) {
     // initSync bailed before evolu was created — likely an import / module
     // load failure. Already logged by initSync; surface a toast so the user
     // doesn't sit staring at a Resolving… spinner.
-    showNotification('Sync failed to initialize. Check console for [sync] errors.', 'error');
+    showNotification(`Sync failed to initialize. ${_appOwnerError || 'Check console for [sync] errors.'}`, 'error');
     return;
   }
   // Race the owner-resolution promise against a 30s ceiling. webkit2gtk
@@ -929,6 +966,7 @@ Object.assign(window, {
   disableSync,
   getMnemonic,
   getMnemonicResolutionError,
+  getSyncBlocker,
   restoreFromMnemonic,
   isSyncEnabled,
   pushCurrentProfile,
