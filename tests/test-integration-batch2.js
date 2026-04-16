@@ -192,6 +192,49 @@ return (async function() {
   assert('refreshAllHealthDots exposed on window', ctxSrc.includes('refreshAllHealthDots'));
   assert('Refresh button in renderProfileContextCards', ctxSrc.includes('ctx-refresh-all-btn'));
 
+  // saveAndRefresh must trigger a re-render of the current view — BroadcastChannel
+  // does not deliver postMessage back to the sender, so single-tab users see no
+  // UI update without an explicit navigate() call. Issue #123.
+  const saveRefreshMatch = ctxSrc.match(/export function saveAndRefresh\([^)]*\)\s*\{([\s\S]*?)^\}/m);
+  assert('saveAndRefresh body found', !!saveRefreshMatch);
+  if (saveRefreshMatch) {
+    const body = saveRefreshMatch[1];
+    assert('saveAndRefresh calls navigate for in-tab re-render (#123)',
+      /window\.navigate\s*\(/.test(body) || /\bnavigate\s*\(/.test(body),
+      'without this, saved context card values stay hidden until reload');
+  }
+
+  // Runtime check: save mutates state → re-render → summary text appears in DOM.
+  const _rtState = window._labState;
+  if (typeof window.saveAndRefresh === 'function' && typeof window.navigate === 'function' && _rtState) {
+    const sv_stress = _rtState.importedData?.stress;
+    try {
+      window.navigate('dashboard');
+      await new Promise(r => setTimeout(r, 50));
+      // Stress card should exist (context cards always render on dashboard)
+      const stressCardBefore = document.querySelector('.profile-context-cards');
+      if (stressCardBefore) {
+        // Simulate a save: mutate state then call saveAndRefresh (same path as saveStress)
+        _rtState.importedData.stress = { level: 'moderate', sources: ['work'], management: ['exercise'], note: '' };
+        window.saveAndRefresh('Stress profile saved', 'stress');
+        await new Promise(r => setTimeout(r, 50));
+        // After re-render, the stress card body should contain the summary text
+        // produced by getStressSummary: "moderate stress — work — manages: exercise"
+        const cardsAfter = document.querySelector('.profile-context-cards');
+        const cardsText = cardsAfter ? cardsAfter.textContent : '';
+        assert('card body reflects saved stress level after saveAndRefresh (#123)',
+          cardsText.includes('moderate stress') && cardsText.includes('work'),
+          `cards text was: ${cardsText.slice(0, 200)}`);
+      }
+    } finally {
+      // Restore pre-test state
+      if (_rtState?.importedData) {
+        if (sv_stress !== undefined) _rtState.importedData.stress = sv_stress;
+        else delete _rtState.importedData.stress;
+      }
+    }
+  }
+
   // ═══════════════════════════════════════
   // 12. PDF filename storage
   // ═══════════════════════════════════════
