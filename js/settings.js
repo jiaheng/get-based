@@ -579,11 +579,17 @@ function syncSetupBack() {
 async function syncSetupDoRestore() {
   if (_syncSetupInProgress) return;
   const input = document.getElementById('sync-setup-restore-input');
-  if (!input || !input.value.trim()) return;
-  const mnemonic = input.value.trim();
+  if (!input) return;
+  const raw = (input.value || '').trim();
+  if (!raw) {
+    showNotification('Paste your 24-word seed into the textarea first', 'error');
+    input.focus();
+    return;
+  }
+  const mnemonic = raw;
   const words = mnemonic.split(/\s+/);
   if (words.length !== 24) {
-    showNotification('Mnemonic must be exactly 24 words', 'error');
+    showNotification(`Seed must be exactly 24 words (got ${words.length})`, 'error');
     return;
   }
 
@@ -699,11 +705,23 @@ function showMnemonicRestore() {
 
 function doMnemonicRestore() {
   const input = document.getElementById('sync-restore-input');
-  if (!input || !input.value.trim()) return;
-  const mnemonic = input.value.trim();
+  if (!input) {
+    // Form wasn't opened yet — the Restore button was clicked from the
+    // header without first opening the textarea. Open it and bail; user
+    // pastes their seed and clicks Restore again.
+    showMnemonicRestore();
+    return;
+  }
+  const raw = (input.value || '').trim();
+  if (!raw) {
+    showNotification('Paste your 24-word seed into the textarea first', 'error');
+    input.focus();
+    return;
+  }
+  const mnemonic = raw;
   const words = mnemonic.split(/\s+/);
   if (words.length !== 24) {
-    showNotification('Mnemonic must be exactly 24 words', 'error');
+    showNotification(`Seed must be exactly 24 words (got ${words.length})`, 'error');
     return;
   }
   showConfirmDialog('Restore from mnemonic? This will replace your sync identity and reload the page.', async () => {
