@@ -7,7 +7,7 @@ import { formatCost, getProfileUsage, getGlobalUsage, resetProfileUsage } from '
 import { getAIProvider, isAIPaused, getOllamaPIIUrl, getOllamaPIIModel } from './api.js';
 import { isOllamaPIIEnabled, setOllamaPIIEnabled, getOllamaConfig, checkOpenAICompatible } from './pii.js';
 import { renderEncryptionSection, renderBackupSection, loadBackupSnapshots, updateKeyCache } from './crypto.js';
-import { isSyncEnabled, enableSync, disableSync, getMnemonic, restoreFromMnemonic, getSyncRelay, setSyncRelay, checkRelayConnection, isMessengerEnabled, getMessengerToken, generateMessengerToken, revokeMessengerToken, pushContextToGateway } from './sync.js';
+import { isSyncEnabled, enableSync, disableSync, getMnemonic, getMnemonicResolutionError, restoreFromMnemonic, getSyncRelay, setSyncRelay, checkRelayConnection, isMessengerEnabled, getMessengerToken, generateMessengerToken, revokeMessengerToken, pushContextToGateway } from './sync.js';
 import './provider-panels.js';
 
 
@@ -632,13 +632,26 @@ function loadMnemonic() {
     el.dataset.masked = 'true';
     el.textContent = MNEMONIC_MASK;
     el.style.userSelect = 'none';
+    el.style.color = '';
     _mnemonicRetries = 0;
-  } else if (_mnemonicRetries < 30) {
+    return;
+  }
+  // Stop polling immediately if Evolu surfaced an actual init error —
+  // no point waiting 30s for a promise that already rejected.
+  const initErr = getMnemonicResolutionError();
+  if (initErr) {
+    el.textContent = `Sync init failed: ${initErr}`;
+    el.style.color = '#fbbf24';
+    _mnemonicRetries = 0;
+    return;
+  }
+  if (_mnemonicRetries < 30) {
     _mnemonicRetries++;
-    el.textContent = 'Resolving...';
+    el.textContent = 'Resolving…';
     _mnemonicRetryTimer = setTimeout(loadMnemonic, 1000);
   } else {
-    el.textContent = 'Could not resolve mnemonic';
+    el.textContent = 'Could not resolve mnemonic — open the dev console and check for [sync] errors, or try a hard refresh';
+    el.style.color = '#fbbf24';
     _mnemonicRetries = 0;
   }
 }

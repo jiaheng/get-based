@@ -15,6 +15,7 @@ let _syncEnabled = false;
 let _syncing = false;
 let _pulling = false;
 let _appOwner = null;
+let _appOwnerError = null;
 let _readyPromise = null;
 let _queryLoaded = null;
 let _debounceTimer = null;
@@ -155,8 +156,14 @@ export async function initSync() {
     // Wait for owner (mnemonic) — signals DB is ready
     _readyPromise = evolu.appOwner.then(owner => {
       _appOwner = owner;
+      _appOwnerError = null;
       dbg('Owner resolved');
     }).catch(e => {
+      // Don't silently swallow — Settings → Data shows "Resolving…" while
+      // _appOwner is null and there's no other signal the user gets. We
+      // stash the message so the UI can surface it instead of timing out
+      // after 30s with the unhelpful "Could not resolve mnemonic".
+      _appOwnerError = e?.message || String(e);
       console.warn('[sync] Owner resolution failed:', e);
     });
 
@@ -332,6 +339,16 @@ function _forcePull() {
 export function getMnemonic() {
   if (!_appOwner) return null;
   return _appOwner.mnemonic || null;
+}
+
+/**
+ * Returns the last Evolu owner-resolution error, or null. The Settings UI
+ * uses this to show an actionable message instead of looping on "Resolving…"
+ * for 30s when Evolu's worker fails to start (OPFS contention, locked
+ * IndexedDB, missing relay, etc.).
+ */
+export function getMnemonicResolutionError() {
+  return _appOwnerError;
 }
 
 export async function restoreFromMnemonic(mnemonic) {
@@ -896,6 +913,7 @@ Object.assign(window, {
   enableSync,
   disableSync,
   getMnemonic,
+  getMnemonicResolutionError,
   restoreFromMnemonic,
   isSyncEnabled,
   pushCurrentProfile,
