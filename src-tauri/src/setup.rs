@@ -196,7 +196,7 @@ impl SetupManager {
 
         // Phase 5: Download model
         self.set_phase(SetupPhase::DownloadingModel {
-            name: "BAAI/bge-m3".into(),
+            name: "sentence-transformers/all-MiniLM-L6-v2".into(),
             progress: 0.0,
         });
         self.download_model(&python_bin).await?;
@@ -515,16 +515,19 @@ impl SetupManager {
     }
 
     async fn download_model(&self, python_bin: &Path) -> Result<(), String> {
-        // Use huggingface_hub to download BGE-M3 ONNX files
+        // Pre-download MiniLM via huggingface_hub so first ingest isn't blocked
+        // on the download. MiniLM ships as safetensors/pytorch weights — pull
+        // the canonical set plus config + tokenizer assets. ~90MB total.
         let script = r#"
 import sys
 from huggingface_hub import snapshot_download
 path = snapshot_download(
-    "BAAI/bge-m3",
+    "sentence-transformers/all-MiniLM-L6-v2",
     allow_patterns=[
-        "*.onnx", "*.onnx_data",
-        "config.json", "tokenizer.json",
-        "tokenizer_config.json", "special_tokens_map.json",
+        "*.safetensors", "*.bin",
+        "config.json", "tokenizer.json", "tokenizer_config.json",
+        "special_tokens_map.json", "vocab.txt",
+        "modules.json", "sentence_bert_config.json",
     ],
     cache_dir=sys.argv[1],
 )

@@ -37,7 +37,7 @@ pub fn run_lens_command(args: &[&str]) -> Result<(String, String, bool), String>
     let output = StdCommand::new(&lens)
         .args(args)
         .env("LENS_DATA_DIR", data_dir.to_string_lossy().as_ref())
-        .env("LENS_EMBEDDING_MODEL", "BAAI/bge-m3")
+        .env("LENS_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
         .output()
         .map_err(|e| format!("Failed to run lens: {}", e))?;
     Ok((
@@ -102,9 +102,13 @@ impl LensManager {
             .env("LENS_PORT", port.to_string())
             .env("LENS_RERANKER", "0")
             .env("LENS_ONNX_PROVIDER", gpu_provider.to_string())
-            // Match the model setup downloads (BAAI/bge-m3) instead of lens's
-            // default `all-MiniLM-L6-v2` which would trigger a redundant download.
-            .env("LENS_EMBEDDING_MODEL", "BAAI/bge-m3")
+            // all-MiniLM-L6-v2: 90MB, 384d, English-focused. Fast on CPU and
+            // fits comfortably in 16GB RAM. We used to hardcode BGE-M3 (1024d,
+            // multilingual, ~2.2GB on disk + 3-5GB resident) but on systems
+            // without GPU acceleration it thrashes memory and ingest collapses
+            // to KB/s. Keep MiniLM as the default; bump to BGE-M3 later when
+            // we can detect a usable GPU provider + sufficient RAM.
+            .env("LENS_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
             .env("LENS_DATA_DIR", data_dir.to_string_lossy().as_ref())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
