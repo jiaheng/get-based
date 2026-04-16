@@ -59,8 +59,8 @@ return (async function() {
     'the probe should be read from config, not passed literally to _doQuery');
   assert('renderCustomLensSection includes lens-test-probe-input field', lensSrc.includes('lens-test-probe-input'));
   assert('handleSaveLensConfig persists testProbe', lensSrc.includes('saveLensConfig({ name, url, enabled, topK, testProbe })'));
-  assert('Connected toast distinguishes zero-passage case',
-    lensSrc.includes('0 passages matched this test query') && lensSrc.includes('endpoint and auth work'),
+  assert('Connected toast distinguishes zero-result case',
+    lensSrc.includes("the test query didn't find any close matches") && lensSrc.includes('your endpoint works'),
     'user with non-matching probe should see the endpoint worked, not "connection failed"');
 
   // ─── 2. Window function exports ───

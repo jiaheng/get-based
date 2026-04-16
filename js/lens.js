@@ -263,7 +263,7 @@ export function updateLensIndicator() {
   const tip = s.state === 'error'
     ? `Knowledge source error: ${s.lastError || 'unknown'}`
     : s.state === 'active'
-      ? `Knowledge source active${cfg.name ? ': ' + cfg.name : ''} · ${s.lastChunkCount || 0} passages`
+      ? `Knowledge source active${cfg.name ? ': ' + cfg.name : ''} · ${s.lastChunkCount || 0} excerpts`
       : `Knowledge source ready${cfg.name ? ': ' + cfg.name : ''}`;
   btn.title = tip;
   if (live) live.textContent = tip;
@@ -289,11 +289,11 @@ export function renderCustomLensSection() {
   const lastInfo = status.state === 'error' && status.lastError
     ? `<div style="font-size:11px;color:#fbbf24;margin-top:4px">Last error: ${escapeHTML(status.lastError)}</div>`
     : connected && status.lastChunkCount
-      ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Last query: ${status.lastChunkCount} passage${status.lastChunkCount !== 1 ? 's' : ''}${status.sourceName ? ' from ' + escapeHTML(status.sourceName) : ''}</div>`
+      ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Last query: ${status.lastChunkCount} excerpt${status.lastChunkCount !== 1 ? 's' : ''}${status.sourceName ? ' from ' + escapeHTML(status.sourceName) : ''}</div>`
       : '';
 
   return `<div class="ai-provider-panel">
-    <div class="ai-provider-desc">Connect a knowledge base to ground the AI's analysis in real sources — research papers, clinical guides, or any documents you choose. When enabled, the AI searches your knowledge base for relevant passages before interpreting your labs. <a href="/docs/guide/interpretive-lens#custom-knowledge-source-rag" target="_blank" rel="noopener" style="color:var(--accent)">Setup guide &rarr;</a></div>
+    <div class="ai-provider-desc">Connect a knowledge base to ground the AI's analysis in real sources — research papers, clinical guides, or any documents you choose. When enabled, the AI looks up the most relevant excerpts from your library before answering. <a href="/docs/guide/interpretive-lens#custom-knowledge-source-rag" target="_blank" rel="noopener" style="color:var(--accent)">Setup guide &rarr;</a></div>
     <div class="api-key-status" id="lens-status-chip">${statusChip}${lastInfo}</div>
     <div style="margin-top:8px;display:flex;align-items:center;gap:10px">
       <label class="toggle-switch" for="lens-enabled-toggle">
@@ -315,8 +315,9 @@ export function renderCustomLensSection() {
       <input type="password" class="api-key-input" id="lens-key-input" value="${escapeAttr(keySet ? '••••••••' : '')}" placeholder="Your access key" style="margin-top:4px">
     </div>
     <div style="margin-top:8px">
-      <label style="font-size:12px;color:var(--text-muted)" for="lens-topk-input">Passages per query</label>
+      <label style="font-size:12px;color:var(--text-muted)" for="lens-topk-input">Excerpts per question</label>
       <input type="number" class="api-key-input" id="lens-topk-input" value="${cfg.topK || 5}" min="1" max="10" style="margin-top:4px;width:100px">
+      <div style="font-size:11px;color:var(--text-muted);margin-top:4px">How many of the most relevant excerpts the AI sees with each chat question. The server may return fewer if the question doesn't match much.</div>
     </div>
     <div style="margin-top:8px">
       <label style="font-size:12px;color:var(--text-muted)" for="lens-test-probe-input">Test query</label>
@@ -355,7 +356,7 @@ function _updateLensStatusChip() {
   const lastInfo = status.state === 'error' && status.lastError
     ? `<div style="font-size:11px;color:#fbbf24;margin-top:4px">Last error: ${escapeHTML(status.lastError)}</div>`
     : connected && status.lastChunkCount
-      ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Last query: ${status.lastChunkCount} passage${status.lastChunkCount !== 1 ? 's' : ''}${status.sourceName ? ' from ' + escapeHTML(status.sourceName) : ''}</div>`
+      ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Last query: ${status.lastChunkCount} excerpt${status.lastChunkCount !== 1 ? 's' : ''}${status.sourceName ? ' from ' + escapeHTML(status.sourceName) : ''}</div>`
       : '';
   chip.innerHTML = statusChip + lastInfo;
 }
@@ -385,8 +386,8 @@ export async function handleSaveLensConfig() {
     // as "broken" — the endpoint answered and the auth is correct.
     const n = result.chunkCount;
     const msg = n > 0
-      ? `Connected — found ${n} passage${n !== 1 ? 's' : ''} above your relevance threshold`
-      : `Connected — 0 passages matched this test query (endpoint and auth work). Try a query more specific to your corpus if you want to see matches.`;
+      ? `Connected — found ${n} good excerpt${n !== 1 ? 's' : ''} for the test query`
+      : `Connected — your endpoint works, but the test query didn't find any close matches. Try a query more specific to what you've indexed.`;
     showNotification(msg, 'success');
   } else {
     showNotification(`Connection failed: ${result.error}`, 'error');

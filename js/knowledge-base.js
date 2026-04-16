@@ -34,6 +34,9 @@ let _state = {
   stats: { total_chunks: 0, documents: [] },
   ingesting: false,
   loading: false,
+  docFilter: '',                 // search box text — case-insensitive substring
+  docSort: 'name-asc',            // 'name-asc' | 'name-desc' | 'chunks-desc' | 'chunks-asc'
+  docListThreshold: 8,            // hide search/sort UI below this many docs
 };
 let _setupPollTimer = null;
 
@@ -116,6 +119,115 @@ async function _pollSetupProgress() {
   } catch (e) {
     console.warn('[KB] poll failed:', e);
   }
+}
+
+/**
+ * Render the indexed-documents list with optional search + sort UI.
+ * For small libraries (< _state.docListThreshold) just renders the raw list —
+ * search/sort is overhead until you have enough docs to scroll. Above the
+ * threshold, surfaces a search box (case-insensitive substring) and a sort
+ * dropdown so a 473-doc list becomes navigable.
+ */
+function _renderDocList(allDocs) {
+  const filter = (_state.docFilter || '').trim().toLowerCase();
+  const filtered = filter
+    ? allDocs.filter(d => (d.source || '').toLowerCase().includes(filter))
+    : allDocs.slice();
+  const sorted = filtered.sort((a, b) => {
+    switch (_state.docSort) {
+      case 'name-desc':   return (b.source || '').localeCompare(a.source || '');
+      case 'chunks-desc': return (b.chunks || 0) - (a.chunks || 0);
+      case 'chunks-asc':  return (a.chunks || 0) - (b.chunks || 0);
+      case 'name-asc':
+      default:            return (a.source || '').localeCompare(b.source || '');
+    }
+  });
+  const showControls = allDocs.length >= _state.docListThreshold;
+  const controls = !showControls ? '' : `
+    <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+      <input type="search" id="kb-doc-search" placeholder="Search ${allDocs.length} document${allDocs.length !== 1 ? 's' : ''}…"
+        value="${_esc(_state.docFilter || '')}"
+        oninput="handleDocSearchInput(this.value)"
+        style="flex:1;min-width:160px;padding:6px 10px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text-primary);border-radius:4px;font-size:12px">
+      <select id="kb-doc-sort" onchange="handleDocSortChange(this.value)"
+        style="padding:6px 10px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text-primary);border-radius:4px;font-size:12px">
+        <option value="name-asc"${_state.docSort === 'name-asc' ? ' selected' : ''}>Name A-Z</option>
+        <option value="name-desc"${_state.docSort === 'name-desc' ? ' selected' : ''}>Name Z-A</option>
+        <option value="chunks-desc"${_state.docSort === 'chunks-desc' ? ' selected' : ''}>Most excerpts first</option>
+        <option value="chunks-asc"${_state.docSort === 'chunks-asc' ? ' selected' : ''}>Fewest excerpts first</option>
+      </select>
+    </div>
+  `;
+  const matchInfo = filter && sorted.length !== allDocs.length
+    ? `<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">Showing ${sorted.length} of ${allDocs.length}</div>`
+    : '';
+  const emptyHint = filter && sorted.length === 0
+    ? `<div style="padding:12px;font-size:12px;color:var(--text-muted);text-align:center">No documents match "${_esc(filter)}"</div>`
+    : '';
+  return `<div style="margin-top:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Indexed documents</div>
+        <button class="kb-clear-all" onclick="handleClearAllDocuments()" title="Remove every document from this knowledge base" ${_state.ingesting ? 'disabled' : ''}>Remove all</button>
+      </div>
+      ${controls}
+      ${matchInfo}
+      <div class="kb-doc-list">
+        ${sorted.map(d => `
+          <div class="kb-doc-row">
+            <span class="kb-doc-icon">📄</span>
+            <span class="kb-doc-name">${_esc(d.source)}</span>
+            <span class="kb-doc-chunks">${d.chunks} excerpt${d.chunks !== 1 ? 's' : ''}</span>
+            <button class="kb-doc-delete" onclick="handleDeleteDocument('${_esc(d.source).replace(/'/g, "\\'")}')" aria-label="Remove ${_esc(d.source)}" title="Remove">×</button>
+          </div>
+        `).join('')}
+        ${emptyHint}
+      </div>
+    </div>`;
+}
+
+// Surgical input handler — re-render only the doc list, not the whole panel.
+// Re-rendering the entire section blows away the input's focus and selection,
+// which is unusable for a search box. We rebuild the doc list only and rely
+// on the controls reading their value from _state on next render.
+export function handleDocSearchInput(value) {
+  _state.docFilter = value;
+  _refreshDocListInPlace();
+}
+
+export function handleDocSortChange(value) {
+  _state.docSort = value;
+  _refreshDocListInPlace();
+}
+
+function _refreshDocListInPlace() {
+  // Find the doc list container and replace just its inner doc rows + match
+  // info. The controls themselves are not re-rendered so the search input
+  // keeps focus while the user types.
+  const container = document.querySelector('#knowledge-base-section .kb-doc-list');
+  if (!container) return;
+  const allDocs = _state.stats?.documents || [];
+  const filter = (_state.docFilter || '').trim().toLowerCase();
+  const filtered = filter
+    ? allDocs.filter(d => (d.source || '').toLowerCase().includes(filter))
+    : allDocs.slice();
+  const sorted = filtered.sort((a, b) => {
+    switch (_state.docSort) {
+      case 'name-desc':   return (b.source || '').localeCompare(a.source || '');
+      case 'chunks-desc': return (b.chunks || 0) - (a.chunks || 0);
+      case 'chunks-asc':  return (a.chunks || 0) - (b.chunks || 0);
+      default:            return (a.source || '').localeCompare(b.source || '');
+    }
+  });
+  container.innerHTML = sorted.map(d => `
+    <div class="kb-doc-row">
+      <span class="kb-doc-icon">📄</span>
+      <span class="kb-doc-name">${_esc(d.source)}</span>
+      <span class="kb-doc-chunks">${d.chunks} excerpt${d.chunks !== 1 ? 's' : ''}</span>
+      <button class="kb-doc-delete" onclick="handleDeleteDocument('${_esc(d.source).replace(/'/g, "\\'")}')" aria-label="Remove ${_esc(d.source)}" title="Remove">×</button>
+    </div>
+  `).join('') + (filter && sorted.length === 0
+    ? `<div style="padding:12px;font-size:12px;color:var(--text-muted);text-align:center">No documents match "${_esc(filter)}"</div>`
+    : '');
 }
 
 /**
@@ -296,13 +408,13 @@ async function runIngest(paths) {
     if (result.chunks_indexed === 0) {
       showNotification(
         skipped > 0
-          ? `Indexed 0 chunks from ${result.files_seen} files (${skipped} skipped — unsupported or too short)`
+          ? `Indexed 0 excerpts from ${result.files_seen} files (${skipped} skipped — unsupported or too short)`
           : 'No content found in selected files (try larger documents)',
         'info'
       );
     } else {
       showNotification(
-        `Indexed ${result.chunks_indexed} chunks from ${result.files_seen} file${result.files_seen !== 1 ? 's' : ''}`,
+        `Indexed ${result.chunks_indexed} excerpts from ${result.files_seen} file${result.files_seen !== 1 ? 's' : ''}`,
         'success'
       );
     }
@@ -320,12 +432,12 @@ async function runIngest(paths) {
 
 export async function handleDeleteDocument(source) {
   if (!isTauri()) return;
-  if (!confirm(`Delete "${source}" from your knowledge base? This removes all chunks indexed from it.`)) {
+  if (!confirm(`Delete "${source}" from your knowledge base? This removes all excerpts indexed from it.`)) {
     return;
   }
   try {
     const deleted = await invoke('delete_document', { source });
-    showNotification(`Removed ${deleted} chunks for ${source}`, 'success');
+    showNotification(`Removed ${deleted} excerpts for ${source}`, 'success');
     _state.stats = await fetchStats();
     _renderSection();
   } catch (e) {
@@ -339,12 +451,12 @@ export async function handleClearAllDocuments() {
   const chunkCount = _state.stats?.total_chunks || 0;
   if (docCount === 0) return;
   const confirmed = window.confirm(
-    `Remove all ${docCount} document${docCount !== 1 ? 's' : ''} (${chunkCount} chunk${chunkCount !== 1 ? 's' : ''}) from your knowledge base? This cannot be undone.`
+    `Remove all ${docCount} document${docCount !== 1 ? 's' : ''} (${chunkCount} excerpt${chunkCount !== 1 ? 's' : ''}) from your knowledge base? This cannot be undone.`
   );
   if (!confirmed) return;
   try {
     const deleted = await invoke('clear_knowledge');
-    showNotification(`Removed ${deleted} chunks (all documents)`, 'success');
+    showNotification(`Removed ${deleted} excerpts (all documents)`, 'success');
     _state.stats = await fetchStats();
     _renderSection();
   } catch (e) {
@@ -456,7 +568,7 @@ function _innerHtml() {
 
   const statsLine = chunkCount === 0
     ? `<span style="color:var(--text-muted)">No documents indexed yet</span>`
-    : `<span style="color:var(--green)">●</span> ${chunkCount} chunk${chunkCount !== 1 ? 's' : ''} from ${docCount} document${docCount !== 1 ? 's' : ''}`;
+    : `<span style="color:var(--green)">●</span> ${chunkCount} excerpt${chunkCount !== 1 ? 's' : ''} from ${docCount} document${docCount !== 1 ? 's' : ''}`;
 
   const dropZoneState = _state.ingesting ? 'kb-drop-zone-busy' : '';
   const dropZoneContent = _state.ingesting
@@ -465,24 +577,7 @@ function _innerHtml() {
        <div style="font-weight:500;margin-top:4px">Drop documents here or click to add</div>
        <div style="font-size:11px;color:var(--text-muted);margin-top:2px">PDF · Markdown · Text · Word · JSON · ZIP</div>`;
 
-  const docList = chunkCount === 0
-    ? ''
-    : `<div style="margin-top:14px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-          <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Indexed documents</div>
-          <button class="kb-clear-all" onclick="handleClearAllDocuments()" title="Remove every document from this knowledge base" ${_state.ingesting ? 'disabled' : ''}>Remove all</button>
-        </div>
-        <div class="kb-doc-list">
-          ${stats.documents.map(d => `
-            <div class="kb-doc-row">
-              <span class="kb-doc-icon">📄</span>
-              <span class="kb-doc-name">${_esc(d.source)}</span>
-              <span class="kb-doc-chunks">${d.chunks} chunk${d.chunks !== 1 ? 's' : ''}</span>
-              <button class="kb-doc-delete" onclick="handleDeleteDocument('${_esc(d.source).replace(/'/g, "\\'")}')" aria-label="Remove ${_esc(d.source)}" title="Remove">×</button>
-            </div>
-          `).join('')}
-        </div>
-      </div>`;
+  const docList = chunkCount === 0 ? '' : _renderDocList(stats.documents);
 
   return `<div class="ai-provider-panel">
     <div class="ai-provider-desc">
@@ -514,14 +609,46 @@ function _innerHtml() {
   </div>`;
 }
 
+/**
+ * Dashboard discoverability banner — shown only when running in Tauri AND
+ * the local Knowledge Base hasn't been set up yet. Browser users (PWA / web)
+ * see nothing because they can't run the local engine. Once setup completes,
+ * the banner disappears forever (driven by _state.setupComplete which is
+ * read from the marker file via get_setup_status).
+ *
+ * Returns inline HTML the dashboard appends; nothing without a desktop build
+ * with no setup. Click takes the user straight to Settings → AI tab where
+ * the KB section lives, with a small scroll nudge so they land on it.
+ */
+export function renderKbDashboardBanner() {
+  if (!isTauri()) return '';
+  if (_state.setupComplete) return '';
+  // Don't trigger a fetch from the dashboard — renderKnowledgeBaseSection
+  // handles the fetch when the user opens Settings. We just check whatever
+  // _state happens to hold; on a cold dashboard load with no Settings visit
+  // yet, _state.setupComplete is false and we'll show the banner. If the
+  // user has already opened Settings once, the value is accurate.
+  return `<div class="kb-dashboard-banner" role="region" aria-label="Local Knowledge Base">
+    <div class="kb-dashboard-banner-icon">📚</div>
+    <div class="kb-dashboard-banner-text">
+      <div class="kb-dashboard-banner-title">Add a local Knowledge Base</div>
+      <div class="kb-dashboard-banner-desc">Index your own documents — research papers, clinical notes, anything — and let the AI ground its answers in them. Runs fully offline on your machine.</div>
+    </div>
+    <button class="kb-dashboard-banner-cta" onclick="event.preventDefault(); window.openSettingsModal &amp;&amp; window.openSettingsModal('ai'); setTimeout(() =&gt; { var el = document.getElementById('knowledge-base-section'); if (el) el.scrollIntoView({behavior:'smooth', block:'center'}); }, 250);">Set up &rarr;</button>
+  </div>`;
+}
+
 // ─── Window exports ──────────────────────────────────────────────
 Object.assign(window, {
   isKnowledgeBaseAvailable,
   renderKnowledgeBaseSection,
+  renderKbDashboardBanner,
   handleAddFiles,
   handleAddFolder,
   handleDeleteDocument,
   handleClearAllDocuments,
+  handleDocSearchInput,
+  handleDocSortChange,
   autoConfigureCustomLens,
   startKbSetup,
 });

@@ -100,6 +100,9 @@ export function showDashboard(data) {
   // ── 2. Onboarding Banner (Step 2) ──
   html += renderOnboardingBanner();
 
+  // ── 2b. Knowledge Base discoverability banner (Tauri-only, hidden once set up) ──
+  if (window.renderKbDashboardBanner) html += window.renderKbDashboardBanner();
+
   // ── 3. Interpretive Lens ──
   html += renderInterpretiveLensSection();
 
