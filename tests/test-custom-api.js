@@ -202,41 +202,47 @@ return (async function() {
   const pricing = window.renderModelPricingHint('custom', 'any-model');
   assert('custom pricing returns empty (unknown endpoint)', pricing === '');
 
-  // ─── 12. settings.js source inspection ───
-  console.log('\n12. settings.js source inspection');
+  // ─── 12. settings.js + provider-panels.js source inspection ───
+  // Provider UI (including Custom) was extracted from settings.js into
+  // provider-panels.js during v1.18.5 refactor. settings.js still holds the
+  // provider-button row and the switchAIProvider wiring.
+  console.log('\n12. settings.js + provider-panels.js source inspection');
   const settingsSrc = await fetch('js/settings.js').then(r => r.text());
-  assert('imports getCustomApiUrl', settingsSrc.includes('getCustomApiUrl'));
-  assert('imports setCustomApiUrl', settingsSrc.includes('setCustomApiUrl'));
-  assert('imports getCustomApiKey', settingsSrc.includes('getCustomApiKey'));
-  assert('imports saveCustomApiKey', settingsSrc.includes('saveCustomApiKey'));
-  assert('imports hasCustomApiKey', settingsSrc.includes('hasCustomApiKey'));
-  assert('imports getCustomApiModel', settingsSrc.includes('getCustomApiModel'));
-  assert('imports setCustomApiModel', settingsSrc.includes('setCustomApiModel'));
-  assert('imports getCustomApiModelDisplay', settingsSrc.includes('getCustomApiModelDisplay'));
-  assert('imports fetchCustomApiModels', settingsSrc.includes('fetchCustomApiModels'));
-  assert('imports validateCustomApiKey', settingsSrc.includes('validateCustomApiKey'));
-  assert('6th provider button with data-provider="custom"', settingsSrc.includes('data-provider="custom"'));
-  assert('switchAIProvider(\'custom\') in onclick', settingsSrc.includes("switchAIProvider('custom')"));
-  assert('renderAIProviderPanel handles custom', settingsSrc.includes("provider === 'custom'"));
-  assert('handleSaveCustomApi exists', settingsSrc.includes('function handleSaveCustomApi()'));
-  assert('handleRemoveCustomApi exists', settingsSrc.includes('function handleRemoveCustomApi()'));
-  assert('renderCustomApiModelDropdown exists', settingsSrc.includes('function renderCustomApiModelDropdown('));
-  assert('applyCustomApiManualModel exists', settingsSrc.includes('function applyCustomApiManualModel()'));
-  assert('custom-url-input element', settingsSrc.includes('custom-url-input'));
-  assert('custom-key-input element', settingsSrc.includes('custom-key-input'));
-  assert('custom-model-area element', settingsSrc.includes('custom-model-area'));
-  assert('custom-model-select element', settingsSrc.includes('custom-model-select'));
-  assert('custom-manual-model element', settingsSrc.includes('custom-manual-model'));
-  assert('initSettingsModelFetch handles custom', settingsSrc.includes('fetchCustomApiModels(customUrl, customKey)'));
-  // Window exports
-  assert('window exports handleSaveCustomApi', settingsSrc.includes('handleSaveCustomApi,'));
-  assert('window exports handleRemoveCustomApi', settingsSrc.includes('handleRemoveCustomApi,'));
-  assert('window exports renderCustomApiModelDropdown', settingsSrc.includes('renderCustomApiModelDropdown,'));
-  assert('window exports applyCustomApiManualModel', settingsSrc.includes('applyCustomApiManualModel,'));
-  // Custom panel before Local AI
-  const customPanelIdx = settingsSrc.indexOf("// Custom API panel");
-  const localPanelIdx = settingsSrc.indexOf("// Local AI panel");
-  assert('Custom API panel before Local AI panel', customPanelIdx < localPanelIdx, `custom@${customPanelIdx}, local@${localPanelIdx}`);
+  const panelsSrc = await fetch('js/provider-panels.js').then(r => r.text());
+  // settings.js still owns the provider switcher row
+  assert('settings.js has data-provider="custom" button', settingsSrc.includes('data-provider="custom"'));
+  assert('settings.js wires switchAIProvider(\'custom\')', settingsSrc.includes("switchAIProvider('custom')"));
+  // provider-panels.js owns the Custom panel: getters/setters + handlers
+  assert('provider-panels imports getCustomApiUrl', panelsSrc.includes('getCustomApiUrl'));
+  assert('provider-panels imports setCustomApiUrl', panelsSrc.includes('setCustomApiUrl'));
+  assert('provider-panels imports getCustomApiKey', panelsSrc.includes('getCustomApiKey'));
+  assert('provider-panels imports saveCustomApiKey', panelsSrc.includes('saveCustomApiKey'));
+  // hasCustomApiKey / getCustomApiModelDisplay stay in api.js (covered by section 1);
+  // the panel uses local `currentKey`/`customModel` vars directly.
+  assert('provider-panels imports getCustomApiModel', panelsSrc.includes('getCustomApiModel'));
+  assert('provider-panels imports setCustomApiModel', panelsSrc.includes('setCustomApiModel'));
+  assert('provider-panels imports fetchCustomApiModels', panelsSrc.includes('fetchCustomApiModels'));
+  assert('provider-panels imports validateCustomApiKey', panelsSrc.includes('validateCustomApiKey'));
+  assert('renderAIProviderPanel handles custom', panelsSrc.includes("provider === 'custom'"));
+  assert('handleSaveCustomApi exists', panelsSrc.includes('function handleSaveCustomApi()'));
+  assert('handleRemoveCustomApi exists', panelsSrc.includes('function handleRemoveCustomApi()'));
+  assert('renderCustomApiModelDropdown exists', panelsSrc.includes('function renderCustomApiModelDropdown('));
+  assert('applyCustomApiManualModel exists', panelsSrc.includes('function applyCustomApiManualModel()'));
+  assert('custom-url-input element', panelsSrc.includes('custom-url-input'));
+  assert('custom-key-input element', panelsSrc.includes('custom-key-input'));
+  assert('custom-model-area element', panelsSrc.includes('custom-model-area'));
+  assert('custom-model-select element', panelsSrc.includes('custom-model-select'));
+  assert('custom-manual-model element', panelsSrc.includes('custom-manual-model'));
+  assert('initSettingsModelFetch handles custom', panelsSrc.includes('fetchCustomApiModels(customUrl, customKey)'));
+  // Window exports (provider-panels.js)
+  assert('window exports handleSaveCustomApi', panelsSrc.includes('handleSaveCustomApi,'));
+  assert('window exports handleRemoveCustomApi', panelsSrc.includes('handleRemoveCustomApi,'));
+  assert('window exports renderCustomApiModelDropdown', panelsSrc.includes('renderCustomApiModelDropdown,'));
+  assert('window exports applyCustomApiManualModel', panelsSrc.includes('applyCustomApiManualModel,'));
+  // Custom panel before Local AI (in provider-panels.js)
+  const customPanelIdx = panelsSrc.indexOf('// Custom API panel');
+  const localPanelIdx = panelsSrc.indexOf('// Local AI panel');
+  assert('Custom API panel before Local AI panel', customPanelIdx >= 0 && localPanelIdx >= 0 && customPanelIdx < localPanelIdx, `custom@${customPanelIdx}, local@${localPanelIdx}`);
 
   // ─── 13. Settings modal DOM ───
   console.log('\n13. Settings modal DOM');
@@ -353,6 +359,45 @@ return (async function() {
   assert('callOpenAICompatibleAPI uses needsMaxCompletionTokens', apiSrc.includes('needsMaxCompletionTokens(model)'));
   assert('body uses dynamic tokenLimitField', apiSrc.includes('[tokenLimitField]:'));
   assert('tokenLimitField defaults to max_tokens', apiSrc.includes("? 'max_completion_tokens' : 'max_tokens'"));
+
+  // ─── 19. Startup cache decrypts Custom API key (#124) ───
+  // Regression: API_KEY_LS_KEYS must include 'labcharts-custom-key' so
+  // decryptKeyCache() populates the in-memory cache on page reload. Without
+  // this, getCachedKey falls back to localStorage.getItem, which returns the
+  // raw encrypted blob — and callCustomAPI sends that as the Bearer token.
+  console.log('\n19. Startup cache decrypts Custom API key (#124)');
+  const cryptoSrc = await fetch('js/crypto.js').then(r => r.text());
+  const apiKeyListMatch = cryptoSrc.match(/const\s+API_KEY_LS_KEYS\s*=\s*\[([^\]]*)\]/);
+  assert('API_KEY_LS_KEYS array exists in crypto.js', !!apiKeyListMatch);
+  if (apiKeyListMatch) {
+    const listBody = apiKeyListMatch[1];
+    assert('API_KEY_LS_KEYS includes labcharts-custom-key', listBody.includes("'labcharts-custom-key'"),
+      'Custom API key must be decrypted into in-memory cache at startup (issue #124)');
+  }
+  // Runtime check: after a round-trip through decryptKeyCache, the cached key
+  // should match what was originally stored (not the encrypted ciphertext blob).
+  if (typeof window.decryptKeyCache === 'function' && typeof window.isUnlocked === 'function' && window.isUnlocked() && typeof window.getCustomApiKey === 'function') {
+    const sv_key = localStorage.getItem('labcharts-custom-key');
+    try {
+      await window.saveCustomApiKey('sk-roundtrip-test-124');
+      // Confirm stored form is encrypted
+      const storedRaw = localStorage.getItem('labcharts-custom-key');
+      const looksEncrypted = !!storedRaw && storedRaw.startsWith('enc_v1:');
+      assert('saveCustomApiKey stores encrypted ciphertext', looksEncrypted,
+        `got: ${storedRaw ? storedRaw.slice(0, 20) + '…' : 'null'}`);
+      // Clear cache, then re-decrypt from localStorage (simulates page reload)
+      window.updateKeyCache('labcharts-custom-key', null);
+      await window.decryptKeyCache();
+      assert('decryptKeyCache rehydrates custom key from encrypted storage', window.getCustomApiKey() === 'sk-roundtrip-test-124',
+        `got: ${window.getCustomApiKey()}`);
+    } finally {
+      if (sv_key) localStorage.setItem('labcharts-custom-key', sv_key);
+      else localStorage.removeItem('labcharts-custom-key');
+      window.updateKeyCache('labcharts-custom-key', null);
+    }
+  } else {
+    console.log('  (skipped runtime rehydrate — encryption not unlocked in this session)');
+  }
 
   // ═══ SUMMARY ═══
   console.log('\n' + results.join('\n'));

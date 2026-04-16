@@ -499,13 +499,21 @@ export function recordChange(field) {
 export function saveAndRefresh(msg, field) {
   if (field) recordChange(field);
   saveImportedData();
-  // Preserve details open state before closeModal re-renders the dashboard
+  // Preserve details open state across the re-render below
   const details = document.querySelector('.welcome-context-details');
   if (details?.open) sessionStorage.setItem('welcome-details-open', '1');
   window.closeModal();
   showNotification(msg, 'success');
   if (window.onContextCardSaved) window.onContextCardSaved();
-  // Refresh health dots for the saved card (fingerprint will have changed)
+  // Re-render the current view so the saved values appear on the card
+  // immediately. BroadcastChannel notifies other tabs but never delivers
+  // back to the sender, so a single-tab user would otherwise see no UI
+  // update until a reload or navigation. Mirrors the BroadcastChannel
+  // handler in crypto.js:initBroadcastChannel. See #123.
+  const activeNav = document.querySelector('.nav-item.active');
+  if (window.navigate) window.navigate(activeNav ? activeNav.dataset.category : 'dashboard');
+  // Refresh health dots for the saved card (fingerprint will have changed).
+  // Must run after navigate() so the ctx-dot-* elements exist in the new DOM.
   loadContextHealthDots();
 }
 

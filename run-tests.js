@@ -70,10 +70,21 @@ const PORT = process.env.PORT || 8000;
     const clean = text.replace(/%c/g, '').replace(/(?:color|background|font-weight|font-size|font-family|padding|border-radius|margin|display)\s*:[^;]+;?/g, '').trim();
     if (!clean) return;
 
-    if (clean.startsWith('FAIL ') || clean.startsWith('PAGE ERROR') || clean.includes('\u274C')) {
+    // Per-assert failure line (both "FAIL " and "FAIL:" formats)
+    if (clean.startsWith('FAIL ') || clean.startsWith('FAIL:') || clean.startsWith('PAGE ERROR') || clean.includes('\u274C')) {
       fails.push(clean);
       console.log('\x1b[31m' + clean + '\x1b[0m');
-    } else if (clean.includes('passed') || clean.includes('Results')) {
+      return;
+    }
+    // Summary lines like "115 passed, 25 failed, 140 total" — flag if any failed
+    const summaryMatch = clean.match(/(\d+)\s+passed[,\s]+(\d+)\s+failed/i);
+    if (summaryMatch && parseInt(summaryMatch[2], 10) > 0) {
+      const failedCount = parseInt(summaryMatch[2], 10);
+      fails.push(`SUMMARY: ${failedCount} failed — ${clean}`);
+      console.log('\x1b[31m' + clean + '\x1b[0m');
+      return;
+    }
+    if (clean.includes('passed') || clean.includes('Results')) {
       console.log('\x1b[36m' + clean + '\x1b[0m');
     } else if (clean.startsWith('\u25B6')) {
       console.log('\x1b[1m' + clean + '\x1b[0m');

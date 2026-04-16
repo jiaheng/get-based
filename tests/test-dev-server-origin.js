@@ -107,6 +107,57 @@ function probe(method, pathStr, headers) {
   assert('isSameOrigin no longer uses .includes() for origin', !/origin\.includes\(`localhost:/.test(src));
   assert('isSameOrigin parses Referer via new URL().origin', /new URL\(req\.headers\.referer\)\.origin/.test(src));
   assert('ALLOWED_ORIGINS Set defined', /ALLOWED_ORIGINS = new Set/.test(src));
+  // Guard must cover /proxy too — this was missed in the original #119 fix and
+  // re-reported by Robert as an SSRF bypass via the legacy /proxy route. The
+  // behavior test below is the real check; this catches silent regressions
+  // even if the server happens to be down when tests run.
+  assert('same-origin guard covers /proxy at route level',
+    /\/api\/.*\|\|.*pathname\s*===\s*['"]\/proxy['"]|pathname\s*===\s*['"]\/proxy['"].*\|\|.*\/api\//.test(src) &&
+    /!isSameOrigin\(req\)/.test(src));
+
+  // ─── /proxy SSRF guard (#119 follow-up) ───
+  // Legacy GET /proxy?url=... was unguarded. Without the fix, an evil tab could
+  // cross-origin fetch /proxy?url=http://192.168.1.1/admin and read the
+  // response (Access-Control-Allow-Origin: *). The exact-origin guard must
+  // reject foreign/forged headers here too.
+
+  // 8. No headers on /proxy → 403
+  try {
+    const status = await probe('GET', '/proxy?url=http://example.com', {});
+    assert('/proxy no headers → 403', status === 403, `got ${status}`);
+  } catch (e) { assert('/proxy no headers → 403', false, e.message); }
+
+  // 9. Forged foreign Origin containing local URL → 403 (the original repro)
+  try {
+    const status = await probe('GET', '/proxy?url=http://example.com', {
+      'Origin': 'https://evil.example',
+    });
+    assert('/proxy forged foreign Origin → 403', status === 403, `got ${status} (SSRF bypass present)`);
+  } catch (e) { assert('/proxy forged foreign Origin → 403', false, e.message); }
+
+  // 10. Forged foreign Referer with substring → 403
+  try {
+    const status = await probe('GET', '/proxy?url=http://example.com', {
+      'Referer': `https://evil.example/?next=http://${HOST}:${PORT}/`,
+    });
+    assert('/proxy forged Referer substring → 403', status === 403, `got ${status}`);
+  } catch (e) { assert('/proxy forged Referer substring → 403', false, e.message); }
+
+  // 11. Lookalike origin → 403
+  try {
+    const status = await probe('GET', '/proxy?url=http://example.com', {
+      'Origin': `http://localhost:${PORT}.evil.example`,
+    });
+    assert('/proxy lookalike Origin → 403', status === 403, `got ${status}`);
+  } catch (e) { assert('/proxy lookalike Origin → 403', false, e.message); }
+
+  // 12. Legitimate same-origin Origin → not 403 (handler runs)
+  try {
+    const status = await probe('GET', '/proxy?url=http://example.com', {
+      'Origin': `http://${HOST}:${PORT}`,
+    });
+    assert('/proxy legitimate Origin → not 403', status !== 403, `got ${status}`);
+  } catch (e) { assert('/proxy legitimate Origin → not 403', false, e.message); }
 
   console.log(results.join('\n'));
   console.log(`\n=== ${passed} passed, ${failed} failed ===`);
