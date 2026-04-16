@@ -194,12 +194,33 @@ impl SetupManager {
         });
         self.install_onnx_runtime(&python_bin, &provider).await?;
 
-        // Phase 5: Download model
+        // Phase 5: Download embedding model
+        // Model choice is hardware-adaptive — see gpu::pick_embedding_model.
+        let total_ram_bytes = {
+            use sysinfo::System;
+            let mut sys = System::new();
+            sys.refresh_memory();
+            sys.total_memory()
+        };
+        let model = gpu::pick_embedding_model(&gpu_info, total_ram_bytes);
+        // Persist choice so lens.rs (run_lens_command + LensManager::start)
+        // can read it without re-running detection. Same directory that
+        // holds the api_key — user-inspectable and user-resettable.
+        fs::write(lens_dir().join("embedding_model"), model)
+            .map_err(|e| format!("Failed to persist model choice: {}", e))?;
+        log::info!(
+            "Hardware → model: {} (gpu={:?}, vram={:?} MB, unified={}, ram={} GB)",
+            model,
+            gpu_info.recommended_provider,
+            gpu_info.vram_mb,
+            gpu_info.vram_is_unified,
+            total_ram_bytes / (1024 * 1024 * 1024),
+        );
         self.set_phase(SetupPhase::DownloadingModel {
-            name: "sentence-transformers/all-MiniLM-L6-v2".into(),
+            name: model.into(),
             progress: 0.0,
         });
-        self.download_model(&python_bin).await?;
+        self.download_model(&python_bin, model).await?;
 
         // Done
         fs::write(setup_marker(), timestamp())
@@ -514,20 +535,24 @@ impl SetupManager {
         Ok(())
     }
 
-    async fn download_model(&self, python_bin: &Path) -> Result<(), String> {
-        // Pre-download MiniLM via huggingface_hub so first ingest isn't blocked
-        // on the download. MiniLM ships as safetensors/pytorch weights — pull
-        // the canonical set plus config + tokenizer assets. ~90MB total.
+    async fn download_model(&self, python_bin: &Path, model: &str) -> Result<(), String> {
+        // Pre-download the chosen embedding model via huggingface_hub so first
+        // ingest isn't blocked on it. The allow_patterns are the union of what
+        // MiniLM-style sentence-transformers need (.safetensors, .bin, pooling
+        // config) and what BGE-M3 needs (.onnx + .onnx_data). HF quietly skips
+        // patterns that don't match, so a broad list works for both.
         let script = r#"
 import sys
 from huggingface_hub import snapshot_download
 path = snapshot_download(
-    "sentence-transformers/all-MiniLM-L6-v2",
+    sys.argv[2],
     allow_patterns=[
         "*.safetensors", "*.bin",
+        "*.onnx", "*.onnx_data",
         "config.json", "tokenizer.json", "tokenizer_config.json",
         "special_tokens_map.json", "vocab.txt",
         "modules.json", "sentence_bert_config.json",
+        "1_Pooling/*",
     ],
     cache_dir=sys.argv[1],
 )
@@ -540,8 +565,12 @@ print(f"Model downloaded to: {path}")
 
         self.run_and_log(
             python_bin,
-            &[script_path.to_str().unwrap_or(""), models_dir().to_str().unwrap_or("")],
-            "Downloading BGE-M3 model",
+            &[
+                script_path.to_str().unwrap_or(""),
+                models_dir().to_str().unwrap_or(""),
+                model,
+            ],
+            &format!("Downloading {}", model),
         )?;
 
         Ok(())

@@ -70,6 +70,11 @@ pub struct GpuInfo {
     pub recommended_provider: OnnxProvider,
     /// Whether the compute runtime (CUDA, ROCm, etc.) is installed and working.
     pub runtime_installed: bool,
+    /// True on Apple Silicon: GPU uses unified memory so vram_mb reports total
+    /// system RAM. Affects model-size thresholds — unified memory is usable
+    /// for ML but also shared with the OS and every other app.
+    #[serde(default)]
+    pub vram_is_unified: bool,
     /// Human-readable summary for UI display.
     pub summary: String,
 }
@@ -84,6 +89,7 @@ impl Default for GpuInfo {
             architecture: None,
             recommended_provider: OnnxProvider::Cpu,
             runtime_installed: false,
+            vram_is_unified: false,
             summary: "No dedicated GPU found. CPU inference will be used.".into(),
         }
     }
@@ -191,6 +197,7 @@ fn detect_nvidia() -> Option<GpuInfo> {
         architecture,
         recommended_provider: OnnxProvider::Cuda,
         runtime_installed: true,
+        vram_is_unified: false,
         summary,
     })
 }
@@ -260,8 +267,38 @@ fn detect_amd_rocm() -> Option<GpuInfo> {
         architecture,
         recommended_provider: OnnxProvider::Rocm,
         runtime_installed: true,
+        vram_is_unified: false,
         summary,
     })
+}
+
+/// Read total VRAM (in bytes) from the AMDGPU/i915 DRM sysfs node.
+/// Available on modern kernels (AMDGPU ≥ 4.15, i915 discrete) — a useful
+/// secondary source when lspci knows the GPU exists but has no memory info.
+#[cfg(target_os = "linux")]
+fn drm_sysfs_vram_mb(vendor_id: &str) -> Option<u64> {
+    let paths = std::fs::read_dir("/sys/class/drm").ok()?;
+    let mut best_mb: u64 = 0;
+    for entry in paths.flatten() {
+        let dir = entry.path();
+        let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+        // Only want "card0", "card1" — skip "card0-HDMI-A-1" output nodes
+        if !name.starts_with("card") || name.contains('-') {
+            continue;
+        }
+        let dev = dir.join("device");
+        let this_vendor = std::fs::read_to_string(dev.join("vendor")).unwrap_or_default();
+        if this_vendor.trim().to_ascii_lowercase() != vendor_id.to_ascii_lowercase() {
+            continue;
+        }
+        let bytes_str = std::fs::read_to_string(dev.join("mem_info_vram_total")).ok()?;
+        let bytes: u64 = bytes_str.trim().parse().ok()?;
+        let mb = bytes / 1024 / 1024;
+        if mb > best_mb {
+            best_mb = mb;
+        }
+    }
+    if best_mb == 0 { None } else { Some(best_mb) }
 }
 
 #[cfg(target_os = "linux")]
@@ -269,6 +306,9 @@ fn detect_amd_lspci() -> Option<GpuInfo> {
     let output = StdCommand::new("lspci").arg("-mm").output().ok()?;
     let stdout = String::from_utf8_lossy(&output.stdout);
 
+    // Collect all AMD display controllers; DRM sysfs gives us VRAM for
+    // whichever one the kernel enumerated as card*. The single-GPU case
+    // reduces to the same result.
     let line = stdout
         .lines()
         .find(|l| {
@@ -279,15 +319,18 @@ fn detect_amd_lspci() -> Option<GpuInfo> {
 
     let name = line.split('"').nth(3).unwrap_or("AMD GPU").to_string();
     let architecture = amd_arch_from_name(&name);
+    // 0x1002 is the PCI vendor ID for AMD
+    let vram_mb = drm_sysfs_vram_mb("0x1002");
 
     Some(GpuInfo {
         vendor: GpuVendor::Amd,
         name: name.clone(),
         driver_version: None,
-        vram_mb: None,
+        vram_mb,
         architecture,
         recommended_provider: OnnxProvider::Rocm,
         runtime_installed: false,
+        vram_is_unified: false,
         summary: format!("{} detected via PCI. ROCm not installed — CPU fallback. Install ROCm for GPU acceleration.", name),
     })
 }
@@ -314,14 +357,21 @@ fn detect_intel_linux() -> Option<GpuInfo> {
         .map(|o| o.status.success())
         .unwrap_or(false);
 
+    // 0x8086 is the PCI vendor ID for Intel. Discrete Arc cards expose real
+    // VRAM via DRM sysfs; integrated iGPUs leave mem_info_vram_total absent
+    // (they share system RAM via GTT, not reported here), so we still return
+    // None for them and let pick_embedding_model fall back to RAM-based tier.
+    let vram_mb = drm_sysfs_vram_mb("0x8086");
+
     Some(GpuInfo {
         vendor: GpuVendor::Intel,
         name: name.clone(),
         driver_version: None,
-        vram_mb: None,
+        vram_mb,
         architecture,
         recommended_provider: OnnxProvider::OpenVino,
         runtime_installed,
+        vram_is_unified: false,
         summary: format!(
             "{}{}",
             name,
@@ -379,6 +429,11 @@ fn detect_windows_non_nvidia() -> Vec<GpuInfo> {
         }
 
         let driver_version = row.get("DriverVersion").and_then(variant_string);
+        // WMI Win32_VideoController.AdapterRAM is a UINT32 capped at ~4 GB;
+        // any card with more VRAM reports 4294836224 regardless of actual
+        // size. Real fix is DXGI's IDXGIAdapter3::QueryVideoMemoryInfo —
+        // tracked as a follow-up. For now, cards ≥ 4 GB look like 4 GB to
+        // pick_embedding_model, which errs toward MiniLM (safe false negative).
         let vram_bytes = row.get("AdapterRAM").and_then(variant_u64);
         let vram_mb = vram_bytes.map(|b| b / 1024 / 1024);
 
@@ -406,6 +461,7 @@ fn detect_windows_non_nvidia() -> Vec<GpuInfo> {
             architecture,
             recommended_provider: OnnxProvider::DirectML,
             runtime_installed: true,
+            vram_is_unified: false,
             summary,
         });
     }
@@ -483,6 +539,12 @@ fn detect_apple() -> Option<GpuInfo> {
         architecture,
         recommended_provider: OnnxProvider::CoreML,
         runtime_installed: true,
+        // Apple Silicon has unified memory; vram_mb above is hw.memsize
+        // (total system RAM) which is the pool the GPU can actually use.
+        // Intel Macs report the same hw.memsize here but CoreML on Intel
+        // uses discrete VRAM from detect_macos_discrete — mark as not
+        // unified so the threshold logic uses the dedicated VRAM number.
+        vram_is_unified: arm,
         summary,
     })
 }
@@ -549,6 +611,7 @@ fn detect_macos_discrete() -> Vec<GpuInfo> {
             architecture,
             recommended_provider: OnnxProvider::CoreML,
             runtime_installed: true,
+            vram_is_unified: false,
             summary: format!("{} on Intel Mac — CoreML/Metal", name),
         });
     }
@@ -624,11 +687,81 @@ fn apple_arch_from_name(name: &str) -> Option<String> {
     }
 }
 
+// ── Model selection ────────────────────────────────────────────────
+
+/// BAAI/bge-m3 — 1024-dim multilingual, ~2.2 GB on disk, 3–5 GB resident.
+pub const MODEL_BGE_M3: &str = "BAAI/bge-m3";
+/// sentence-transformers/all-MiniLM-L6-v2 — 384-dim English, 90 MB on disk.
+pub const MODEL_MINILM: &str = "sentence-transformers/all-MiniLM-L6-v2";
+
+/// Pick the best embedding model for the detected hardware.
+///
+/// BGE-M3 is higher quality (MTEB ~59 vs ~41) and multilingual, but needs
+/// 3–5 GB resident and thrashes systems that don't have dedicated VRAM or
+/// a lot of system RAM. MiniLM is the safe default — fast on CPU, fits in
+/// ~200 MB. Tiers:
+///
+///   1. Usable discrete GPU (CUDA/DirectML/CoreML) with ≥ 6 GB VRAM → BGE-M3
+///   2. Apple Silicon unified memory ≥ 16 GB → BGE-M3 (GPU pool == RAM)
+///   3. CPU-only with ≥ 24 GB total system RAM → BGE-M3
+///   4. Everything else → MiniLM
+///
+/// ROCm is intentionally excluded from tier 1 because PyPI doesn't ship an
+/// `onnxruntime-rocm` wheel — even if the user has a ROCm-capable card
+/// we'd run on CPU anyway. False positives here would put them back on
+/// the thrashing path that motivated this helper.
+pub fn pick_embedding_model(gpu: &GpuInfo, total_ram_bytes: u64) -> &'static str {
+    const MB: u64 = 1024 * 1024;
+    const GB: u64 = 1024 * MB;
+
+    let has_accel = gpu.runtime_installed
+        && matches!(
+            gpu.recommended_provider,
+            OnnxProvider::Cuda | OnnxProvider::DirectML | OnnxProvider::CoreML
+        );
+    let vram_mb = gpu.vram_mb.unwrap_or(0);
+
+    // Tier 2: Apple Silicon (unified memory). CoreML runs from the same
+    // pool the OS + every other app is using, so the threshold has to
+    // match the CPU tier, not the dedicated-VRAM tier.
+    if has_accel && gpu.vram_is_unified && vram_mb >= 16 * 1024 {
+        return MODEL_BGE_M3;
+    }
+    // Tier 1: dedicated VRAM on NVIDIA/AMD(DirectML)/Intel(DirectML).
+    if has_accel && !gpu.vram_is_unified && vram_mb >= 6 * 1024 {
+        return MODEL_BGE_M3;
+    }
+    // Tier 3: CPU user with enough RAM to eat the model without swap.
+    if total_ram_bytes >= 24 * GB {
+        return MODEL_BGE_M3;
+    }
+    MODEL_MINILM
+}
+
 // ── Tests ──────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn gpu_with(
+        provider: OnnxProvider,
+        vram_mb: Option<u64>,
+        runtime_installed: bool,
+        vram_is_unified: bool,
+    ) -> GpuInfo {
+        GpuInfo {
+            vendor: GpuVendor::Unknown,
+            name: "test".into(),
+            driver_version: None,
+            vram_mb,
+            architecture: None,
+            recommended_provider: provider,
+            runtime_installed,
+            vram_is_unified,
+            summary: String::new(),
+        }
+    }
 
     #[test]
     fn nvidia_arch_mapping() {
@@ -671,6 +804,72 @@ mod tests {
         assert_eq!(info.vendor, GpuVendor::Unknown);
         assert_eq!(info.recommended_provider, OnnxProvider::Cpu);
         assert!(!info.runtime_installed);
+        assert!(!info.vram_is_unified);
+    }
+
+    #[test]
+    fn pick_model_cuda_big_vram_picks_bge() {
+        let gpu = gpu_with(OnnxProvider::Cuda, Some(8 * 1024), true, false);
+        assert_eq!(pick_embedding_model(&gpu, 16 * 1024 * 1024 * 1024), MODEL_BGE_M3);
+    }
+
+    #[test]
+    fn pick_model_cuda_small_vram_picks_minilm() {
+        // 4 GB card — above Windows WMI false-positive cap, below our 6 GB threshold
+        let gpu = gpu_with(OnnxProvider::Cuda, Some(4 * 1024), true, false);
+        assert_eq!(pick_embedding_model(&gpu, 16 * 1024 * 1024 * 1024), MODEL_MINILM);
+    }
+
+    #[test]
+    fn pick_model_directml_big_vram_picks_bge() {
+        let gpu = gpu_with(OnnxProvider::DirectML, Some(12 * 1024), true, false);
+        assert_eq!(pick_embedding_model(&gpu, 16 * 1024 * 1024 * 1024), MODEL_BGE_M3);
+    }
+
+    #[test]
+    fn pick_model_rocm_excluded_even_with_big_vram() {
+        // ROCm is intentionally excluded — no PyPI wheel, user ends up on CPU.
+        // Don't let vram_mb lure us into BGE-M3 on a card that can't use it.
+        let gpu = gpu_with(OnnxProvider::Rocm, Some(16 * 1024), true, false);
+        assert_eq!(pick_embedding_model(&gpu, 16 * 1024 * 1024 * 1024), MODEL_MINILM);
+    }
+
+    #[test]
+    fn pick_model_apple_silicon_16gb_unified_picks_bge() {
+        let gpu = gpu_with(OnnxProvider::CoreML, Some(16 * 1024), true, true);
+        // total_ram_bytes here is system RAM; Apple Silicon shares, but the
+        // helper only reads GpuInfo.vram_is_unified + GpuInfo.vram_mb for
+        // the unified tier — passing 0 here proves that.
+        assert_eq!(pick_embedding_model(&gpu, 0), MODEL_BGE_M3);
+    }
+
+    #[test]
+    fn pick_model_apple_silicon_8gb_unified_picks_minilm() {
+        // M1/M2 base 8 GB model — shared RAM with OS + apps, BGE-M3 would thrash
+        let gpu = gpu_with(OnnxProvider::CoreML, Some(8 * 1024), true, true);
+        assert_eq!(pick_embedding_model(&gpu, 0), MODEL_MINILM);
+    }
+
+    #[test]
+    fn pick_model_cpu_only_24gb_ram_picks_bge() {
+        let gpu = GpuInfo::default();
+        assert_eq!(pick_embedding_model(&gpu, 24 * 1024 * 1024 * 1024), MODEL_BGE_M3);
+    }
+
+    #[test]
+    fn pick_model_cpu_only_16gb_ram_picks_minilm() {
+        // Matches the observed failure case on the dev machine — 16 GB laptop
+        // + Polaris (no ROCm) → must resolve to MiniLM.
+        let gpu = GpuInfo::default();
+        assert_eq!(pick_embedding_model(&gpu, 16 * 1024 * 1024 * 1024), MODEL_MINILM);
+    }
+
+    #[test]
+    fn pick_model_accel_present_but_vram_unknown_picks_minilm() {
+        // Detection populated runtime_installed but vram_mb is None (e.g.
+        // AMD Linux without ROCm and before we shipped sysfs). Don't gamble.
+        let gpu = gpu_with(OnnxProvider::Cuda, None, true, false);
+        assert_eq!(pick_embedding_model(&gpu, 16 * 1024 * 1024 * 1024), MODEL_MINILM);
     }
 
     #[test]
