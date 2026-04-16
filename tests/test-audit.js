@@ -34,7 +34,7 @@ return (async function() {
   assert('SW uses importScripts for version', swAuditSrc.includes("importScripts('/version.js')"));
   assert('SW CACHE_NAME uses semver', swAuditSrc.includes('`labcharts-v${self.APP_VERSION}`'));
   assert('Umami analytics script present (self-hosted)', indexSrc.includes('umami-iota-olive.vercel.app/script.js'));
-  assert('Umami blocked on file:// protocol', indexSrc.includes("location.protocol!=='file:'"));
+  assert('Umami blocked on file:// protocol', /location\.protocol\s*!==\s*['"]file:['"]/.test(indexSrc));
 
   // ═══════════════════════════════════════
   // 3. XSS: escapeHTML in views.js

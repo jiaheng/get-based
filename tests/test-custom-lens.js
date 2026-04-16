@@ -44,6 +44,24 @@ return (async function() {
   // Encrypted key storage
   assert("saveLensKey uses encryptedSetItem", lensSrc.includes("encryptedSetItem('labcharts-lens-key'") || lensSrc.includes('encryptedSetItem(SECRET_KEY'));
   assert("getLensKey uses getCachedKey", lensSrc.includes('getCachedKey(SECRET_KEY)') || lensSrc.includes("getCachedKey('labcharts-lens-key')"));
+  // ─── testProbe (configurable test query, replaces hardcoded probe) ───
+  // The old hardcoded 'vitamin D deficiency supplementation' only made sense
+  // for health-focused RAGs. Custom Knowledge Source must work for any
+  // domain — legal, code docs, recipes — so the probe is now per-user and
+  // the "Save & Test" result separates connectivity (pass/fail) from
+  // passage count (informational).
+  assert('DEFAULT_TEST_PROBE constant defined', lensSrc.includes('DEFAULT_TEST_PROBE ='));
+  assert('testProbe included in DEFAULT_CONFIG', lensSrc.includes('testProbe:') && lensSrc.includes('DEFAULT_CONFIG'));
+  assert('testLensConnection reads cfg.testProbe', lensSrc.includes('cfg.testProbe'));
+  assert('testLensConnection falls back to DEFAULT_TEST_PROBE', lensSrc.includes('|| DEFAULT_TEST_PROBE'));
+  assert('testLensConnection no longer hardcodes the vitamin D probe inline',
+    !/['"]vitamin D deficiency supplementation['"][\s\S]{0,100}_doQuery/.test(lensSrc),
+    'the probe should be read from config, not passed literally to _doQuery');
+  assert('renderCustomLensSection includes lens-test-probe-input field', lensSrc.includes('lens-test-probe-input'));
+  assert('handleSaveLensConfig persists testProbe', lensSrc.includes('saveLensConfig({ name, url, enabled, topK, testProbe })'));
+  assert('Connected toast distinguishes zero-passage case',
+    lensSrc.includes('0 passages matched this test query') && lensSrc.includes('endpoint and auth work'),
+    'user with non-matching probe should see the endpoint worked, not "connection failed"');
 
   // ─── 2. Window function exports ───
   console.log('\n2. Window function exports');

@@ -8,7 +8,13 @@ import { hashString, showNotification, showConfirmDialog, isDebugMode, escapeHTM
 const CONFIG_KEY = 'labcharts-lens-config';
 const SECRET_KEY = 'labcharts-lens-key';
 
-const DEFAULT_CONFIG = { name: '', url: '', enabled: false, topK: 5 };
+// testProbe — per-user "canary" query used by Save & Test to verify the
+// endpoint. Default is health-themed because getbased's audience typically
+// indexes health research, but any user with a different domain corpus (legal
+// docs, code docs, recipes…) can change it so the test result reflects their
+// actual content instead of always looking like "0 passages returned".
+const DEFAULT_TEST_PROBE = 'vitamin D deficiency supplementation';
+const DEFAULT_CONFIG = { name: '', url: '', enabled: false, topK: 5, testProbe: DEFAULT_TEST_PROBE };
 const TIMEOUT_MS = 30000;
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const CACHE_MAX = 20;
@@ -219,14 +225,23 @@ export function buildLensSnippet(result) {
 // ─── Test connection ──────────────────────────────────────────
 // Tests the configured URL + key regardless of the enabled toggle
 // (users explicitly asking to test shouldn't be blocked by the toggle state).
+//
+// Returns { ok, chunkCount, firstSource, error } where `ok` reflects
+// CONNECTIVITY ONLY — a 200 response with valid schema counts as pass
+// even if chunkCount is 0. Passage count is informational: a server that
+// answers correctly but returns no chunks is "working" from a transport
+// perspective; the user still needs to evaluate whether their probe is
+// relevant to their corpus. This separation keeps Custom Knowledge Source
+// generic across domains — users with legal / code / recipe RAGs don't see
+// "connection failed" just because the default health probe doesn't match.
 export async function testLensConnection() {
   const cfg = getLensConfig();
   const key = getLensKey();
   if (!cfg.url || !key) return { ok: false, error: 'URL and API key required' };
   clearLensCache();
   updateLensStatus({ state: 'idle', lastError: null });
-  // Use a domain-relevant probe — 'test query' is too generic to pass typical similarity floors.
-  const result = await _doQuery(cfg.url, key, Math.max(cfg.topK, 3), cfg.name || 'Lens', 'vitamin D deficiency supplementation', {});
+  const probe = (cfg.testProbe && cfg.testProbe.trim()) || DEFAULT_TEST_PROBE;
+  const result = await _doQuery(cfg.url, key, Math.max(cfg.topK, 3), cfg.name || 'Lens', probe, {});
   if (!result) return { ok: false, error: getLensStatus().lastError || 'unknown error' };
   return { ok: true, chunkCount: result.chunks.length, firstSource: result.chunks[0]?.source || '' };
 }
@@ -303,6 +318,11 @@ export function renderCustomLensSection() {
       <label style="font-size:12px;color:var(--text-muted)" for="lens-topk-input">Passages per query</label>
       <input type="number" class="api-key-input" id="lens-topk-input" value="${cfg.topK || 5}" min="1" max="10" style="margin-top:4px;width:100px">
     </div>
+    <div style="margin-top:8px">
+      <label style="font-size:12px;color:var(--text-muted)" for="lens-test-probe-input">Test query</label>
+      <input type="text" class="api-key-input" id="lens-test-probe-input" value="${escapeAttr(cfg.testProbe || DEFAULT_TEST_PROBE)}" placeholder="${escapeAttr(DEFAULT_TEST_PROBE)}" style="margin-top:4px">
+      <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Sent to your endpoint on Save &amp; Test to verify the connection. Pick a query your corpus is likely to have good matches for — health, legal, code, whatever fits.</div>
+    </div>
     <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
       <button class="import-btn import-btn-primary" onclick="handleSaveLensConfig()">Save &amp; Test</button>
       ${connected ? '<button class="import-btn import-btn-secondary" onclick="handleClearLensCache()">Clear cache</button>' : ''}
@@ -345,6 +365,7 @@ export async function handleSaveLensConfig() {
   const url = (document.getElementById('lens-url-input')?.value || '').trim().replace(/\/+$/, '');
   const keyRaw = document.getElementById('lens-key-input')?.value || '';
   const topK = Math.max(1, Math.min(10, parseInt(document.getElementById('lens-topk-input')?.value, 10) || 5));
+  const testProbe = (document.getElementById('lens-test-probe-input')?.value || '').trim() || DEFAULT_TEST_PROBE;
   const enabled = !!document.getElementById('lens-enabled-toggle')?.checked;
 
   if (!url) { showNotification('Please enter an endpoint URL', 'error'); return; }
@@ -353,13 +374,20 @@ export async function handleSaveLensConfig() {
   const key = (keyRaw === '••••••••') ? getLensKey() : keyRaw.trim();
   if (!key) { showNotification('Please enter an API key', 'error'); return; }
 
-  saveLensConfig({ name, url, enabled, topK });
+  saveLensConfig({ name, url, enabled, topK, testProbe });
   if (keyRaw !== '••••••••') await saveLensKey(key);
 
   const result = await testLensConnection();
   _rerenderLensSection();
   if (result.ok) {
-    showNotification(`Connected — ${result.chunkCount} passage${result.chunkCount !== 1 ? 's' : ''} returned`, 'success');
+    // Connectivity succeeded. Passage count is informational so users with
+    // domains that don't match the default probe don't misread "0 passages"
+    // as "broken" — the endpoint answered and the auth is correct.
+    const n = result.chunkCount;
+    const msg = n > 0
+      ? `Connected — found ${n} passage${n !== 1 ? 's' : ''} above your relevance threshold`
+      : `Connected — 0 passages matched this test query (endpoint and auth work). Try a query more specific to your corpus if you want to see matches.`;
+    showNotification(msg, 'success');
   } else {
     showNotification(`Connection failed: ${result.error}`, 'error');
   }
