@@ -354,6 +354,45 @@ return (async function() {
   assert('body uses dynamic tokenLimitField', apiSrc.includes('[tokenLimitField]:'));
   assert('tokenLimitField defaults to max_tokens', apiSrc.includes("? 'max_completion_tokens' : 'max_tokens'"));
 
+  // ─── 19. Startup cache decrypts Custom API key (#124) ───
+  // Regression: API_KEY_LS_KEYS must include 'labcharts-custom-key' so
+  // decryptKeyCache() populates the in-memory cache on page reload. Without
+  // this, getCachedKey falls back to localStorage.getItem, which returns the
+  // raw encrypted blob — and callCustomAPI sends that as the Bearer token.
+  console.log('\n19. Startup cache decrypts Custom API key (#124)');
+  const cryptoSrc = await fetch('js/crypto.js').then(r => r.text());
+  const apiKeyListMatch = cryptoSrc.match(/const\s+API_KEY_LS_KEYS\s*=\s*\[([^\]]*)\]/);
+  assert('API_KEY_LS_KEYS array exists in crypto.js', !!apiKeyListMatch);
+  if (apiKeyListMatch) {
+    const listBody = apiKeyListMatch[1];
+    assert('API_KEY_LS_KEYS includes labcharts-custom-key', listBody.includes("'labcharts-custom-key'"),
+      'Custom API key must be decrypted into in-memory cache at startup (issue #124)');
+  }
+  // Runtime check: after a round-trip through decryptKeyCache, the cached key
+  // should match what was originally stored (not the encrypted ciphertext blob).
+  if (typeof window.decryptKeyCache === 'function' && typeof window.isUnlocked === 'function' && window.isUnlocked() && typeof window.getCustomApiKey === 'function') {
+    const sv_key = localStorage.getItem('labcharts-custom-key');
+    try {
+      await window.saveCustomApiKey('sk-roundtrip-test-124');
+      // Confirm stored form is encrypted
+      const storedRaw = localStorage.getItem('labcharts-custom-key');
+      const looksEncrypted = !!storedRaw && storedRaw.startsWith('enc_v1:');
+      assert('saveCustomApiKey stores encrypted ciphertext', looksEncrypted,
+        `got: ${storedRaw ? storedRaw.slice(0, 20) + '…' : 'null'}`);
+      // Clear cache, then re-decrypt from localStorage (simulates page reload)
+      window.updateKeyCache('labcharts-custom-key', null);
+      await window.decryptKeyCache();
+      assert('decryptKeyCache rehydrates custom key from encrypted storage', window.getCustomApiKey() === 'sk-roundtrip-test-124',
+        `got: ${window.getCustomApiKey()}`);
+    } finally {
+      if (sv_key) localStorage.setItem('labcharts-custom-key', sv_key);
+      else localStorage.removeItem('labcharts-custom-key');
+      window.updateKeyCache('labcharts-custom-key', null);
+    }
+  } else {
+    console.log('  (skipped runtime rehydrate — encryption not unlocked in this session)');
+  }
+
   // ═══ SUMMARY ═══
   console.log('\n' + results.join('\n'));
   console.log(`\n=== ${passed} passed, ${failed} failed, ${passed + failed} total ===`);
