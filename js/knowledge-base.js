@@ -118,6 +118,43 @@ async function _pollSetupProgress() {
   }
 }
 
+/**
+ * Render the live ingest progress block — counter + filename + progress bar
+ * + ETA. Falls back to a generic spinner before the first progress event
+ * arrives (typically the first 1-3 seconds while the lens process boots and
+ * the embedder loads). Driven by _state.ingestProgress, which the run loop
+ * polls from Rust's IngestState every 500ms.
+ */
+function _renderIngestProgress() {
+  const p = _state.ingestProgress;
+  if (!p || !p.total) {
+    return `<span class="kb-spinner" aria-hidden="true"></span> Starting indexer…`;
+  }
+  const pct = Math.min(100, Math.round((p.current / p.total) * 100));
+  const elapsed = p.started_at_ms ? (Date.now() - p.started_at_ms) / 1000 : 0;
+  let eta = '';
+  if (elapsed > 5 && p.current > 0 && p.current < p.total) {
+    const perFile = elapsed / p.current;
+    const remainSec = Math.round(perFile * (p.total - p.current));
+    const m = Math.floor(remainSec / 60);
+    const s = remainSec % 60;
+    eta = m > 0 ? ` · ~${m}m ${s}s remaining` : ` · ~${s}s remaining`;
+  }
+  // Truncate long source paths from the front so users see the filename
+  // (most informative part) rather than the directory prefix.
+  const fname = p.source ? p.source.split('/').slice(-2).join('/') : '';
+  return `
+    <div style="display:flex;align-items:center;gap:8px;font-weight:500">
+      <span class="kb-spinner" aria-hidden="true"></span>
+      <span>Indexing ${p.current} of ${p.total}${eta}</span>
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:4px;font-family:ui-monospace,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%">${_esc(fname)}</div>
+    <div style="margin-top:8px;background:var(--bg-secondary);border-radius:4px;overflow:hidden;height:6px;width:100%">
+      <div style="height:100%;width:${pct}%;background:var(--accent);transition:width 0.4s ease"></div>
+    </div>
+  `;
+}
+
 function _phaseLabel(phase) {
   if (!phase) return 'Starting…';
   const tag = phase.phase || phase;
@@ -186,8 +223,15 @@ async function pickFiles() {
       options: {
         multiple: true,
         directory: false,
+        // Separate filter groups so the native OS dialog's "file type"
+        // dropdown lets users switch between document and archive views.
+        // Linux GTK pickers in particular tend to hide archives when the
+        // active filter is purely "documents", so users couldn't select
+        // a .zip without knowing to switch filters.
         filters: [
-          { name: 'Documents', extensions: ['txt', 'md', 'markdown', 'rst', 'json', 'pdf', 'docx', 'zip'] },
+          { name: 'Documents', extensions: ['txt', 'md', 'markdown', 'rst', 'json', 'pdf', 'docx'] },
+          { name: 'Archives', extensions: ['zip'] },
+          { name: 'All supported', extensions: ['txt', 'md', 'markdown', 'rst', 'json', 'pdf', 'docx', 'zip'] },
         ],
       },
     });
@@ -228,7 +272,23 @@ export async function handleAddFolder() {
 
 async function runIngest(paths) {
   _state.ingesting = true;
+  _state.ingestProgress = null;
   _renderSection();
+
+  // Poll the Rust IngestState every 500ms so the UI shows N/M and the
+  // current filename instead of a static "Indexing…" spinner. Rust
+  // updates the state from the lens CLI's JSONL stream as each file
+  // completes. Cleared on completion in the finally block.
+  const progressTimer = setInterval(async () => {
+    try {
+      const p = await invoke('get_ingest_progress');
+      if (p && _state.ingesting) {
+        _state.ingestProgress = p;
+        _renderSection();
+      }
+    } catch { /* polling is best-effort */ }
+  }, 500);
+
   try {
     const result = await invoke('ingest_documents', { req: { paths } });
     if (!result) return;
@@ -251,7 +311,9 @@ async function runIngest(paths) {
   } catch (e) {
     showNotification(`Ingest failed: ${e}`, 'error');
   } finally {
+    clearInterval(progressTimer);
     _state.ingesting = false;
+    _state.ingestProgress = null;
     _renderSection();
   }
 }
@@ -398,10 +460,10 @@ function _innerHtml() {
 
   const dropZoneState = _state.ingesting ? 'kb-drop-zone-busy' : '';
   const dropZoneContent = _state.ingesting
-    ? `<span class="kb-spinner" aria-hidden="true"></span> Indexing…`
+    ? _renderIngestProgress()
     : `<div style="font-size:24px;line-height:1">📁</div>
        <div style="font-weight:500;margin-top:4px">Drop documents here or click to add</div>
-       <div style="font-size:11px;color:var(--text-muted);margin-top:2px">PDF · Markdown · Text · Word · JSON</div>`;
+       <div style="font-size:11px;color:var(--text-muted);margin-top:2px">PDF · Markdown · Text · Word · JSON · ZIP</div>`;
 
   const docList = chunkCount === 0
     ? ''

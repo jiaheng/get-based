@@ -82,7 +82,9 @@ def ingest(
     if not json_out:
         console.print(f"[bold cyan]Ingesting[/] {path}…")
     try:
-        result = ingest_path(config, path)
+        # JSONL progress is only useful for a parent process — emit it
+        # exactly when --json was requested. Human runs stay clean.
+        result = ingest_path(config, path, emit_progress=json_out)
     except FileNotFoundError as e:
         if json_out:
             print(_json.dumps({"error": str(e)}))

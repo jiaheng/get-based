@@ -77,7 +77,7 @@ async fn get_lens_config() -> Result<LensConfigInfo, String> {
         stdout.trim().to_string()
     };
     Ok(LensConfigInfo {
-        url: "http://127.0.0.1:8321/query".into(),
+        url: "http://127.0.0.1:8322/query".into(),
         api_key,
         top_k: 5,
     })
@@ -95,26 +95,115 @@ struct IngestResult {
     skipped: Vec<String>,
 }
 
-/// Ingest documents into the local knowledge base. Handles multiple paths;
-/// each is ingested independently and results are summed.
+/// Per-file progress reported by the lens CLI's JSONL stream. Polled by the
+/// frontend during long ingest runs so the user sees an N/M counter and the
+/// current filename instead of a static "Indexing…" spinner.
+#[derive(Default, Clone, serde::Serialize)]
+pub struct IngestProgress {
+    pub current: u32,
+    pub total: u32,
+    pub source: String,
+    pub chunks_so_far: u32,
+    pub started_at_ms: u64,
+}
+
+#[derive(Default)]
+pub struct IngestState {
+    pub progress: std::sync::Mutex<Option<IngestProgress>>,
+}
+
 #[tauri::command]
-async fn ingest_documents(req: IngestRequest) -> Result<IngestResult, String> {
+fn get_ingest_progress(state: tauri::State<'_, IngestState>) -> Option<IngestProgress> {
+    state.progress.lock().unwrap().clone()
+}
+
+/// Ingest documents into the local knowledge base. Handles multiple paths;
+/// each is ingested independently and results are summed. Streams the lens
+/// CLI's JSONL output so per-file progress lands in IngestState while the
+/// command runs — the frontend polls `get_ingest_progress` for the live
+/// counter. The final non-event JSON line is the IngestResult.
+#[tauri::command]
+async fn ingest_documents(
+    req: IngestRequest,
+    state: tauri::State<'_, IngestState>,
+) -> Result<IngestResult, String> {
     if req.paths.is_empty() {
         return Err("No paths provided".into());
     }
+
+    fn now_ms() -> u64 {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0)
+    }
+
+    let started_at_ms = now_ms();
+    // Reset progress at the start of every ingest call so a previous run's
+    // tail state doesn't leak into the new operation's UI.
+    *state.progress.lock().unwrap() = Some(IngestProgress {
+        started_at_ms,
+        ..Default::default()
+    });
+
     let mut total = IngestResult {
         files_seen: 0,
         chunks_indexed: 0,
         skipped: vec![],
     };
+
     for path in &req.paths {
-        let (stdout, stderr, ok) = lens::run_lens_command(&["ingest", "--json", path])?;
-        if !ok {
-            return Err(format!("Ingest of {} failed: {}", path, stderr));
+        let mut final_line: Option<String> = None;
+        let progress_mutex = &state.progress;
+        let result = lens::run_lens_command_streaming(&["ingest", "--json", path], |line| {
+            // Each stdout line from `lens ingest --json` is JSON. Event-tagged
+            // lines update progress; the lone non-event line at the end is
+            // the IngestResult dict.
+            let parsed: serde_json::Value = match serde_json::from_str(line) {
+                Ok(v) => v,
+                Err(_) => return,
+            };
+            match parsed.get("event").and_then(|v| v.as_str()) {
+                Some("start") => {
+                    let total_files = parsed["total"].as_u64().unwrap_or(0) as u32;
+                    if let Ok(mut p) = progress_mutex.lock() {
+                        if let Some(progress) = p.as_mut() {
+                            progress.total = total_files;
+                        }
+                    }
+                }
+                Some("file") => {
+                    if let Ok(mut p) = progress_mutex.lock() {
+                        if let Some(progress) = p.as_mut() {
+                            progress.current = parsed["index"].as_u64().unwrap_or(0) as u32;
+                            progress.total = parsed["total"].as_u64().unwrap_or(progress.total as u64) as u32;
+                            progress.source = parsed["source"].as_str().unwrap_or("").to_string();
+                            let added = parsed["chunks"].as_u64().unwrap_or(0) as u32;
+                            progress.chunks_so_far = progress.chunks_so_far.saturating_add(added);
+                        }
+                    }
+                }
+                _ => {
+                    // No event tag → this is the final result line.
+                    final_line = Some(line.to_string());
+                }
+            }
+        });
+
+        // Always clear the progress state on exit, success or failure, so the
+        // UI doesn't get stuck showing "indexing N of M" after we're done.
+        if let Err(e) = result {
+            *state.progress.lock().unwrap() = None;
+            return Err(format!("Ingest of {} failed: {}", path, e));
         }
+
+        let stdout = final_line
+            .ok_or_else(|| format!("Ingest of {} produced no result line", path))?;
         let parsed: serde_json::Value = serde_json::from_str(stdout.trim())
             .map_err(|e| format!("Bad ingest JSON: {}", e))?;
         if let Some(err) = parsed.get("error").and_then(|v| v.as_str()) {
+            *state.progress.lock().unwrap() = None;
             return Err(format!("Ingest error: {}", err));
         }
         total.files_seen += parsed["files_seen"].as_u64().unwrap_or(0) as u32;
@@ -127,6 +216,8 @@ async fn ingest_documents(req: IngestRequest) -> Result<IngestResult, String> {
             }
         }
     }
+
+    *state.progress.lock().unwrap() = None;
     Ok(total)
 }
 
@@ -284,6 +375,7 @@ async fn main() {
         })
         .manage(LensManager::new())
         .manage(SetupManager::new())
+        .manage(IngestState::default())
         .invoke_handler(tauri::generate_handler![
             // Lens sidecar
             get_lens_status,
@@ -300,6 +392,7 @@ async fn main() {
             // Knowledge base
             get_lens_config,
             ingest_documents,
+            get_ingest_progress,
             get_knowledge_stats,
             delete_document,
             clear_knowledge,

@@ -78,22 +78,45 @@ def _walk(root: Path) -> Iterator[Path]:
             yield p
 
 
-def ingest_path(config: LensConfig, source: Path) -> dict:
+def ingest_path(config: LensConfig, source: Path, emit_progress: bool = False) -> dict:
     """Ingest a file or directory into the lens store. Returns summary stats.
     A .zip input is auto-extracted into a temp directory and ingested as if
     the user had passed that directory; the temp dir is removed on exit.
+
+    When `emit_progress` is True, prints JSONL progress events to stdout
+    before the final result line. Events: {"event":"start","total":N},
+    {"event":"file","index":i,"total":N,"source":"...","chunks":n}. The
+    final line is the result dict (no "event" key) so Rust can route
+    JSONL lines to progress state vs result capture.
     """
     if not source.exists():
         raise FileNotFoundError(f"No such path: {source}")
 
     with _expand_zip_if_needed(source) as walk_root:
-        return _ingest_walk(config, walk_root)
+        return _ingest_walk(config, walk_root, emit_progress=emit_progress)
 
 
-def _ingest_walk(config: LensConfig, source: Path) -> dict:
+def _ingest_walk(config: LensConfig, source: Path, emit_progress: bool = False) -> dict:
+    import json as _json
+    import sys as _sys
+
+    def _emit(**event):
+        if not emit_progress:
+            return
+        print(_json.dumps(event), flush=True)
+        # Also echo to stderr so a human watching the CLI can see activity
+        # if they ever run `lens ingest --json` manually.
+        print(_json.dumps(event), file=_sys.stderr, flush=True)
+
     embedder = create_embedder(config)
     store = Store(config)
     store.ensure_collection(embedder.dimension())
+
+    # Pre-walk to get a total count for progress. Cheap — just scans filenames,
+    # no file reads. Worth the extra walk for the UX win of a real N/M bar.
+    all_files = list(_walk(source))
+    total = len(all_files)
+    _emit(event="start", total=total)
 
     files_seen = 0
     chunks_indexed = 0
@@ -112,15 +135,20 @@ def _ingest_walk(config: LensConfig, source: Path) -> dict:
         store.upsert(batch)
         return len(batch)
 
-    for file_path in _walk(source):
+    for file_path in all_files:
         files_seen += 1
+        file_chunks_before = chunks_indexed + len(batch)
         try:
             text = _read_text(file_path)
         except Exception as e:
             log.warning("Skipping %s: %s", file_path, e)
             skipped.append(str(file_path))
+            _emit(event="file", index=files_seen, total=total,
+                  source=str(file_path), chunks=0, skipped=True)
             continue
         if not text.strip():
+            _emit(event="file", index=files_seen, total=total,
+                  source=str(file_path), chunks=0, skipped=True)
             continue
         rel_source = str(file_path.relative_to(source.parent if source.is_file() else source))
         for chunk in chunk_text(text, max_size=config.chunk_max_size,
@@ -133,6 +161,11 @@ def _ingest_walk(config: LensConfig, source: Path) -> dict:
             if len(batch) >= BATCH:
                 chunks_indexed += flush(batch)
                 batch = []
+        # Emit per-file progress. Chunks-added is approximate until the
+        # final batch flushes, but close enough for a progress indicator.
+        file_chunks = chunks_indexed + len(batch) - file_chunks_before
+        _emit(event="file", index=files_seen, total=total,
+              source=rel_source, chunks=file_chunks)
 
     chunks_indexed += flush(batch)
 

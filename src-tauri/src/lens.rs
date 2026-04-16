@@ -60,6 +60,57 @@ pub fn run_lens_command(args: &[&str]) -> Result<(String, String, bool), String>
     ))
 }
 
+/// Streaming variant of `run_lens_command`. Spawns the lens subprocess with
+/// piped stdout, calls `on_line` for each stdout line as it arrives, then
+/// waits for exit. stderr is drained in a background thread and returned in
+/// the error message on non-zero exit. Use for long-running operations
+/// (ingest) where the caller wants progress events.
+pub fn run_lens_command_streaming(
+    args: &[&str],
+    mut on_line: impl FnMut(&str),
+) -> Result<(), String> {
+    use std::io::{BufRead, BufReader, Read};
+    let lens = lens_bin_path();
+    if !lens.exists() {
+        return Err(format!(
+            "Lens binary not found at {:?}. Run setup first.",
+            lens
+        ));
+    }
+    let data_dir = lens_data_dir();
+    let model = selected_embedding_model();
+    let mut child = StdCommand::new(&lens)
+        .args(args)
+        .env("LENS_DATA_DIR", data_dir.to_string_lossy().as_ref())
+        .env("LENS_EMBEDDING_MODEL", &model)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to spawn lens: {}", e))?;
+
+    let stdout = child.stdout.take().ok_or("stdout not captured")?;
+    let mut stderr = child.stderr.take().ok_or("stderr not captured")?;
+
+    let stderr_handle = std::thread::spawn(move || {
+        let mut buf = String::new();
+        let _ = stderr.read_to_string(&mut buf);
+        buf
+    });
+
+    for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+        on_line(line.trim());
+    }
+
+    let stderr_content = stderr_handle.join().unwrap_or_default();
+    let status = child
+        .wait()
+        .map_err(|e| format!("lens wait failed: {}", e))?;
+    if !status.success() {
+        return Err(format!("lens exited non-zero:\n{}", stderr_content));
+    }
+    Ok(())
+}
+
 /// Manages the Lens Python sidecar process lifecycle.
 pub struct LensManager {
     process: Mutex<Option<std::process::Child>>,
@@ -71,7 +122,7 @@ impl LensManager {
     pub fn new() -> Self {
         let default_config = serde_json::json!({
             "host": "127.0.0.1",
-            "port": 8321,
+            "port": 8322,
             "reranker": false,
         });
         Self {
@@ -95,7 +146,7 @@ impl LensManager {
         let (host, port) = {
             let config = self.config.lock().unwrap();
             let host = config["host"].as_str().unwrap_or("127.0.0.1").to_string();
-            let port = config["port"].as_u64().unwrap_or(8321);
+            let port = config["port"].as_u64().unwrap_or(8322);
             (host, port)
         };
 
@@ -200,7 +251,7 @@ impl LensManager {
         let (host, port) = {
             let config = self.config.lock().unwrap();
             let host = config["host"].as_str().unwrap_or("127.0.0.1").to_string();
-            let port = config["port"].as_u64().unwrap_or(8321);
+            let port = config["port"].as_u64().unwrap_or(8322);
             (host, port)
         };
 
@@ -340,11 +391,11 @@ mod tests {
     }
 
     #[test]
-    fn default_config_is_localhost_8321() {
+    fn default_config_is_localhost_8322() {
         let mgr = LensManager::new();
         let config = mgr.config.lock().unwrap();
         assert_eq!(config["host"], "127.0.0.1");
-        assert_eq!(config["port"], 8321);
+        assert_eq!(config["port"], 8322);
         assert_eq!(config["reranker"], false);
     }
 

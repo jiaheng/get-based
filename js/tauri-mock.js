@@ -17,6 +17,7 @@
     { source: 'omega-3-meta-analysis.pdf', chunks: 65 },
     { source: 'longevity-notes.md', chunks: 20 },
   ];
+  let _mockIngestProgress = null;
 
   const stats = () => ({
     total_chunks: _mockDocs.reduce((n, d) => n + d.chunks, 0),
@@ -45,14 +46,14 @@
 
       // ── Lens server ──────────────────────────────────────────────
       case 'get_lens_status':
-        return Promise.resolve({ running: true, pid: 12345, port: 8321 });
+        return Promise.resolve({ running: true, pid: 12345, port: 8322 });
       case 'start_lens':
       case 'stop_lens':
       case 'configure_lens':
         return Promise.resolve(null);
       case 'get_lens_config':
         return Promise.resolve({
-          url: 'http://127.0.0.1:8321/query',
+          url: 'http://127.0.0.1:8322/query',
           api_key: 'mock-key-' + Math.random().toString(36).slice(2, 12),
           top_k: 5,
         });
@@ -60,21 +61,51 @@
       // ── Knowledge base ───────────────────────────────────────────
       case 'get_knowledge_stats':
         return Promise.resolve(stats());
+      case 'get_ingest_progress':
+        return Promise.resolve(_mockIngestProgress);
       case 'ingest_documents': {
         const paths = (args && args.req && args.req.paths) || [];
+        // Simulate per-file streaming so the UI's progress bar exercises
+        // the same code path as the real Rust IngestState. Total is the
+        // path count multiplied to feel like a small dir/zip extract.
+        const fakeTotal = Math.max(paths.length, 5);
+        _mockIngestProgress = {
+          current: 0,
+          total: fakeTotal,
+          source: '',
+          chunks_so_far: 0,
+          started_at_ms: Date.now(),
+        };
+        const tickMs = 350;
         return new Promise((resolve) => {
-          setTimeout(() => {
-            let chunks = 0;
-            for (const p of paths) {
-              const name = String(p).split('/').pop() || 'doc.md';
-              if (!_mockDocs.find((d) => d.source === name)) {
-                const c = 5 + Math.floor(Math.random() * 30);
-                _mockDocs.push({ source: name, chunks: c });
-                chunks += c;
+          let chunks = 0;
+          let i = 0;
+          const tick = () => {
+            i += 1;
+            const fname = (paths[i - 1] || `mock-doc-${i}.md`).split('/').pop();
+            const c = 3 + Math.floor(Math.random() * 12);
+            _mockIngestProgress = {
+              current: i,
+              total: fakeTotal,
+              source: fname,
+              chunks_so_far: (_mockIngestProgress?.chunks_so_far || 0) + c,
+              started_at_ms: _mockIngestProgress.started_at_ms,
+            };
+            if (i >= paths.length) {
+              for (const p of paths) {
+                const name = String(p).split('/').pop() || 'doc.md';
+                if (!_mockDocs.find((d) => d.source === name)) {
+                  _mockDocs.push({ source: name, chunks: c });
+                  chunks += c;
+                }
               }
+              _mockIngestProgress = null;
+              resolve({ files_seen: paths.length, chunks_indexed: chunks, skipped: [] });
+              return;
             }
-            resolve({ files_seen: paths.length, chunks_indexed: chunks, skipped: [] });
-          }, 1200);
+            setTimeout(tick, tickMs);
+          };
+          setTimeout(tick, tickMs);
         });
       }
       case 'delete_document': {
