@@ -70,18 +70,25 @@ export async function startKbSetup() {
   if (!isTauri()) return;
   _state.setupRunning = true;
   _renderSection();
-  try {
-    await invoke('run_setup');
-  } catch (e) {
-    showNotification(`Setup failed to start: ${e}`, 'error');
-    _state.setupRunning = false;
-    _renderSection();
-    return;
-  }
-  // Start polling for progress
+
+  // Start polling BEFORE firing run_setup. run_setup is a long-running async
+  // command (downloads + pip install take ~2 min); if we awaited it the JS
+  // would block for that entire window and the poll timer would never tick,
+  // so the UI would freeze at "Starting…" and jump straight to the done
+  // state. Instead, start the poll loop first, then fire run_setup as a
+  // background Promise. SetupManager records phase transitions via the
+  // Mutex inside the Rust struct, and our poll reads them out every second.
   if (_setupPollTimer) clearInterval(_setupPollTimer);
   _setupPollTimer = setInterval(_pollSetupProgress, 1000);
   _pollSetupProgress();
+
+  invoke('run_setup').catch((e) => {
+    // SetupManager.run_setup already records SetupPhase::Failed on error
+    // before returning Err, so the poll will surface the failure and
+    // update the UI. This handler just keeps the unhandled-rejection
+    // warning quiet and leaves a breadcrumb in the console.
+    console.warn('[KB] run_setup rejected:', e);
+  });
 }
 
 async function _pollSetupProgress() {

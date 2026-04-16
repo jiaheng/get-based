@@ -192,6 +192,20 @@
   <script src="vendor/cashu-ts.js"></script>
   <script src="version.js"></script>
   <script src="js/tauri-mock.js"></script>
+  <script>
+    // F5 / Ctrl+R / Cmd+R → reload. WebKit2GTK (Linux Tauri) does not bind
+    // these by default, so without this the desktop window can only be
+    // reloaded by relaunching the binary. Harmless in regular browsers
+    // where the browser already handles them — we just preventDefault and
+    // call location.reload() which is the same effect.
+    window.addEventListener('keydown', function (e) {
+      var ctrlOrMeta = e.ctrlKey || e.metaKey;
+      if (e.key === 'F5' || (ctrlOrMeta && (e.key === 'r' || e.key === 'R'))) {
+        e.preventDefault();
+        location.reload();
+      }
+    });
+  </script>
   <script type="module" src="js/main.js"></script>
   <script>
     // Cookieless Umami analytics — opt-out via Settings → Privacy. Skips on

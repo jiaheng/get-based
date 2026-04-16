@@ -451,6 +451,19 @@ impl SetupManager {
         let pip = venv_pip();
 
         self.run_and_log(&pip, &["install", "--upgrade", "pip"], "Upgrading pip")?;
+        // Pre-install build backend (setuptools + wheel) into the main venv so
+        // we can skip pip's isolated build environment. pip 26's isolated build
+        // envs have a known flakiness with python-build-standalone: the
+        // isolated interpreter intermittently can't resolve the stdlib
+        // (queue.py etc.), which kills `pip install` on first cold run even
+        // though the bundled Python is fine. Using --no-build-isolation below
+        // avoids the isolation step entirely and is faster too — no redundant
+        // setuptools/wheel downloads per isolated env.
+        self.run_and_log(
+            &pip,
+            &["install", "--upgrade", "setuptools", "wheel"],
+            "Installing build tools",
+        )?;
         // Install the bundled lens source (with the [full] extras for ONNX + PDF + DOCX)
         let source_arg = format!(
             "{}[full]",
@@ -458,7 +471,7 @@ impl SetupManager {
         );
         self.run_and_log(
             &pip,
-            &["install", "--upgrade", &source_arg],
+            &["install", "--upgrade", "--no-build-isolation", &source_arg],
             "Installing getbased-lens (bundled)",
         )?;
 
