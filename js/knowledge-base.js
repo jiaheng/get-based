@@ -352,9 +352,16 @@ function _innerHtml() {
     const gpuLine = _state.setupGpu
       ? `<div style="font-size:12px;color:var(--text-muted);margin-top:8px">Hardware: ${_esc(_state.setupGpu.name || 'detecting…')}${_state.setupGpu.recommended_provider ? ' · ' + _esc(_state.setupGpu.recommended_provider) : ''}</div>`
       : '';
+    // Live tail-line from the underlying subprocess (pip's "Downloading X" etc.)
+    // — surfaced so the user can see activity during the long install phase
+    // instead of a frozen 0% bar.
+    const statusLine = _state.setupPhase && _state.setupPhase.status
+      ? `<div style="margin-top:4px;font-size:11px;color:var(--text-muted);font-family:ui-monospace,monospace;opacity:0.75;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(_state.setupPhase.status)}</div>`
+      : '';
     return `<div class="ai-provider-panel">
       <div class="ai-provider-desc">Setting up local knowledge engine — this is a one-time download.</div>
       <div style="margin-top:10px;font-size:13px;color:var(--text-muted)">${_esc(_phaseLabel(_state.setupPhase))}</div>
+      ${statusLine}
       <div style="margin-top:8px;background:var(--bg-secondary);border-radius:6px;overflow:hidden;height:8px">
         <div style="height:100%;width:${Math.max(pct * 100, 5)}%;background:var(--accent);transition:width 0.5s ease;border-radius:6px"></div>
       </div>

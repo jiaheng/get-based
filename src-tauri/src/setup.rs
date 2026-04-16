@@ -50,9 +50,12 @@ pub enum SetupPhase {
     NotStarted,
     DetectingGpu,
     DownloadingPython { url: String, progress: f32 },
-    InstallingLens { progress: f32 },
-    DownloadingOnnxRuntime { provider: String, progress: f32 },
-    DownloadingModel { name: String, progress: f32 },
+    /// `status` carries the live tail-line from pip's stdout — e.g. "Downloading
+    /// torch-2.11.0...whl (530.6 MB)". Lets the UI show moving activity during
+    /// the long pip install phase instead of a static 0% bar.
+    InstallingLens { progress: f32, status: Option<String> },
+    DownloadingOnnxRuntime { provider: String, progress: f32, status: Option<String> },
+    DownloadingModel { name: String, progress: f32, status: Option<String> },
     Completed,
     Failed { error: String },
 }
@@ -183,7 +186,7 @@ impl SetupManager {
         let python_bin = self.download_python().await?;
 
         // Phase 3: Install Lens in venv (always re-extracts bundled source for upgrades)
-        self.set_phase(SetupPhase::InstallingLens { progress: 0.0 });
+        self.set_phase(SetupPhase::InstallingLens { progress: 0.0, status: None });
         self.install_lens(&python_bin).await?;
 
         // Phase 4: Download ONNX Runtime provider
@@ -191,6 +194,7 @@ impl SetupManager {
         self.set_phase(SetupPhase::DownloadingOnnxRuntime {
             provider: provider.to_string(),
             progress: 0.0,
+            status: None,
         });
         self.install_onnx_runtime(&python_bin, &provider).await?;
 
@@ -219,6 +223,7 @@ impl SetupManager {
         self.set_phase(SetupPhase::DownloadingModel {
             name: model.into(),
             progress: 0.0,
+            status: None,
         });
         self.download_model(&python_bin, model).await?;
 
@@ -246,6 +251,82 @@ impl SetupManager {
             }
             _ => {}
         }
+    }
+
+    /// Update the live status line (e.g. "Downloading torch-2.11...whl").
+    /// Also bumps progress on "Collecting" events so the bar creeps forward.
+    fn set_install_status(&self, line: &str) {
+        let mut phase = self.phase.lock().unwrap();
+        let status_slot = match &mut *phase {
+            SetupPhase::InstallingLens { status, progress } => {
+                // pip's "Collecting X" / "Downloading X" lines are good anchors
+                // for a rough progress estimate. We don't know the total package
+                // count ahead of time, but lens[full] lands around ~70 packages,
+                // so each event bumps ~1.3% and we cap at 90% until the final
+                // "Successfully installed" flip.
+                if line.starts_with("Collecting ") || line.starts_with("Downloading ") {
+                    *progress = (*progress + 0.013).min(0.90);
+                } else if line.starts_with("Successfully installed") {
+                    *progress = 0.99;
+                }
+                Some(status)
+            }
+            SetupPhase::DownloadingOnnxRuntime { status, .. }
+            | SetupPhase::DownloadingModel { status, .. } => Some(status),
+            _ => None,
+        };
+        if let Some(slot) = status_slot {
+            *slot = Some(line.to_string());
+        }
+    }
+
+    /// Spawn a subprocess and stream its stdout line-by-line, calling `on_line`
+    /// for each line. stderr is captured whole and surfaced on non-zero exit.
+    /// Use this instead of run_and_log when the subprocess runs long enough
+    /// that the caller wants live UI updates — pip install, huggingface_hub
+    /// snapshot_download, etc.
+    fn run_and_stream(
+        &self,
+        cmd: &Path,
+        args: &[&str],
+        label: &str,
+        mut on_line: impl FnMut(&str),
+    ) -> Result<(), String> {
+        use std::io::{BufRead, BufReader, Read};
+        log::info!("{}: {} {}", label, cmd.display(), args.join(" "));
+
+        let mut child = std::process::Command::new(cmd)
+            .args(args)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("{} failed to start: {}", label, e))?;
+
+        let stdout = child.stdout.take().ok_or("stdout not captured")?;
+        let mut stderr = child.stderr.take().ok_or("stderr not captured")?;
+
+        // Drain stderr in a background thread so a chatty process doesn't
+        // block on a full pipe buffer. We only need the contents on error.
+        let stderr_handle = std::thread::spawn(move || {
+            let mut buf = String::new();
+            let _ = stderr.read_to_string(&mut buf);
+            buf
+        });
+
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            log::debug!("[{}] {}", label, line);
+            on_line(line.trim());
+        }
+
+        let stderr_content = stderr_handle.join().unwrap_or_default();
+        let status = child
+            .wait()
+            .map_err(|e| format!("{} wait failed: {}", label, e))?;
+
+        if !status.success() {
+            return Err(format!("{} failed:\n{}", label, stderr_content));
+        }
+        Ok(())
     }
 }
 
@@ -490,10 +571,24 @@ impl SetupManager {
             "{}[full]",
             source_dir.to_str().ok_or("Lens source path is not valid UTF-8")?
         );
-        self.run_and_log(
+        // Stream the big pip install so the UI can show live activity instead
+        // of a dead 0% bar for 5-10 minutes. Each "Collecting"/"Downloading"
+        // line bumps the progress bar forward and lands as the phase status.
+        self.run_and_stream(
             &pip,
             &["install", "--upgrade", "--no-build-isolation", &source_arg],
             "Installing getbased-lens (bundled)",
+            |line| {
+                if line.starts_with("Collecting ")
+                    || line.starts_with("Downloading ")
+                    || line.starts_with("Using cached ")
+                    || line.starts_with("Building wheel ")
+                    || line.starts_with("Installing collected packages")
+                    || line.starts_with("Successfully installed")
+                {
+                    self.set_install_status(line);
+                }
+            },
         )?;
 
         Ok(())
@@ -530,32 +625,58 @@ impl SetupManager {
         };
 
         for pkg in packages {
-            self.run_and_log(&pip, &["install", "--upgrade", pkg], &format!("Installing {}", pkg))?;
+            self.run_and_stream(
+                &pip,
+                &["install", "--upgrade", pkg],
+                &format!("Installing {}", pkg),
+                |line| {
+                    if line.starts_with("Collecting ")
+                        || line.starts_with("Downloading ")
+                        || line.starts_with("Using cached ")
+                        || line.starts_with("Installing collected packages")
+                        || line.starts_with("Successfully installed")
+                        || line.starts_with("Requirement already satisfied")
+                    {
+                        self.set_install_status(line);
+                    }
+                },
+            )?;
         }
         Ok(())
     }
 
     async fn download_model(&self, python_bin: &Path, model: &str) -> Result<(), String> {
-        // Pre-download the chosen embedding model via huggingface_hub so first
-        // ingest isn't blocked on it. The allow_patterns are the union of what
-        // MiniLM-style sentence-transformers need (.safetensors, .bin, pooling
-        // config) and what BGE-M3 needs (.onnx + .onnx_data). HF quietly skips
-        // patterns that don't match, so a broad list works for both.
+        // Pre-download the chosen embedding model via huggingface_hub. Pattern
+        // list is tailored to the chosen model:
+        //   - ONNX-family (e.g. BAAI/bge-m3): *.onnx + *.onnx_data + metadata
+        //   - sentence-transformers family (e.g. MiniLM): safetensors +
+        //     sentence_bert_config + 1_Pooling + tokenizer. No onnx/, no
+        //     openvino/, no pytorch_model.bin — MiniLM repos ship all four
+        //     formats and a blanket allow_patterns would pull 700 MB instead
+        //     of the 90 MB we actually need, plus confuse the user by
+        //     downloading Intel-specific openvino variants.
         let script = r#"
 import sys
 from huggingface_hub import snapshot_download
-path = snapshot_download(
-    sys.argv[2],
-    allow_patterns=[
-        "*.safetensors", "*.bin",
+
+model = sys.argv[2]
+is_onnx_model = any(tok in model.lower() for tok in ("bge-m3", "bge-large", "onnx"))
+if is_onnx_model:
+    patterns = [
         "*.onnx", "*.onnx_data",
+        "config.json", "tokenizer.json",
+        "tokenizer_config.json", "special_tokens_map.json",
+    ]
+else:
+    patterns = [
+        "*.safetensors",
         "config.json", "tokenizer.json", "tokenizer_config.json",
         "special_tokens_map.json", "vocab.txt",
         "modules.json", "sentence_bert_config.json",
         "1_Pooling/*",
-    ],
-    cache_dir=sys.argv[1],
-)
+    ]
+
+path = snapshot_download(model, allow_patterns=patterns, cache_dir=sys.argv[1])
 print(f"Model downloaded to: {path}")
 "#;
 
