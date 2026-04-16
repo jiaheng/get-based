@@ -44,7 +44,7 @@ class LensConfig:
     # leak knowledge-base queries to anyone on the local network. Override via
     # LENS_HOST=0.0.0.0 if you explicitly want LAN access.
     host: str = "127.0.0.1"
-    port: int = 8321
+    port: int = 8322
 
     # Data
     data_dir: Path = field(default_factory=_default_data_dir)
@@ -90,7 +90,7 @@ class LensConfig:
 
         return cls(
             host=os.environ.get("LENS_HOST", "127.0.0.1"),
-            port=int(os.environ.get("LENS_PORT", "8321")),
+            port=int(os.environ.get("LENS_PORT", "8322")),
             data_dir=data_dir,
             api_key_file=Path(os.environ.get("LENS_API_KEY_FILE", str(data_dir / "api_key"))),
             collection=os.environ.get("LENS_COLLECTION", "knowledge"),
