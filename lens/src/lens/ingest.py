@@ -118,6 +118,17 @@ def _ingest_walk(config: LensConfig, source: Path, emit_progress: bool = False) 
     total = len(all_files)
     _emit(event="start", total=total)
 
+    # Source-level dedup: re-ingesting the same file would otherwise create
+    # a parallel set of chunks (each gets a fresh uuid4 below). Preempt by
+    # deleting any existing chunks for each source we're about to re-index.
+    # Cheap relative to embedding cost — qdrant filter-delete by payload.
+    for file_path in all_files:
+        rel = str(file_path.relative_to(source.parent if source.is_file() else source))
+        try:
+            store.delete_by_source(rel)
+        except Exception as e:
+            log.debug("Pre-ingest dedup delete failed for %s (likely first ingest): %s", rel, e)
+
     files_seen = 0
     chunks_indexed = 0
     skipped = []

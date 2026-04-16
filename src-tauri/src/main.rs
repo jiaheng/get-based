@@ -241,8 +241,87 @@ struct DocumentInfo {
     chunks: u32,
 }
 
+/// Try to talk to the running lens HTTP server first — that bypasses the
+/// qdrant POSIX flock that a CLI subprocess would fight over. Falls back
+/// to the CLI when the server isn't up (typically right after setup, before
+/// the first start_lens call). Used by stats / delete / clear so they
+/// don't require pause-restart cycles for every render.
+async fn lens_http_get(path: &str) -> Result<serde_json::Value, String> {
+    let key_path = lens::lens_data_dir().join("api_key");
+    let api_key = std::fs::read_to_string(&key_path)
+        .map_err(|e| format!("Read api_key: {}", e))?
+        .trim()
+        .to_string();
+    let url = format!("http://127.0.0.1:8322{}", path);
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("HTTP client init: {}", e))?;
+    let resp = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .send()
+        .await
+        .map_err(|e| format!("HTTP request: {}", e))?;
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {}: {}", resp.status(), resp.text().await.unwrap_or_default()));
+    }
+    resp.json().await.map_err(|e| format!("JSON decode: {}", e))
+}
+
+async fn lens_http_delete(path: &str) -> Result<serde_json::Value, String> {
+    let key_path = lens::lens_data_dir().join("api_key");
+    let api_key = std::fs::read_to_string(&key_path)
+        .map_err(|e| format!("Read api_key: {}", e))?
+        .trim()
+        .to_string();
+    let url = format!("http://127.0.0.1:8322{}", path);
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("HTTP client init: {}", e))?;
+    let resp = client
+        .delete(&url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .send()
+        .await
+        .map_err(|e| format!("HTTP request: {}", e))?;
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {}: {}", resp.status(), resp.text().await.unwrap_or_default()));
+    }
+    resp.json().await.map_err(|e| format!("JSON decode: {}", e))
+}
+
 #[tauri::command]
-async fn get_knowledge_stats() -> Result<KnowledgeStats, String> {
+async fn get_knowledge_stats(lens: tauri::State<'_, LensManager>) -> Result<KnowledgeStats, String> {
+    // Prefer the running server's HTTP endpoint — it shares the qdrant
+    // handle the server already holds, so no flock conflict. Falls back
+    // to the CLI when the server isn't up yet (very early in app lifetime
+    // or right after setup before start_lens fires).
+    let server_running = lens
+        .status()
+        .await
+        .map(|s| s["running"].as_bool().unwrap_or(false))
+        .unwrap_or(false);
+    if server_running {
+        match lens_http_get("/stats").await {
+            Ok(v) => {
+                let documents: Vec<DocumentInfo> = v["documents"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(|d| Some(DocumentInfo {
+                        source: d.get("source")?.as_str()?.into(),
+                        chunks: d.get("chunks")?.as_u64()? as u32,
+                    })).collect())
+                    .unwrap_or_default();
+                return Ok(KnowledgeStats {
+                    total_chunks: v["total_chunks"].as_u64().unwrap_or(0) as u32,
+                    documents,
+                });
+            }
+            Err(e) => log::warn!("HTTP stats failed, falling back to CLI: {}", e),
+        }
+    }
+
     let (stdout, stderr, ok) = lens::run_lens_command(&["stats", "--json"])?;
     if !ok {
         return Err(format!("Stats failed: {}", stderr));
@@ -304,6 +383,29 @@ async fn delete_document(
     source: String,
     lens: tauri::State<'_, LensManager>,
 ) -> Result<u32, String> {
+    // Prefer HTTP path when the server is up (no flock conflict).
+    let server_running = lens
+        .status()
+        .await
+        .map(|s| s["running"].as_bool().unwrap_or(false))
+        .unwrap_or(false);
+    if server_running {
+        // Minimal URL-path encoding — keep / so FastAPI's `:path` matcher
+        // sees the whole relative source path. Encode characters that would
+        // otherwise terminate the path or break the request line.
+        let encoded: String = source.chars().map(|c| match c {
+            ' ' => "%20".to_string(),
+            '?' => "%3F".to_string(),
+            '#' => "%23".to_string(),
+            '%' => "%25".to_string(),
+            _ => c.to_string(),
+        }).collect();
+        let path = format!("/sources/{}", encoded);
+        match lens_http_delete(&path).await {
+            Ok(v) => return Ok(v["deleted_chunks"].as_u64().unwrap_or(0) as u32),
+            Err(e) => log::warn!("HTTP delete failed, falling back to CLI: {}", e),
+        }
+    }
     with_lens_paused(&lens, async {
         let (stdout, stderr, ok) = lens::run_lens_command(&["delete", "--json", &source])?;
         if !ok {
@@ -320,6 +422,17 @@ async fn delete_document(
 /// "Remove all" button in Settings → AI → Local Knowledge Base).
 #[tauri::command]
 async fn clear_knowledge(lens: tauri::State<'_, LensManager>) -> Result<u32, String> {
+    let server_running = lens
+        .status()
+        .await
+        .map(|s| s["running"].as_bool().unwrap_or(false))
+        .unwrap_or(false);
+    if server_running {
+        match lens_http_delete("/sources").await {
+            Ok(v) => return Ok(v["deleted_chunks"].as_u64().unwrap_or(0) as u32),
+            Err(e) => log::warn!("HTTP clear failed, falling back to CLI: {}", e),
+        }
+    }
     with_lens_paused(&lens, async {
         let (stdout, stderr, ok) = lens::run_lens_command(&["clear", "--json", "--yes"])?;
         if !ok {

@@ -93,7 +93,53 @@ def create_app(config: LensConfig) -> FastAPI:
 
     @app.get("/")
     async def root():
-        return {"name": "getbased-lens", "version": "0.2.0", "endpoints": ["/health", "/query"]}
+        return {"name": "getbased-lens", "version": "0.2.0", "endpoints": ["/health", "/query", "/stats", "/sources/{source}"]}
+
+    @app.get("/stats")
+    async def stats_endpoint(authorization: Optional[str] = Header(default=None)):
+        """Per-source chunk counts. Lets the desktop UI poll without
+        spawning a CLI subprocess that fights this server for the qdrant
+        flock."""
+        require_auth(authorization)
+        store = get_store()
+        try:
+            sources = store.list_sources()
+            total = sum(int(s.get("chunks", 0)) for s in sources)
+            return {"total_chunks": total, "documents": sources}
+        except Exception as e:
+            log.exception("Stats failed")
+            raise HTTPException(500, f"Stats failed: {e}")
+
+    @app.delete("/sources/{source:path}")
+    async def delete_source_endpoint(
+        source: str,
+        authorization: Optional[str] = Header(default=None),
+    ):
+        """Delete every chunk for a given source. Same lock-bypass rationale
+        as /stats — the UI's "Remove" button shouldn't have to spawn a CLI
+        subprocess that locks out the running server."""
+        require_auth(authorization)
+        store = get_store()
+        try:
+            deleted = store.delete_by_source(source)
+            return {"deleted_chunks": int(deleted)}
+        except Exception as e:
+            log.exception("Delete failed")
+            raise HTTPException(500, f"Delete failed: {e}")
+
+    @app.delete("/sources")
+    async def clear_endpoint(authorization: Optional[str] = Header(default=None)):
+        """Drop the entire collection. Lock-bypass for the "Remove all"
+        button. Returns the pre-clear count so the UI can show a real
+        toast ("Removed N excerpts")."""
+        require_auth(authorization)
+        store = get_store()
+        try:
+            cleared = store.clear()
+            return {"deleted_chunks": int(cleared)}
+        except Exception as e:
+            log.exception("Clear failed")
+            raise HTTPException(500, f"Clear failed: {e}")
 
     @app.get("/health")
     async def health():
