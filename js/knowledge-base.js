@@ -168,32 +168,21 @@ export async function autoConfigureCustomLens() {
 }
 
 // ─── File ingest (drag & drop + click) ───────────────────────────
+// Uses the Tauri dialog plugin's IPC command directly instead of importing
+// @tauri-apps/plugin-dialog from unpkg. The plugin is a thin wrapper over
+// invoke('plugin:dialog|open', { options }); calling invoke directly avoids
+// a runtime CORS/CSP dependency on unpkg and keeps the dev-mock compatible.
 async function pickFiles() {
   if (!isTauri()) return [];
   try {
-    // Tauri's dialog plugin
-    const { open } = await import('https://unpkg.com/@tauri-apps/plugin-dialog@2/dist/index.js')
-      .catch(() => ({ open: null }));
-    if (!open) {
-      // Fallback: HTML file input. Tauri dialog plugin not loaded.
-      return new Promise((resolve) => {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.multiple = true;
-        input.accept = '.txt,.md,.markdown,.rst,.json,.pdf,.docx';
-        input.onchange = () => {
-          const files = Array.from(input.files || []);
-          resolve(files.map(f => f.path).filter(Boolean));
-        };
-        input.click();
-      });
-    }
-    const selected = await open({
-      multiple: true,
-      directory: false,
-      filters: [
-        { name: 'Documents', extensions: ['txt', 'md', 'markdown', 'rst', 'json', 'pdf', 'docx'] },
-      ],
+    const selected = await invoke('plugin:dialog|open', {
+      options: {
+        multiple: true,
+        directory: false,
+        filters: [
+          { name: 'Documents', extensions: ['txt', 'md', 'markdown', 'rst', 'json', 'pdf', 'docx'] },
+        ],
+      },
     });
     if (!selected) return [];
     return Array.isArray(selected) ? selected : [selected];
@@ -206,12 +195,12 @@ async function pickFiles() {
 async function pickFolder() {
   if (!isTauri()) return null;
   try {
-    const { open } = await import('https://unpkg.com/@tauri-apps/plugin-dialog@2/dist/index.js')
-      .catch(() => ({ open: null }));
-    if (!open) return null;
-    const selected = await open({ directory: true, multiple: false });
+    const selected = await invoke('plugin:dialog|open', {
+      options: { directory: true, multiple: false },
+    });
     return selected || null;
   } catch (e) {
+    console.warn('[KB] folder picker failed:', e);
     return null;
   }
 }

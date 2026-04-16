@@ -12,12 +12,10 @@
 
   const log = (...args) => console.log('%c[tauri-mock]', 'color:#c792ea', ...args);
 
-  const nowSec = () => Math.floor(Date.now() / 1000);
-
   let _mockDocs = [
-    { source: 'vitamin-d-mitochondria.md', chunks: 42, ingested_at: nowSec() - 3600 },
-    { source: 'omega-3-meta-analysis.pdf', chunks: 65, ingested_at: nowSec() - 7200 },
-    { source: 'longevity-notes.md', chunks: 20, ingested_at: nowSec() - 86400 },
+    { source: 'vitamin-d-mitochondria.md', chunks: 42 },
+    { source: 'omega-3-meta-analysis.pdf', chunks: 65 },
+    { source: 'longevity-notes.md', chunks: 20 },
   ];
 
   const stats = () => ({
@@ -66,20 +64,24 @@
         const paths = (args && args.req && args.req.paths) || [];
         return new Promise((resolve) => {
           setTimeout(() => {
+            let chunks = 0;
             for (const p of paths) {
               const name = String(p).split('/').pop() || 'doc.md';
               if (!_mockDocs.find((d) => d.source === name)) {
-                _mockDocs.push({ source: name, chunks: 5 + Math.floor(Math.random() * 30), ingested_at: nowSec() });
+                const c = 5 + Math.floor(Math.random() * 30);
+                _mockDocs.push({ source: name, chunks: c });
+                chunks += c;
               }
             }
-            resolve({ documents_ingested: paths.length, chunks_added: paths.length * 20, errors: [] });
+            resolve({ files_seen: paths.length, chunks_indexed: chunks, skipped: [] });
           }, 1200);
         });
       }
       case 'delete_document': {
         const src = args && args.source;
+        const doc = _mockDocs.find((d) => d.source === src);
         _mockDocs = _mockDocs.filter((d) => d.source !== src);
-        return Promise.resolve(null);
+        return Promise.resolve(doc ? doc.chunks : 0);
       }
 
       // ── Updater ──────────────────────────────────────────────────
