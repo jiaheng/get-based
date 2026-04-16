@@ -126,6 +126,7 @@ fn get_ingest_progress(state: tauri::State<'_, IngestState>) -> Option<IngestPro
 async fn ingest_documents(
     req: IngestRequest,
     state: tauri::State<'_, IngestState>,
+    lens: tauri::State<'_, LensManager>,
 ) -> Result<IngestResult, String> {
     if req.paths.is_empty() {
         return Err("No paths provided".into());
@@ -147,78 +148,85 @@ async fn ingest_documents(
         ..Default::default()
     });
 
-    let mut total = IngestResult {
-        files_seen: 0,
-        chunks_indexed: 0,
-        skipped: vec![],
-    };
+    // Qdrant takes a process-level POSIX file lock on its storage dir, so
+    // the ingest subprocess and the long-running lens server can't both
+    // hold it (second one in fails with "Storage folder already accessed
+    // by another instance"). with_lens_paused stops the server for the
+    // duration of the body and restarts it after, so chat / lens queries
+    // resume once ingest is done.
+    let outcome: Result<IngestResult, String> = with_lens_paused(&lens, async {
+        let mut total = IngestResult {
+            files_seen: 0,
+            chunks_indexed: 0,
+            skipped: vec![],
+        };
 
-    for path in &req.paths {
-        let mut final_line: Option<String> = None;
-        let progress_mutex = &state.progress;
-        let result = lens::run_lens_command_streaming(&["ingest", "--json", path], |line| {
-            // Each stdout line from `lens ingest --json` is JSON. Event-tagged
-            // lines update progress; the lone non-event line at the end is
-            // the IngestResult dict.
-            let parsed: serde_json::Value = match serde_json::from_str(line) {
-                Ok(v) => v,
-                Err(_) => return,
-            };
-            match parsed.get("event").and_then(|v| v.as_str()) {
-                Some("start") => {
-                    let total_files = parsed["total"].as_u64().unwrap_or(0) as u32;
-                    if let Ok(mut p) = progress_mutex.lock() {
-                        if let Some(progress) = p.as_mut() {
-                            progress.total = total_files;
+        for path in &req.paths {
+            let mut final_line: Option<String> = None;
+            let progress_mutex = &state.progress;
+            let result = lens::run_lens_command_streaming(&["ingest", "--json", path], |line| {
+                let parsed: serde_json::Value = match serde_json::from_str(line) {
+                    Ok(v) => v,
+                    Err(_) => return,
+                };
+                match parsed.get("event").and_then(|v| v.as_str()) {
+                    Some("start") => {
+                        let total_files = parsed["total"].as_u64().unwrap_or(0) as u32;
+                        if let Ok(mut p) = progress_mutex.lock() {
+                            if let Some(progress) = p.as_mut() {
+                                progress.total = total_files;
+                            }
                         }
                     }
-                }
-                Some("file") => {
-                    if let Ok(mut p) = progress_mutex.lock() {
-                        if let Some(progress) = p.as_mut() {
-                            progress.current = parsed["index"].as_u64().unwrap_or(0) as u32;
-                            progress.total = parsed["total"].as_u64().unwrap_or(progress.total as u64) as u32;
-                            progress.source = parsed["source"].as_str().unwrap_or("").to_string();
-                            let added = parsed["chunks"].as_u64().unwrap_or(0) as u32;
-                            progress.chunks_so_far = progress.chunks_so_far.saturating_add(added);
+                    Some("file") => {
+                        if let Ok(mut p) = progress_mutex.lock() {
+                            if let Some(progress) = p.as_mut() {
+                                progress.current = parsed["index"].as_u64().unwrap_or(0) as u32;
+                                progress.total = parsed["total"].as_u64().unwrap_or(progress.total as u64) as u32;
+                                progress.source = parsed["source"].as_str().unwrap_or("").to_string();
+                                let added = parsed["chunks"].as_u64().unwrap_or(0) as u32;
+                                progress.chunks_so_far = progress.chunks_so_far.saturating_add(added);
+                            }
                         }
                     }
+                    _ => {
+                        // No event tag → this is the final result line.
+                        final_line = Some(line.to_string());
+                    }
                 }
-                _ => {
-                    // No event tag → this is the final result line.
-                    final_line = Some(line.to_string());
-                }
+            });
+
+            if let Err(e) = result {
+                return Err(format!("Ingest of {} failed: {}", path, e));
             }
-        });
 
-        // Always clear the progress state on exit, success or failure, so the
-        // UI doesn't get stuck showing "indexing N of M" after we're done.
-        if let Err(e) = result {
-            *state.progress.lock().unwrap() = None;
-            return Err(format!("Ingest of {} failed: {}", path, e));
-        }
-
-        let stdout = final_line
-            .ok_or_else(|| format!("Ingest of {} produced no result line", path))?;
-        let parsed: serde_json::Value = serde_json::from_str(stdout.trim())
-            .map_err(|e| format!("Bad ingest JSON: {}", e))?;
-        if let Some(err) = parsed.get("error").and_then(|v| v.as_str()) {
-            *state.progress.lock().unwrap() = None;
-            return Err(format!("Ingest error: {}", err));
-        }
-        total.files_seen += parsed["files_seen"].as_u64().unwrap_or(0) as u32;
-        total.chunks_indexed += parsed["chunks_indexed"].as_u64().unwrap_or(0) as u32;
-        if let Some(skipped) = parsed["skipped"].as_array() {
-            for s in skipped {
-                if let Some(s) = s.as_str() {
-                    total.skipped.push(s.into());
+            let stdout = final_line
+                .ok_or_else(|| format!("Ingest of {} produced no result line", path))?;
+            let parsed: serde_json::Value = serde_json::from_str(stdout.trim())
+                .map_err(|e| format!("Bad ingest JSON: {}", e))?;
+            if let Some(err) = parsed.get("error").and_then(|v| v.as_str()) {
+                return Err(format!("Ingest error: {}", err));
+            }
+            total.files_seen += parsed["files_seen"].as_u64().unwrap_or(0) as u32;
+            total.chunks_indexed += parsed["chunks_indexed"].as_u64().unwrap_or(0) as u32;
+            if let Some(skipped) = parsed["skipped"].as_array() {
+                for s in skipped {
+                    if let Some(s) = s.as_str() {
+                        total.skipped.push(s.into());
+                    }
                 }
             }
         }
-    }
 
+        Ok(total)
+    })
+    .await;
+
+    // Always clear the progress state so the UI doesn't show "indexing N
+    // of M" forever after exit.
     *state.progress.lock().unwrap() = None;
-    Ok(total)
+
+    outcome
 }
 
 #[derive(serde::Serialize)]
@@ -263,28 +271,65 @@ async fn get_knowledge_stats() -> Result<KnowledgeStats, String> {
     })
 }
 
-#[tauri::command]
-async fn delete_document(source: String) -> Result<u32, String> {
-    let (stdout, stderr, ok) = lens::run_lens_command(&["delete", "--json", &source])?;
-    if !ok {
-        return Err(format!("Delete failed: {}", stderr));
+/// Stop the lens server if it's running, run `body`, then restart the server
+/// if it was running before. Wraps any qdrant-mutating subprocess so the
+/// process-level POSIX file lock on Qdrant's storage doesn't conflict
+/// between the long-running server and a one-shot CLI invocation.
+async fn with_lens_paused<F, T>(lens: &LensManager, body: F) -> T
+where
+    F: std::future::Future<Output = T>,
+{
+    let was_running = lens
+        .status()
+        .await
+        .map(|s| s["running"].as_bool().unwrap_or(false))
+        .unwrap_or(false);
+    if was_running {
+        if let Err(e) = lens.stop().await {
+            log::warn!("Failed to stop lens server: {}", e);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     }
-    let parsed: serde_json::Value = serde_json::from_str(stdout.trim())
-        .map_err(|e| format!("Bad delete JSON: {}", e))?;
-    Ok(parsed["deleted_chunks"].as_u64().unwrap_or(0) as u32)
+    let result = body.await;
+    if was_running {
+        if let Err(e) = lens.start().await {
+            log::warn!("Failed to restart lens server: {}", e);
+        }
+    }
+    result
+}
+
+#[tauri::command]
+async fn delete_document(
+    source: String,
+    lens: tauri::State<'_, LensManager>,
+) -> Result<u32, String> {
+    with_lens_paused(&lens, async {
+        let (stdout, stderr, ok) = lens::run_lens_command(&["delete", "--json", &source])?;
+        if !ok {
+            return Err(format!("Delete failed: {}", stderr));
+        }
+        let parsed: serde_json::Value = serde_json::from_str(stdout.trim())
+            .map_err(|e| format!("Bad delete JSON: {}", e))?;
+        Ok(parsed["deleted_chunks"].as_u64().unwrap_or(0) as u32)
+    })
+    .await
 }
 
 /// Drop every chunk from the knowledge base (destructive — for the
 /// "Remove all" button in Settings → AI → Local Knowledge Base).
 #[tauri::command]
-async fn clear_knowledge() -> Result<u32, String> {
-    let (stdout, stderr, ok) = lens::run_lens_command(&["clear", "--json", "--yes"])?;
-    if !ok {
-        return Err(format!("Clear failed: {}", stderr));
-    }
-    let parsed: serde_json::Value = serde_json::from_str(stdout.trim())
-        .map_err(|e| format!("Bad clear JSON: {}", e))?;
-    Ok(parsed["deleted_chunks"].as_u64().unwrap_or(0) as u32)
+async fn clear_knowledge(lens: tauri::State<'_, LensManager>) -> Result<u32, String> {
+    with_lens_paused(&lens, async {
+        let (stdout, stderr, ok) = lens::run_lens_command(&["clear", "--json", "--yes"])?;
+        if !ok {
+            return Err(format!("Clear failed: {}", stderr));
+        }
+        let parsed: serde_json::Value = serde_json::from_str(stdout.trim())
+            .map_err(|e| format!("Bad clear JSON: {}", e))?;
+        Ok(parsed["deleted_chunks"].as_u64().unwrap_or(0) as u32)
+    })
+    .await
 }
 
 // ── Setup commands ─────────────────────────────────────────────────
