@@ -219,70 +219,85 @@ export async function initSync() {
 export async function enableSync({ skipPush = false } = {}) {
   localStorage.setItem(SYNC_STORAGE_KEY, 'true');
   _syncEnabled = true;
+  _appOwnerError = null;
   await initSync();
-  if (evolu && _readyPromise) {
-    await _readyPromise;
-    if (_queryLoaded) await _queryLoaded;
-    if (!skipPush) {
-      await pushAllProfiles();
-    }
-    showNotification('Sync enabled', 'success');
-    renderSyncIndicator();
+  if (!evolu || !_readyPromise) {
+    // initSync bailed before evolu was created — likely an import / module
+    // load failure. Already logged by initSync; surface a toast so the user
+    // doesn't sit staring at a Resolving… spinner.
+    showNotification('Sync failed to initialize. Check console for [sync] errors.', 'error');
+    return;
   }
+  // Race the owner-resolution promise against a 30s ceiling. webkit2gtk
+  // can leave Evolu's appOwner promise pending forever when OPFS or the
+  // SharedWorker can't be acquired — without this race the await blocks
+  // toggleSync's finally block too, leaving the UI stuck.
+  const timeout = new Promise(resolve => setTimeout(() => resolve('__timeout__'), 30000));
+  const result = await Promise.race([_readyPromise.then(() => 'ok'), timeout]);
+  if (result === '__timeout__' || !_appOwner) {
+    const reason = _appOwnerError || 'Evolu owner did not resolve within 30s';
+    showNotification(`Sync init failed: ${reason}`, 'error');
+    return;
+  }
+  if (_queryLoaded) {
+    // Cap query load too — same hang risk
+    await Promise.race([_queryLoaded, new Promise(r => setTimeout(r, 30000))]);
+  }
+  if (!skipPush) {
+    try { await pushAllProfiles(); } catch (e) { console.warn('[sync] initial push failed:', e); }
+  }
+  showNotification('Sync enabled', 'success');
+  renderSyncIndicator();
 }
 
 export async function disableSync() {
-  // Wait for in-flight operations to finish
-  if (_syncing || _pulling) {
-    await new Promise(r => setTimeout(r, 500));
-  }
+  // Flip the persisted flag FIRST, before any awaits. If anything below
+  // hangs (Evolu worker stuck on OPFS / SharedWorker locks — observed in
+  // webkit2gtk), a manual page reload will still see sync as off.
   localStorage.setItem(SYNC_STORAGE_KEY, 'false');
   _syncEnabled = false;
+  _appOwnerError = null;
 
-  // Stop relay probe interval
+  // Stop background timers + reset status (UI feedback before the reload)
   if (_relayProbeInterval) { clearInterval(_relayProbeInterval); _relayProbeInterval = null; }
-
-  // Reset sync status and notify UI
+  clearTimeout(_debounceTimer);
+  clearInterval(_pollInterval);
   Object.assign(_syncStatus, { relay: 'unknown', relayCheckedAt: null, push: 'idle', pushStartedAt: null, pushConfirmedAt: null, pull: 'idle', pullReceivedAt: null, lastError: null });
   for (const fn of _syncStatusListeners) fn(_syncStatus);
   renderSyncIndicator();
 
-  // Clear sync timestamps so fresh pull can happen after re-enable
+  // Clear sync timestamps so a fresh pull can happen after re-enable
   for (let i = localStorage.length - 1; i >= 0; i--) {
     const key = localStorage.key(i);
     if (key && key.endsWith('-sync-ts')) localStorage.removeItem(key);
   }
 
-  // Reset Evolu DB and reload to kill the Worker + release OPFS locks.
-  // resetAppOwner drops all tables (including identity). The page reload
-  // terminates the SharedWorker. On next enableSync, createEvolu sees
-  // dbIsInitialized=false and generates a fresh mnemonic.
+  // Fire-and-forget the Evolu reset. We can't trust this await: if the
+  // worker is hung (the same OPFS/SharedWorker contention that traps
+  // restoreFromMnemonic on webkit2gtk), `resetAppOwner` never resolves
+  // and the user sees the toggle silently do nothing.
+  // The page reload below kills the worker process anyway, so a
+  // half-completed reset is harmless — the new tab boots clean.
   if (evolu) {
     try {
-      await evolu.resetAppOwner({ reload: false });
+      Promise.resolve(evolu.resetAppOwner({ reload: false }))
+        .catch(e => console.warn('[sync] Evolu reset failed (proceeding anyway):', e));
     } catch (e) {
-      console.warn('[sync] Evolu reset failed:', e);
+      console.warn('[sync] Evolu reset threw synchronously:', e);
     }
-    evolu = null;
-    profileQuery = null;
-    _appOwner = null;
-    _readyPromise = null;
-    _queryLoaded = null;
-    clearTimeout(_debounceTimer);
-    clearInterval(_pollInterval);
-    showNotification('Sync disabled — reloading…', 'success');
-    setTimeout(() => window.location.reload(), 500);
-    return;
   }
 
+  // Drop in-memory references so any stray callers see fresh-state behavior
   evolu = null;
   profileQuery = null;
   _appOwner = null;
   _readyPromise = null;
   _queryLoaded = null;
-  clearTimeout(_debounceTimer);
-  clearInterval(_pollInterval);
-  showNotification('Sync disabled', 'success');
+
+  showNotification('Sync disabled — reloading…', 'success');
+  // Reload regardless of whether Evolu cooperated. ~250ms gives the toast
+  // time to render before the page swaps.
+  setTimeout(() => window.location.reload(), 250);
 }
 
 // ═══════════════════════════════════════════════

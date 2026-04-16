@@ -124,7 +124,16 @@ return (async function() {
   assert('Pull calls migrateProfileData', syncSrc.includes('migrateProfileData(state.importedData)'));
   assert('pushAllProfiles pushes all profiles on first enable', syncSrc.includes('async function pushAllProfiles'));
   assert('disableSync clears _appOwner', syncSrc.includes('_appOwner = null'));
-  assert('disableSync waits for in-flight ops', syncSrc.includes('if (_syncing || _pulling)'));
+  // disableSync intentionally NO LONGER waits for in-flight ops or awaits
+  // Evolu reset — both introduced hang risks on webkit2gtk (Evolu worker
+  // stuck on OPFS / SharedWorker locks). The page reload below kills the
+  // worker process anyway. The persisted SYNC_STORAGE_KEY flips before
+  // any await so a hard refresh always sees sync as off.
+  assert('disableSync flips SYNC_STORAGE_KEY before any await',
+    /localStorage\.setItem\(SYNC_STORAGE_KEY,\s*['"]false['"]\)[\s\S]{0,200}_syncEnabled = false/.test(syncSrc));
+  assert('disableSync does not block on Evolu reset (fire-and-forget)',
+    /Promise\.resolve\(evolu\.resetAppOwner/.test(syncSrc),
+    'awaiting resetAppOwner blocks the toggle when Evolu worker is hung');
   assert('disableSync resets Evolu identity for mnemonic regeneration', syncSrc.includes('evolu.resetAppOwner('));
   assert('disableSync reloads page after reset to kill Worker', syncSrc.includes('window.location.reload()'));
   assert('disableSync clears sync timestamps', syncSrc.includes("'-sync-ts'") && syncSrc.indexOf("'-sync-ts'") < restoreIdx);

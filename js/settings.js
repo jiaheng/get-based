@@ -424,22 +424,49 @@ function renderSyncSection() {
 }
 
 let _syncToggling = false;
+let _syncToggleWatchdog = null;
+function _releaseSyncToggle() {
+  _syncToggling = false;
+  if (_syncToggleWatchdog) { clearTimeout(_syncToggleWatchdog); _syncToggleWatchdog = null; }
+}
 async function toggleSync(enabled) {
-  if (_syncToggling) return;
+  if (_syncToggling) {
+    // Don't silently swallow — tell the user their click registered but is
+    // already mid-flight. (If they're hitting this repeatedly, the watchdog
+    // below will release the lock so the next click works.)
+    showNotification('Sync change already in progress…', 'info');
+    return;
+  }
   _syncToggling = true;
+  // Watchdog: if the modal closes by some path that doesn't run our
+  // cleanup (e.g. ESC key, page nav, browser back, JS error), release
+  // the toggle lock after 60s so the next click isn't dead. 60s is
+  // generous — long enough to write down 24 words, short enough to
+  // recover from a wedge before the user gives up.
+  _syncToggleWatchdog = setTimeout(_releaseSyncToggle, 60000);
   if (enabled) {
     showSyncSetupModal();
-    // _syncToggling cleared by closeSyncSetup or syncSetupDone
+    // _syncToggling cleared by closeSyncSetup, syncSetupDone, or watchdog
   } else {
     try {
       _mnemonicCache = null;
       _mnemonicRetries = 0;
       clearTimeout(_mnemonicRetryTimer);
       await disableSync();
+      // disableSync triggers a page reload, but if we're still here render
+      // the disabled state immediately for visual feedback.
+      const el = document.getElementById('sync-section');
+      if (el) el.innerHTML = renderSyncSection();
+    } catch (e) {
+      console.error('[sync] disable failed:', e);
+      showNotification(`Disable failed: ${e?.message || e}`, 'error');
+      // Visually un-stick the toggle by re-rendering — the underlying
+      // localStorage flag is already false (set early in disableSync) so
+      // the toggle will show as off.
       const el = document.getElementById('sync-section');
       if (el) el.innerHTML = renderSyncSection();
     } finally {
-      _syncToggling = false;
+      _releaseSyncToggle();
     }
   }
 }
@@ -493,7 +520,7 @@ async function closeSyncSetup() {
   }
   const el = document.getElementById('sync-section');
   if (el) el.innerHTML = renderSyncSection();
-  _syncToggling = false;
+  _releaseSyncToggle();
 }
 
 let _syncSetupInProgress = false;
@@ -556,7 +583,7 @@ async function syncSetupNew() {
 function syncSetupDone() {
   const overlay = document.getElementById('sync-setup-overlay');
   if (overlay) overlay.classList.remove('show');
-  _syncToggling = false;
+  _releaseSyncToggle();
   const el = document.getElementById('sync-section');
   if (el) el.innerHTML = renderSyncSection();
   loadMnemonic();
