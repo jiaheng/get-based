@@ -343,7 +343,13 @@ export async function restoreFromMnemonic(mnemonic) {
       const key = localStorage.key(i);
       if (key && key.endsWith('-sync-ts')) localStorage.removeItem(key);
     }
-    showNotification('Restored from mnemonic — reloading...', 'success');
+    showNotification('Restored from mnemonic — reloading…', 'success');
+    // Reload so the app re-initializes from the now-restored CRDT identity.
+    // Without this, Evolu pulls remote records in the background but the
+    // running JS keeps using the previous in-memory state, so the user sees
+    // no UI change despite the toast saying "reloading…". Same pattern as
+    // disableSync above.
+    setTimeout(() => window.location.reload(), 500);
     return true;
   } catch (e) {
     console.error('[sync] Restore failed:', e);
