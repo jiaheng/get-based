@@ -5,6 +5,14 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.20.1', date: '2026-04-16', title: 'Bug Fixes',
+    items: [
+      'Custom API key now works after page reload — previously the encrypted blob was sent as the Bearer token, breaking requests until the key was re-entered (#124)',
+      'Context cards (diet, sleep, stress, exercise, light, love, environment, diagnoses) now update on screen immediately after saving, no reload needed (#123)',
+      'Closed SSRF bypass on the legacy /proxy dev-server route — the same-origin guard from #119 now covers both /api/* and /proxy (#119 follow-up)',
+    ]
+  },
+  {
     version: '1.20.0', date: '2026-04-15', title: 'Custom Knowledge Source',
     items: [
       'Connect a RAG knowledge endpoint to your Interpretive Lens — the AI grounds its analysis in your own research, clinical guides, or documents',
