@@ -142,6 +142,21 @@ impl LensManager {
             }
         }
 
+        // Sweep for orphan lens processes from previous Tauri sessions.
+        // Tauri kills the *parent* on dev-server restart but spawned lens
+        // server children get reparented to PID 1 and keep the qdrant
+        // POSIX flock held — leaving every subsequent ingest/delete/clear
+        // in this Tauri session permanently locked out. Drop trait alone
+        // doesn't help because crashed/killed Tauri processes don't run
+        // their destructors.
+        let killed = kill_orphan_lens_processes();
+        if killed > 0 {
+            log::info!("Reaped {} orphan lens process(es) before starting fresh server", killed);
+            // Brief pause so the OS releases the qdrant flock + port before
+            // we spawn the new server.
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+
         // Read config and release lock before spawning
         let (host, port) = {
             let config = self.config.lock().unwrap();
@@ -377,6 +392,58 @@ impl Drop for LensManager {
             let _ = child.wait();
         }
     }
+}
+
+/// Kill any orphan lens server process from a prior Tauri session whose
+/// command line points at our managed venv's lens binary. Returns the
+/// number of processes killed.
+///
+/// Why this is needed: Tauri dev restarts (or crashes) leave spawned lens
+/// children reparented to PID 1. Drop on LensManager only fires when the
+/// process exits cleanly, which it doesn't when the dev runner is killed.
+/// The orphan keeps holding qdrant's exclusive POSIX flock, blocking every
+/// subsequent ingest/delete/clear in the new Tauri session — they all hit
+/// "Storage folder already accessed by another instance".
+///
+/// Match heuristic: any process whose argv contains the absolute path to
+/// our lens binary (lens_bin_path()). That's specific enough to never
+/// touch unrelated `lens` binaries on the user's system.
+fn kill_orphan_lens_processes() -> usize {
+    let our_bin = lens_bin_path();
+    let our_bin_str = match our_bin.to_str() {
+        Some(s) => s,
+        None => return 0,
+    };
+    let our_pid = std::process::id();
+
+    let mut sys = sysinfo::System::new();
+    sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+
+    let mut killed = 0;
+    for (pid, process) in sys.processes() {
+        // Don't accidentally kill ourselves
+        if pid.as_u32() == our_pid {
+            continue;
+        }
+        // Look for our lens binary path in the cmdline (argv).
+        // process.cmd() returns &[OsString] — the argv of the process.
+        let matches = process
+            .cmd()
+            .iter()
+            .any(|arg| arg.to_str().is_some_and(|s| s.contains(our_bin_str)));
+        if !matches {
+            continue;
+        }
+        log::warn!(
+            "Killing orphan lens process pid={} cmd={:?}",
+            pid.as_u32(),
+            process.cmd().iter().take(2).collect::<Vec<_>>()
+        );
+        if process.kill() {
+            killed += 1;
+        }
+    }
+    killed
 }
 
 #[cfg(test)]
