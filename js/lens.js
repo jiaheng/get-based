@@ -670,10 +670,17 @@ export async function handleLensBackendChange(backend) {
   // doesn't have to hit Save before chat can query. Silent — if the
   // engine isn't set up yet, the KB panel will show its setup flow
   // inside the mounted section anyway.
-  if (backend === 'desktop-engine' && !getLensKey() && window.api?.invoke) {
+  //
+  // Unconditional refresh (no `!getLensKey()` guard): after a fresh
+  // setup the engine regenerates api_key, so a stale localStorage key
+  // from a previous install would silently 401 every query. Fetching
+  // every toggle keeps the two in sync cheaply.
+  if (backend === 'desktop-engine' && window.api?.invoke) {
     try {
       const cfg = await window.api.invoke('get_lens_config');
-      if (cfg?.api_key) await saveLensKey(cfg.api_key);
+      if (cfg?.api_key && cfg.api_key !== getLensKey()) {
+        await saveLensKey(cfg.api_key);
+      }
     } catch { /* engine not set up yet — fine, panel handles it */ }
   }
   _rerenderLensSection();
