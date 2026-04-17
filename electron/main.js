@@ -18,9 +18,15 @@
 
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import path from 'node:path';
+import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { SetupManager } from './setup.js';
 import { detectGpu, detectAll } from './gpu.js';
+import {
+  LensManager, runLensCommand, runLensCommandStreaming,
+  lensHttpGet, lensHttpDelete, percentEncodePath,
+} from './lens-manager.js';
+import { apiKeyPath } from './paths.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, '..');
@@ -28,6 +34,11 @@ const isDev = process.env.ELECTRON_DEV === '1';
 
 let mainWindow = null;
 let setupManager = null;
+let lensManager = null;
+// In-flight ingest progress — the renderer polls via get_ingest_progress,
+// matching the Tauri-era IngestState. Reset at the start of every ingest
+// so tail state from a previous call doesn't leak into the UI.
+let ingestProgress = null;
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -121,27 +132,194 @@ ipcMain.handle('plugin:dialog|open', async (_event, args) => {
   return result.filePaths[0];
 });
 
-// ── IPC: lens server + knowledge base (phase 3 stubs) ──────────────
-//
-// These are stubbed until electron/lens-manager.js lands. We register them
-// anyway so the renderer doesn't hit "No handler registered" errors — the
-// stubs return the same shape as the real implementation will, just with
-// empty / not-running values. Real behavior comes in phase 3 of the port.
+// ── IPC: lens sidecar lifecycle ────────────────────────────────────
 
-ipcMain.handle('get_lens_status', async () => ({ running: false }));
-ipcMain.handle('start_lens', async () => { throw new Error('Lens manager not yet ported (phase 3)'); });
-ipcMain.handle('stop_lens', async () => {});
-ipcMain.handle('configure_lens', async () => {});
+function getLensManager() {
+  if (!lensManager) lensManager = new LensManager();
+  return lensManager;
+}
+
+ipcMain.handle('get_lens_status', async () => getLensManager().status());
+ipcMain.handle('start_lens', async () => getLensManager().start());
+ipcMain.handle('stop_lens', async () => getLensManager().stop());
+ipcMain.handle('configure_lens', async (_event, args) => {
+  await getLensManager().configure(args?.config || args || {});
+});
+
+// ── IPC: knowledge base queries ────────────────────────────────────
+//
+// Strategy (ports main.rs):
+//   • Prefer HTTP to the running lens server where possible — bypasses the
+//     qdrant POSIX flock that a CLI subprocess would fight over.
+//   • Fall back to the CLI when the server isn't up (e.g. first-run right
+//     after setup, before start_lens fires).
+//   • For CLI paths that mutate qdrant, wrap in withLensPaused so the
+//     running server temporarily releases the flock.
+
+/// Stop the running lens server, run `body`, restart if it was running.
+/// Mirrors the Rust `with_lens_paused`. 300 ms settle lets the OS drop the
+/// POSIX flock before the CLI subprocess tries to acquire it.
+async function withLensPaused(body) {
+  const mgr = getLensManager();
+  const s = await mgr.status().catch(() => ({ running: false }));
+  const wasRunning = !!s?.running;
+  if (wasRunning) {
+    try { await mgr.stop(); } catch (e) { console.warn('[kb] Failed to stop lens server:', e.message); }
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  try {
+    return await body();
+  } finally {
+    if (wasRunning) {
+      try { await mgr.start(); } catch (e) { console.warn('[kb] Failed to restart lens server:', e.message); }
+    }
+  }
+}
+
+/// Return the local lens server URL + API key for auto-fill into Custom
+/// Knowledge Source. Generates a key on first call via `lens key`.
 ipcMain.handle('get_lens_config', async () => {
-  throw new Error('Lens manager not yet ported (phase 3)');
+  let apiKey;
+  try {
+    apiKey = (await fs.readFile(apiKeyPath(), 'utf8')).trim();
+  } catch {
+    const { stdout, stderr, ok } = await runLensCommand(['key']);
+    if (!ok) throw new Error(`Failed to generate key: ${stderr}`);
+    apiKey = stdout.trim();
+  }
+  return { url: 'http://127.0.0.1:8322/query', api_key: apiKey, top_k: 5 };
 });
-ipcMain.handle('ingest_documents', async () => {
-  throw new Error('Lens manager not yet ported (phase 3)');
+
+ipcMain.handle('get_ingest_progress', async () => ingestProgress);
+
+/// Ingest documents into the local knowledge base. Handles multiple paths;
+/// each is ingested independently and results are summed. Streams the lens
+/// CLI's JSONL output so per-file progress lands in ingestProgress while
+/// the command runs — the frontend polls get_ingest_progress for the
+/// live counter. The final non-event JSON line is the IngestResult.
+ipcMain.handle('ingest_documents', async (_event, args) => {
+  const paths = args?.req?.paths || [];
+  if (!Array.isArray(paths) || paths.length === 0) {
+    throw new Error('No paths provided');
+  }
+  // Reset at the start so a previous run's tail state doesn't leak.
+  ingestProgress = { current: 0, total: 0, source: '', chunks_so_far: 0, started_at_ms: Date.now() };
+
+  try {
+    return await withLensPaused(async () => {
+      const total = { files_seen: 0, chunks_indexed: 0, skipped: [] };
+      for (const p of paths) {
+        let finalLine = null;
+        await runLensCommandStreaming(['ingest', '--json', p], (line) => {
+          let parsed;
+          try { parsed = JSON.parse(line); } catch { return; }
+          const event = parsed?.event;
+          if (event === 'start') {
+            if (ingestProgress) {
+              ingestProgress.total = Number(parsed.total) || 0;
+            }
+          } else if (event === 'file') {
+            if (ingestProgress) {
+              ingestProgress.current = Number(parsed.index) || 0;
+              ingestProgress.total = Number(parsed.total) || ingestProgress.total;
+              ingestProgress.source = String(parsed.source || '');
+              const added = Number(parsed.chunks) || 0;
+              ingestProgress.chunks_so_far += added;
+            }
+          } else {
+            // No event tag → the final result line from lens ingest.
+            finalLine = line;
+          }
+        }).catch((e) => { throw new Error(`Ingest of ${p} failed: ${e.message}`); });
+
+        if (!finalLine) throw new Error(`Ingest of ${p} produced no result line`);
+        let parsed;
+        try { parsed = JSON.parse(finalLine.trim()); }
+        catch (e) { throw new Error(`Bad ingest JSON: ${e.message}`); }
+        if (parsed.error) throw new Error(`Ingest error: ${parsed.error}`);
+        total.files_seen += Number(parsed.files_seen) || 0;
+        total.chunks_indexed += Number(parsed.chunks_indexed) || 0;
+        if (Array.isArray(parsed.skipped)) {
+          for (const s of parsed.skipped) if (typeof s === 'string') total.skipped.push(s);
+        }
+      }
+      return total;
+    });
+  } finally {
+    // Always clear so the UI stops showing "N of M" after exit.
+    ingestProgress = null;
+  }
 });
-ipcMain.handle('get_ingest_progress', async () => null);
-ipcMain.handle('get_knowledge_stats', async () => ({ total_chunks: 0, documents: [] }));
-ipcMain.handle('delete_document', async () => 0);
-ipcMain.handle('clear_knowledge', async () => 0);
+
+ipcMain.handle('get_knowledge_stats', async () => {
+  const mgr = getLensManager();
+  const s = await mgr.status().catch(() => ({ running: false }));
+  if (s?.running) {
+    try {
+      const v = await lensHttpGet('/stats');
+      const documents = Array.isArray(v?.documents)
+        ? v.documents.map((d) => ({ source: String(d.source || ''), chunks: Number(d.chunks) || 0 }))
+        : [];
+      return { total_chunks: Number(v?.total_chunks) || 0, documents };
+    } catch (e) {
+      console.warn('[kb] HTTP stats failed, falling back to CLI:', e.message);
+    }
+  }
+  const { stdout, stderr, ok } = await runLensCommand(['stats', '--json']);
+  if (!ok) throw new Error(`Stats failed: ${stderr}`);
+  let parsed;
+  try { parsed = JSON.parse(stdout.trim()); }
+  catch (e) { throw new Error(`Bad stats JSON: ${e.message}`); }
+  if (parsed.error) throw new Error(parsed.error);
+  const documents = Array.isArray(parsed.documents)
+    ? parsed.documents.map((d) => ({ source: String(d.source || ''), chunks: Number(d.chunks) || 0 }))
+    : [];
+  return { total_chunks: Number(parsed.total_chunks) || 0, documents };
+});
+
+ipcMain.handle('delete_document', async (_event, args) => {
+  const source = args?.source;
+  if (!source) throw new Error('No source provided');
+  const mgr = getLensManager();
+  const s = await mgr.status().catch(() => ({ running: false }));
+  if (s?.running) {
+    try {
+      const v = await lensHttpDelete(`/sources/${percentEncodePath(source)}`);
+      return Number(v?.deleted_chunks) || 0;
+    } catch (e) {
+      console.warn('[kb] HTTP delete failed, falling back to CLI:', e.message);
+    }
+  }
+  return withLensPaused(async () => {
+    const { stdout, stderr, ok } = await runLensCommand(['delete', '--json', source]);
+    if (!ok) throw new Error(`Delete failed: ${stderr}`);
+    let parsed;
+    try { parsed = JSON.parse(stdout.trim()); }
+    catch (e) { throw new Error(`Bad delete JSON: ${e.message}`); }
+    return Number(parsed?.deleted_chunks) || 0;
+  });
+});
+
+ipcMain.handle('clear_knowledge', async () => {
+  const mgr = getLensManager();
+  const s = await mgr.status().catch(() => ({ running: false }));
+  if (s?.running) {
+    try {
+      const v = await lensHttpDelete('/sources');
+      return Number(v?.deleted_chunks) || 0;
+    } catch (e) {
+      console.warn('[kb] HTTP clear failed, falling back to CLI:', e.message);
+    }
+  }
+  return withLensPaused(async () => {
+    const { stdout, stderr, ok } = await runLensCommand(['clear', '--json', '--yes']);
+    if (!ok) throw new Error(`Clear failed: ${stderr}`);
+    let parsed;
+    try { parsed = JSON.parse(stdout.trim()); }
+    catch (e) { throw new Error(`Bad clear JSON: ${e.message}`); }
+    return Number(parsed?.deleted_chunks) || 0;
+  });
+});
 
 // ── IPC: auto-updater (phase 7 stubs) ──────────────────────────────
 
@@ -170,4 +348,15 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   // Standard Electron pattern: quit on all-closed except macOS.
   if (process.platform !== 'darwin') app.quit();
+});
+
+// Kill the lens sidecar on quit so it doesn't leak + hold qdrant's POSIX
+// flock into the next launch. LensManager._tryReapChild + the orphan
+// reaper in killOrphanLensProcesses would recover from a leak, but
+// closing cleanly saves the next-launch user a 500ms settle pause.
+app.on('will-quit', async (event) => {
+  if (!lensManager) return;
+  event.preventDefault();
+  try { await lensManager.stop(); } catch {}
+  app.exit(0);
 });
