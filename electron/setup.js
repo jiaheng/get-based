@@ -75,15 +75,30 @@ export class SetupManager {
     };
   }
 
-  /// User hit Cancel. Flip the flag and SIGKILL the tracked subprocess and
-  /// its direct children — pip spawns python subprocesses that ignore
-  /// SIGTERM on the parent, so we have to walk the tree ourselves.
+  /// User hit Cancel. Flip the flag and kill the tracked subprocess tree.
+  /// pip → python → wheel-builder-gcc is a three-deep tree, and SIGKILL
+  /// on just the pip PID orphans the rest. Linux walks /proc recursively;
+  /// Windows uses `taskkill /F /T` which terminates the whole tree in one
+  /// call.
   async cancel() {
     this._cancelRequested = true;
     const pid = this._currentChildPid;
     if (!pid) return;
-    for (const childPid of await listChildPids(pid)) {
-      try { process.kill(childPid, 'SIGKILL'); } catch {}
+    if (process.platform === 'win32') {
+      // /F force, /T tree. Node's process.kill can't walk the tree on Windows.
+      try {
+        await new Promise((resolve) => {
+          const child = spawn('taskkill', ['/F', '/T', '/PID', String(pid)], { windowsHide: true });
+          child.on('close', resolve);
+          child.on('error', resolve);
+        });
+      } catch {}
+      return;
+    }
+    // Linux/macOS: walk descendants recursively, kill deepest first.
+    const all = await listDescendantPids(pid);
+    for (const descendant of all.reverse()) {
+      try { process.kill(descendant, 'SIGKILL'); } catch {}
     }
     try { process.kill(pid, 'SIGKILL'); } catch {}
   }
@@ -174,9 +189,12 @@ export class SetupManager {
       const expected = await this._fetchExpectedSha256(filename);
       verifySha256(archiveBytes, expected);
     } catch (e) {
-      // Skip-with-warning matches Rust behavior — don't block install on a
-      // transient SHA fetch failure, but log loudly for support triage.
-      console.warn(`[setup] SHA256 verification SKIPPED: ${e.message || e}`);
+      // Skip-with-warning: don't block install on a transient SHA fetch
+      // failure, but make sure the user sees it in the UI. Surfaces via
+      // the phase's `status` slot which the KB setup view renders inline.
+      const msg = `SHA256 verification skipped (${e.message || e}). Archive integrity not verified.`;
+      console.warn(`[setup] ${msg}`);
+      this._setStatusLine(msg);
     }
 
     const tempDir = `${target}.tmp`;
@@ -485,14 +503,30 @@ function verifySha256(data, expectedHex) {
   }
 }
 
-/// List direct child PIDs of `parentPid`. Linux: walk /proc. macOS/Windows:
-/// use `pgrep -P` (available on macOS) / `wmic` fallback. Best-effort — a
-/// failure returns an empty list and we only kill the parent PID itself.
-async function listChildPids(parentPid) {
+/// List every descendant PID of `parentPid` (direct children, grandchildren,
+/// etc.) in breadth-first order. pip → python → wheel-builder is a three-
+/// deep tree; SIGKILL on only the direct child orphans the grandchildren.
+///
+/// Linux: walks /proc. macOS: uses `ps -axo pid,ppid`. Windows handled by
+/// the caller via taskkill /T.
+async function listDescendantPids(rootPid) {
+  const parentToChildren = await buildPpidMap();
+  if (!parentToChildren) return [];
+  const out = [];
+  const queue = [rootPid];
+  while (queue.length) {
+    const pid = queue.shift();
+    const children = parentToChildren.get(pid) || [];
+    for (const c of children) { out.push(c); queue.push(c); }
+  }
+  return out;
+}
+
+async function buildPpidMap() {
   if (process.platform === 'linux') {
     try {
       const entries = await fs.readdir('/proc');
-      const out = [];
+      const map = new Map();
       for (const pidStr of entries) {
         const pid = parseInt(pidStr, 10);
         if (!Number.isFinite(pid)) continue;
@@ -502,14 +536,34 @@ async function listChildPids(parentPid) {
           // spaces and parens; take everything after the final ')'.
           const afterComm = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
           const ppid = parseInt(afterComm[1], 10);
-          if (ppid === parentPid) out.push(pid);
+          if (!map.has(ppid)) map.set(ppid, []);
+          map.get(ppid).push(pid);
         } catch {}
       }
-      return out;
-    } catch { return []; }
+      return map;
+    } catch { return null; }
   }
-  // Best-effort for other platforms — skip until packaging phase adds ps-list.
-  return [];
+  if (process.platform === 'darwin') {
+    return new Promise((resolve) => {
+      const child = spawn('ps', ['-axo', 'pid,ppid'], { windowsHide: true });
+      let out = '';
+      child.stdout.on('data', (c) => { out += c.toString('utf8'); });
+      child.on('close', () => {
+        const map = new Map();
+        for (const line of out.split('\n').slice(1)) {
+          const m = line.trim().match(/^(\d+)\s+(\d+)/);
+          if (!m) continue;
+          const pid = parseInt(m[1], 10);
+          const ppid = parseInt(m[2], 10);
+          if (!map.has(ppid)) map.set(ppid, []);
+          map.get(ppid).push(pid);
+        }
+        resolve(map);
+      });
+      child.on('error', () => resolve(null));
+    });
+  }
+  return null;
 }
 
 /// Copy the bundled lens/ source tree into `target`. For dev, we read from
@@ -523,6 +577,9 @@ async function copyBundledLensSourceTo(target) {
 }
 
 function bundledLensSourcePath() {
+  // Test override — lets integration suites point at a fixture lens tree.
+  // Checked first so it wins regardless of packaged/dev mode.
+  if (process.env.GETBASED_LENS_SOURCE) return process.env.GETBASED_LENS_SOURCE;
   // Packaged app: electron-builder's `extraResources` copies lens/ to
   // process.resourcesPath/lens, outside app.asar so fs can read from it.
   // Dev: fall back to the checked-in lens/ at repo root. process.defaultApp

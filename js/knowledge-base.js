@@ -530,10 +530,16 @@ function _attachDropHandlers() {
     e.preventDefault();
     zone.classList.remove('kb-drop-zone-active');
     if (!isDesktop()) return;
-    // Electron (and Tauri) expose native file paths on dataTransfer.files
-    // via the non-standard `.path` field on each File object.
+    // Electron 32 deprecated File.path — on sandboxed renderers it returns
+    // empty or just the filename, which makes lens silently walk CWD when
+    // it fails to resolve the relative path. webUtils.getPathForFile(file)
+    // is the supported replacement; the preload bridge exposes it as
+    // window.api.getPathForFile.
     const files = Array.from(e.dataTransfer?.files || []);
-    const paths = files.map(f => f.path).filter(Boolean);
+    const getPath = window.api?.getPathForFile;
+    const paths = files
+      .map((f) => (getPath ? getPath(f) : f.path))
+      .filter(Boolean);
     if (paths.length > 0) {
       await runIngest(paths);
     }

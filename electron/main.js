@@ -16,7 +16,7 @@
 //   - Phase 4: renderer JS swaps isTauri() → isDesktop() to talk to these handlers
 //   - Phase 7: electron-updater wiring for check_for_update / install_update
 
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -24,7 +24,7 @@ import { createRequire } from 'node:module';
 import { SetupManager } from './setup.js';
 import { detectGpu, detectAll } from './gpu.js';
 import {
-  LensManager, runLensCommand, runLensCommandStreaming,
+  LensManager, reapOrphanLensProcesses, runLensCommand, runLensCommandStreaming,
   lensHttpGet, lensHttpDelete, percentEncodePath,
 } from './lens-manager.js';
 import { apiKeyPath } from './paths.js';
@@ -66,6 +66,14 @@ function createWindow() {
   });
   mainWindow = win;
 
+  // Expected origin for this window. Anything trying to navigate away from
+  // it gets blocked by the will-navigate handler below — an unguarded
+  // location.href would otherwise take the main window to an attacker
+  // origin, which then inherits our preload bridge + every IPC handler.
+  const expectedOriginPrefix = isDev
+    ? 'http://localhost:8000/'
+    : `file://${path.join(projectRoot, 'index.html')}`;
+
   if (isDev) {
     // Dev mode: talk to the existing Node dev-server at localhost:8000.
     // Same URL the PWA uses, so we get hot-iteration on the frontend
@@ -80,13 +88,41 @@ function createWindow() {
   }
 
   // External links (target=_blank, window.open) open in the user's default
-  // browser instead of spawning extra Electron windows.
+  // browser instead of spawning extra Electron windows. URL scheme is
+  // validated — shell.openExternal will happily launch file:// or
+  // javascript:// or custom handlers, so any renderer XSS would otherwise
+  // pivot to local code execution.
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    openExternalSafe(url);
     return { action: 'deny' };
   });
 
+  // Navigation lock: block attempts to replace the renderer origin.
+  // Internal anchors (target=_self) and the initial load are both allowed;
+  // only cross-origin navigations are denied + handed to the OS browser.
+  win.webContents.on('will-navigate', (event, url) => {
+    if (url.startsWith(expectedOriginPrefix)) return;
+    event.preventDefault();
+    openExternalSafe(url);
+  });
+
   win.on('closed', () => { if (mainWindow === win) mainWindow = null; });
+}
+
+/// Scheme-validated wrapper around shell.openExternal. Rejects
+/// file:, javascript:, vbscript:, data:, and any custom-protocol URL —
+/// only http(s) and mailto round-trip to the OS.
+function openExternalSafe(url) {
+  let parsed;
+  try { parsed = new URL(url); } catch { return; }
+  const allowed = new Set(['http:', 'https:', 'mailto:']);
+  if (!allowed.has(parsed.protocol)) {
+    console.warn(`[main] openExternal blocked for scheme: ${parsed.protocol}`);
+    return;
+  }
+  shell.openExternal(parsed.toString()).catch((e) => {
+    console.warn('[main] shell.openExternal failed:', e?.message || e);
+  });
 }
 
 // ── IPC: setup pipeline ────────────────────────────────────────────
@@ -127,7 +163,18 @@ ipcMain.handle('detect_all_gpus', async () => detectAll());
 
 ipcMain.handle('plugin:dialog|open', async (_event, args) => {
   const options = args?.options || {};
-  const filters = Array.isArray(options.filters) ? options.filters : [];
+  // Coerce filters into the exact shape Electron expects. A renderer sending
+  // filter.name = 1 or extensions = "zip" (string not string[]) would
+  // otherwise crash dialog internals in the main process.
+  const rawFilters = Array.isArray(options.filters) ? options.filters : [];
+  const filters = rawFilters
+    .filter((f) => f && typeof f === 'object')
+    .map((f) => ({
+      name: String(f.name || 'Files'),
+      extensions: (Array.isArray(f.extensions) ? f.extensions : [])
+        .filter((x) => typeof x === 'string')
+        .map((x) => String(x).replace(/^\./, '')),
+    }));
   const properties = [];
   if (options.directory) properties.push('openDirectory');
   else properties.push('openFile');
@@ -208,10 +255,27 @@ ipcMain.handle('get_ingest_progress', async () => ingestProgress);
 /// the command runs — the frontend polls get_ingest_progress for the
 /// live counter. The final non-event JSON line is the IngestResult.
 ipcMain.handle('ingest_documents', async (_event, args) => {
-  const paths = args?.req?.paths || [];
-  if (!Array.isArray(paths) || paths.length === 0) {
+  const rawPaths = args?.req?.paths || [];
+  if (!Array.isArray(rawPaths) || rawPaths.length === 0) {
     throw new Error('No paths provided');
   }
+  // Validate every path up front. Turns silent fall-through (e.g. lens
+  // receiving a relative or non-existent path and walking CWD) into a
+  // clear, actionable error before we spawn any subprocess. realpath
+  // resolves symlinks — a user dragging `evil.zip → /etc/shadow` would
+  // otherwise let lens try to ingest the target without the user
+  // noticing.
+  const paths = [];
+  for (const raw of rawPaths) {
+    if (typeof raw !== 'string' || raw.length === 0) {
+      throw new Error(`Invalid path (empty or non-string): ${JSON.stringify(raw)}`);
+    }
+    let resolved;
+    try { resolved = await fs.realpath(path.resolve(raw)); }
+    catch { throw new Error(`Path does not exist: ${raw}`); }
+    paths.push(resolved);
+  }
+  console.log('[kb] ingest_documents paths:', paths);
   // Reset at the start so a previous run's tail state doesn't leak.
   ingestProgress = { current: 0, total: 0, source: '', chunks_so_far: 0, started_at_ms: Date.now() };
 
@@ -347,6 +411,12 @@ function extractReleaseNotes(raw) {
   return String(raw);
 }
 
+// Cached version of the last successful check. Reused by install_update
+// so we don't have to re-hit the GitHub feed between "user clicked the
+// banner" and "start downloading" — a transient 503 there would otherwise
+// throw "no update available" right after we offered one.
+let lastUpdateCheck = null;
+
 ipcMain.handle('check_for_update', async () => {
   const currentVersion = app.getVersion();
   const empty = {
@@ -363,10 +433,11 @@ ipcMain.handle('check_for_update', async () => {
   if (!app.isPackaged) return empty;
   try {
     const result = await autoUpdater.checkForUpdates();
-    if (!result || !result.updateInfo) return empty;
+    if (!result || !result.updateInfo) { lastUpdateCheck = null; return empty; }
     const info = result.updateInfo;
     // Nothing to offer if the feed's latest version == what we're on.
-    if (info.version === currentVersion) return empty;
+    if (info.version === currentVersion) { lastUpdateCheck = null; return empty; }
+    lastUpdateCheck = info;
     return {
       available: true,
       current_version: currentVersion,
@@ -381,10 +452,13 @@ ipcMain.handle('check_for_update', async () => {
 
 ipcMain.handle('install_update', async () => {
   if (!app.isPackaged) throw new Error('Auto-update is unavailable in dev mode');
-  // Check again to arm the downloader's internal state — calling
-  // downloadUpdate without a prior check is undefined behavior per
-  // electron-updater. The check is cheap; the result is cached.
-  await autoUpdater.checkForUpdates();
+  // Require a prior successful check_for_update. downloadUpdate without
+  // a cached updateInfo in electron-updater's internals is undefined
+  // behavior; the renderer's banner UI always runs check first, so a
+  // missing cache here means the user clicked install on a stale banner.
+  if (!lastUpdateCheck) {
+    throw new Error('No update available. Re-check and try again.');
+  }
   await autoUpdater.downloadUpdate();
   // quitAndInstall restarts the app with the new version. Doesn't
   // resolve — the event loop tears down first.
@@ -393,7 +467,54 @@ ipcMain.handle('install_update', async () => {
 
 // ── App lifecycle ──────────────────────────────────────────────────
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // Inject CSP headers on every response. Packaged builds load index.html
+  // over file:// where same-origin is permissive and there is no server to
+  // set CSP at the transport layer, so we do it here. The policy allows
+  // inline styles (Chart.js legends, some compat shims set `style=`) but
+  // keeps script-src tight to 'self'. connect-src covers provider APIs,
+  // sync relay, and the local lens server. data:/blob: for image imports.
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [
+          "default-src 'self';"
+          + " script-src 'self';"
+          + " style-src 'self' 'unsafe-inline';"
+          + " img-src 'self' data: blob: https:;"
+          + " font-src 'self' data:;"
+          + " connect-src 'self' https: wss: http://localhost:8322 http://127.0.0.1:8322;"
+          + " media-src 'self' blob:;"
+          + " worker-src 'self' blob:;"
+          + " frame-ancestors 'none';"
+          + " object-src 'none';",
+        ],
+      },
+    });
+  });
+
+  // Reap orphan lens processes BEFORE any IPC handler wires up. An abrupt
+  // app quit (SIGKILL, crash, battery cutoff) leaves the spawned lens
+  // server reparented to PID 1, still holding port 8322 + qdrant's POSIX
+  // flock. The LensManager.start() path already reaps, but that only runs
+  // when the renderer calls start_lens — if the renderer hits /health
+  // first via the indicator's auto-check, it sees "Failed to fetch"
+  // against the dead orphan, and no reap ever happens. Launching a reap
+  // pass up front breaks that deadlock.
+  //
+  // 2s timeout so a hung /proc read on a slow disk can't block window
+  // creation indefinitely.
+  try {
+    const killed = await Promise.race([
+      reapOrphanLensProcesses(),
+      new Promise((resolve) => setTimeout(() => resolve(0), 2000)),
+    ]);
+    if (killed > 0) console.log(`[main] Reaped ${killed} orphan lens process(es) at launch`);
+  } catch (e) {
+    console.warn('[main] Launch-time orphan reap failed:', e?.message || e);
+  }
+
   createWindow();
 
   app.on('activate', () => {
@@ -411,9 +532,16 @@ app.on('window-all-closed', () => {
 // flock into the next launch. LensManager._tryReapChild + the orphan
 // reaper in killOrphanLensProcesses would recover from a leak, but
 // closing cleanly saves the next-launch user a 500ms settle pause.
-app.on('will-quit', async (event) => {
-  if (!lensManager) return;
+//
+// 2s hard ceiling on stop() — a stuck lens child must not hang app quit.
+// On the next launch the orphan reaper catches whatever is left alive.
+let quitInProgress = false;
+app.on('will-quit', (event) => {
+  if (!lensManager || quitInProgress) return;
+  quitInProgress = true;
   event.preventDefault();
-  try { await lensManager.stop(); } catch {}
-  app.exit(0);
+  Promise.race([
+    lensManager.stop().catch(() => {}),
+    new Promise((resolve) => setTimeout(resolve, 2000)),
+  ]).finally(() => { app.exit(0); });
 });

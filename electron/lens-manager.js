@@ -54,12 +54,25 @@ function selectedEmbeddingModel() {
 }
 
 /// Env block the lens process inherits. Keeps LENS_DATA_DIR and
-/// LENS_EMBEDDING_MODEL in sync with what setup wrote to disk.
+/// LENS_EMBEDDING_MODEL in sync with what setup wrote to disk. Applies to
+/// both the long-running server (LensManager.start) and one-shot CLI
+/// calls (runLensCommand, runLensCommandStreaming) — consistency matters
+/// because the CLI's `stats`/`delete`/`clear` paths would otherwise see
+/// a different similarity floor than live queries.
 function lensEnv(extra = {}) {
   return {
     ...process.env,
     LENS_DATA_DIR: lensDir(),
     LENS_EMBEDDING_MODEL: selectedEmbeddingModel(),
+    // The lens default (0.55) is calibrated for BGE-M3, where cosine-sim
+    // scores concentrate higher. MiniLM on jargon-heavy corpora tends to
+    // score related-but-tangential chunks in the 0.40-0.55 band, so the
+    // default quietly culls most good matches — a user with 12k+ excerpts
+    // saw ≤2 chunks returned for "vitamin D deficiency". 0.40 is
+    // permissive enough for MiniLM without letting in pure noise
+    // (anything below 0.35 is usually unrelated). Make it user-tunable
+    // via a slider in a follow-up.
+    LENS_SIMILARITY_FLOOR: process.env.LENS_SIMILARITY_FLOOR || '0.4',
     ...extra,
   };
 }
@@ -228,6 +241,24 @@ export class LensManager {
     this._child = null;
     this._startedAt = null;
     this._config = { host: DEFAULT_HOST, port: DEFAULT_PORT, reranker: false };
+    // Serialize start/stop. Two concurrent start() calls would both see
+    // `_child == null`, both spawn, and the second overwrite orphans the
+    // first. Two start/stop pairs overlap the health-loop polling with a
+    // new child. A promise-chain mutex is the smallest viable fix.
+    this._lifecycleMutex = Promise.resolve();
+    // AbortController per start() so stop() can tear down the health loop
+    // immediately instead of letting it run out the full 60s timeout
+    // against a child that's already been killed.
+    this._startAbort = null;
+  }
+
+  /// Run `fn` under the lifecycle mutex. Returns fn's result. If fn
+  /// throws, the chain is reset so the next caller isn't poisoned.
+  _serialize(fn) {
+    const pending = this._lifecycleMutex.then(fn, fn);
+    // Detach errors from the chain; each caller sees its own error.
+    this._lifecycleMutex = pending.then(() => undefined, () => undefined);
+    return pending;
   }
 
   /// Poll the child — if it exited since we last checked, drop our handle
@@ -246,7 +277,10 @@ export class LensManager {
     return null;
   }
 
-  async start() {
+  start() { return this._serialize(() => this._startImpl()); }
+  stop()  { return this._serialize(() => this._stopImpl()); }
+
+  async _startImpl() {
     if (this._child && this._tryReapChild() === null) {
       throw new Error('Lens is already running');
     }
@@ -286,29 +320,43 @@ export class LensManager {
     this._child = child;
     this._startedAt = Date.now();
 
-    // BGE-M3 cold start can take ~30s, wait up to 60s. Health check
-    // polls 1/sec. If the child exits during startup, surface the
-    // crash immediately instead of waiting out the timeout.
-    await sleep(3000);
-    const healthUrl = `http://${host}:${port}/health`;
-    for (let i = 0; i < 60; i++) {
-      const exited = this._tryReapChild();
-      if (exited) {
-        throw new Error(`Lens sidecar exited during startup (code=${exited.code} signal=${exited.signal}). Check logs.`);
+    // AbortController so stop() can short-circuit the health loop below
+    // instead of letting it run out the full 60s after the child dies.
+    const abort = new AbortController();
+    this._startAbort = abort;
+    try {
+      // BGE-M3 cold start can take ~30s, wait up to 60s. Health check
+      // polls 1/sec. If the child exits during startup, surface the
+      // crash immediately instead of waiting out the timeout.
+      await abortableSleep(3000, abort.signal);
+      const healthUrl = `http://${host}:${port}/health`;
+      for (let i = 0; i < 60; i++) {
+        if (abort.signal.aborted) throw new Error('Lens start aborted');
+        const exited = this._tryReapChild();
+        if (exited) {
+          throw new Error(`Lens sidecar exited during startup (code=${exited.code} signal=${exited.signal}). Check logs.`);
+        }
+        try {
+          const ctl = new AbortController();
+          const t = setTimeout(() => ctl.abort(), 2000);
+          const signal = anyAbortSignal(ctl.signal, abort.signal);
+          const resp = await fetch(healthUrl, { signal });
+          clearTimeout(t);
+          if (resp.ok) return;
+        } catch {}
+        await abortableSleep(1000, abort.signal);
       }
-      try {
-        const ctl = new AbortController();
-        const t = setTimeout(() => ctl.abort(), 2000);
-        const resp = await fetch(healthUrl, { signal: ctl.signal });
-        clearTimeout(t);
-        if (resp.ok) return;
-      } catch {}
-      await sleep(1000);
+      throw new Error(`Lens sidecar did not become healthy within 60s at ${healthUrl}`);
+    } finally {
+      if (this._startAbort === abort) this._startAbort = null;
     }
-    throw new Error(`Lens sidecar did not become healthy within 60s at ${healthUrl}`);
   }
 
-  async stop() {
+  async _stopImpl() {
+    // Abort any in-flight start() health loop first — without this, the
+    // loop keeps polling against a child we're about to kill and throws
+    // "did not become healthy" for the caller who did start-then-stop.
+    if (this._startAbort) { try { this._startAbort.abort(); } catch {} }
     const child = this._child;
     if (!child) return;
     this._child = null;
@@ -369,6 +417,12 @@ export class LensManager {
 /// risk OS (Unix sockets + /proc), so we ship full detection there. macOS
 /// and Windows fall back to best-effort (no reap, relies on the app
 /// shutting down cleanly).
+/// Public wrapper so main.js can reap orphans at app launch before the
+/// renderer has had a chance to call start_lens.
+export async function reapOrphanLensProcesses() {
+  return killOrphanLensProcesses();
+}
+
 async function killOrphanLensProcesses() {
   if (process.platform !== 'linux') return 0;
   const ourBin = lensBinPath();
@@ -390,4 +444,29 @@ async function killOrphanLensProcesses() {
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/// Sleep that rejects immediately when `signal` aborts. Used inside the
+/// health-check loop so stop() can tear it down without waiting up to 60s.
+function abortableSleep(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(new Error('aborted')); return; }
+    const t = setTimeout(() => { cleanup(); resolve(); }, ms);
+    const onAbort = () => { clearTimeout(t); cleanup(); reject(new Error('aborted')); };
+    const cleanup = () => signal?.removeEventListener?.('abort', onAbort);
+    signal?.addEventListener?.('abort', onAbort, { once: true });
+  });
+}
+
+/// Merge N AbortSignals into one that fires when any of them does.
+/// Used inside the health-check fetch so both the per-request 2s timer
+/// and the outer stop() abort both cut short the request.
+function anyAbortSignal(...signals) {
+  const ctl = new AbortController();
+  for (const s of signals) {
+    if (!s) continue;
+    if (s.aborted) { ctl.abort(); break; }
+    s.addEventListener('abort', () => ctl.abort(), { once: true });
+  }
+  return ctl.signal;
 }

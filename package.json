@@ -47,7 +47,6 @@
       "js/**/*",
       "vendor/**/*",
       "data/**/*",
-      "api/**/*",
       "package.json",
       "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
       "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}",
@@ -68,9 +67,16 @@
         "filter": [
           "**/*",
           "!build/**",
+          "!dist/**",
+          "!.venv/**",
+          "!.pytest_cache/**",
+          "!.mypy_cache/**",
           "!**/__pycache__/**",
           "!**/*.pyc",
-          "!**/*.egg-info/**"
+          "!**/*.pyo",
+          "!**/*.whl",
+          "!**/*.egg-info/**",
+          "!**/.*"
         ]
       }
     ],
