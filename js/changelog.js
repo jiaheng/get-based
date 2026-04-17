@@ -10,7 +10,7 @@ const CHANGELOG = [
       'Native desktop app for Linux, macOS, and Windows. One-click install — no terminal needed. Auto-updates itself in the background.',
       'Knowledge Base (Settings → AI): one section, two buttons — "On this device" or "External server". The app picks the right on-device engine automatically (the desktop app uses a native backend for speed; the browser uses an in-browser one that works offline). No more guessing.',
       'The AI grounds its answers in whichever engine you choose — no more juggling two settings that did the same thing.',
-      'Multiple libraries (in-browser engine): keep research papers, clinical guides, and personal notes in separate collections and switch between them. Create, rename, switch, delete from Settings.',
+      'Multiple libraries work on both engines now — desktop and in-browser. Keep research papers, clinical guides, and personal notes in separate collections; switch between them from Settings. Chat grounds its answers in whichever library is active.',
       'Document parsers for on-device indexing: PDF, Word, Markdown, plain text, and ZIP archives (which expand inline — each inner doc becomes its own source).',
       'Better retrieval variety — results now span multiple documents instead of piling up on one. Fixes queries like "vitamin D and circadian rhythm and cold exposure" that used to return only vitamin-D chunks.',
       'Inline drop-zone + document list under Settings → AI → Knowledge Base — add, preview, and remove files without leaving Settings.',
