@@ -135,6 +135,12 @@ async function _pollSetupProgress() {
       _setupPollTimer = null;
       if (_setupPushUnsub) { try { _setupPushUnsub(); } catch {} _setupPushUnsub = null; }
       _state.stats = await fetchStats();
+      // Seed a "Default" library so the picker above has something to
+      // show. /libraries auto-creates one on first access, so this is
+      // just a trigger — lens.js re-populates the select from the IPC.
+      try {
+        if (window.loadLensLibraryPicker) window.loadLensLibraryPicker();
+      } catch {}
       showNotification('Knowledge engine ready — drop in your first document.', 'success');
     } else if (phaseTag === 'failed') {
       _state.setupRunning = false;
@@ -787,10 +793,24 @@ export function renderKbDashboardBanner() {
 }
 
 // ─── Window exports ──────────────────────────────────────────────
+/// External refresh hook — lens.js calls this after a library switch
+/// (create / activate / delete) so the desktop-engine stats + doc list
+/// reflect the newly-active library's collection. Fire-and-forget:
+/// errors are logged but don't bubble to the caller.
+async function refreshKnowledgeBase() {
+  try {
+    _state.stats = await fetchStats();
+    _renderSection();
+  } catch (e) {
+    console.warn('[KB] refreshKnowledgeBase failed:', e);
+  }
+}
+
 Object.assign(window, {
   isKnowledgeBaseAvailable,
   renderKnowledgeBaseSection,
   renderKbDashboardBanner,
+  refreshKnowledgeBase,
   handleAddFiles,
   handleAddFolder,
   handleDeleteDocument,

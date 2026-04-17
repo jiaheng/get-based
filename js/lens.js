@@ -381,16 +381,19 @@ subscribeLensStatus(updateLensIndicator);
 // ═══════════════════════════════════════════════
 export function renderCustomLensSection() {
   const cfg = getLensConfig();
-  // Schedule the local-backend init on the next animation frame. The
-  // caller (settings.js or _rerenderLensSection) sets innerHTML with the
-  // string we return, so the #lens-local-stats element doesn't exist yet
-  // at this point. rAF defers until after that assignment paints, at
-  // which point _loadLocalLensStats can populate stats + doc list +
-  // library dropdown + wire the drop handlers. Without this, the panel
-  // opened with backend=in-browser stayed stuck on "Loading…".
-  if (cfg.backend === 'in-browser' && typeof requestAnimationFrame === 'function') {
+  // Schedule on-device init on the next animation frame. The caller
+  // (settings.js or _rerenderLensSection) sets innerHTML with the
+  // string we return, so the #lens-local-stats + #lens-library-select
+  // elements don't exist yet at this point. rAF defers until after
+  // that assignment paints.
+  const isOnDeviceRender =
+    cfg.backend === 'in-browser' || cfg.backend === 'desktop-engine';
+  if (isOnDeviceRender && typeof requestAnimationFrame === 'function') {
     requestAnimationFrame(() => {
-      try { _loadLocalLensStats(); } catch {}
+      try { _loadLibraryPicker(); } catch {}
+      if (cfg.backend === 'in-browser') {
+        try { _loadLocalLensStats(); } catch {}
+      }
     });
   }
   const keySet = !!getLensKey();
@@ -469,10 +472,24 @@ export function renderCustomLensSection() {
       <label for="lens-enabled-toggle" style="font-size:13px;cursor:pointer">Enable Knowledge Source</label>
     </div>
 
-    <div style="margin-top:10px">
-      <label style="font-size:12px;color:var(--text-muted)" for="lens-name-input">Display name</label>
-      <input type="text" class="api-key-input" id="lens-name-input" value="${escapeAttr(cfg.name)}" placeholder="${isBrowser ? 'e.g. My Research Library' : isDesktop ? 'e.g. Desktop Library' : 'e.g. Functional Medicine Library'}" style="margin-top:4px">
+    ${isOnDevice ? `
+    <!-- Library picker — shared between in-browser and desktop-engine.
+         Implementation swaps via handleLibrary* dispatchers. The select is
+         populated lazily after mount because both backends are async. -->
+    <div id="lens-library-picker" style="margin-top:12px">
+      <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px" for="lens-library-select">Library</label>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <select id="lens-library-select" onchange="handleLibraryActivate(this.value)"
+                style="flex:1;min-width:180px;padding:6px 8px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border);border-radius:4px;font-size:13px">
+          <option value="">Loading…</option>
+        </select>
+        <button class="import-btn import-btn-secondary" onclick="handleLibraryNew()" style="font-size:12px;padding:6px 10px" title="New library">+ New</button>
+        <button class="import-btn import-btn-secondary" onclick="handleLibraryRename()" style="font-size:12px;padding:6px 10px" title="Rename active library">Rename</button>
+        <button class="import-btn import-btn-secondary" onclick="handleLibraryDelete()" style="font-size:12px;padding:6px 10px" title="Delete active library">Delete</button>
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Keep different collections separate — research papers, clinical guides, personal notes. Chat grounds its answers in the active library only.</div>
     </div>
+    ` : ''}
 
     <!-- Desktop-engine: delegate the setup + ingest UI to knowledge-base.js.
          That module already handles the first-run phase machine, stats line,
@@ -492,6 +509,13 @@ export function renderCustomLensSection() {
     </div>
 
     <div id="lens-remote-fields" style="${externalFieldsStyle}">
+      <!-- Display name: only meaningful for external-server, which is a
+           remote endpoint rather than a named library. On-device backends
+           derive the chip label from the active library name. -->
+      <div style="margin-top:8px">
+        <label style="font-size:12px;color:var(--text-muted)" for="lens-name-input">Display name</label>
+        <input type="text" class="api-key-input" id="lens-name-input" value="${escapeAttr(cfg.name)}" placeholder="e.g. Functional Medicine Library" style="margin-top:4px">
+      </div>
       <div style="margin-top:8px">
         <label style="font-size:12px;color:var(--text-muted)" for="lens-url-input">Endpoint URL</label>
         <input type="text" class="api-key-input" id="lens-url-input" value="${escapeAttr(cfg.url)}" placeholder="https://your-server.example.com/query" style="margin-top:4px">
@@ -508,19 +532,6 @@ export function renderCustomLensSection() {
     </div>
 
     <div id="lens-local-fields" style="${browserFieldsStyle}">
-      <div id="lens-local-libraries" style="margin-top:10px">
-        <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px" for="lens-local-library-select">Library</label>
-        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-          <select id="lens-local-library-select" onchange="handleLocalLensActivate(this.value)"
-                  style="flex:1;min-width:180px;padding:6px 8px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border);border-radius:4px;font-size:13px">
-            <option value="">Loading…</option>
-          </select>
-          <button class="import-btn import-btn-secondary" onclick="handleLocalLensNewLibrary()" style="font-size:12px;padding:6px 10px" title="New library">+ New</button>
-          <button class="import-btn import-btn-secondary" onclick="handleLocalLensRenameLibrary()" style="font-size:12px;padding:6px 10px" title="Rename active library">Rename</button>
-          <button class="import-btn import-btn-secondary" onclick="handleLocalLensDeleteLibrary()" style="font-size:12px;padding:6px 10px" title="Delete active library">Delete</button>
-        </div>
-        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Separate libraries let you keep different collections — research papers, clinical guides, personal notes — without mixing them. Chat grounds its answers in whichever library is active.</div>
-      </div>
       <div id="lens-local-stats" style="margin-top:10px;padding:10px 14px;background:var(--bg-secondary);border-radius:6px;font-size:13px;color:var(--text-muted)">Loading stats…</div>
       <div id="lens-local-drop"
            role="button" tabindex="0"
@@ -595,7 +606,6 @@ function _updateLensStatusChip() {
 }
 
 export async function handleSaveLensConfig() {
-  const name = (document.getElementById('lens-name-input')?.value || '').trim();
   const topK = Math.max(1, Math.min(10, parseInt(document.getElementById('lens-topk-input')?.value, 10) || 5));
   const enabled = !!document.getElementById('lens-enabled-toggle')?.checked;
   // Backend is set by the pill buttons via handleLensBackendChange and
@@ -603,7 +613,10 @@ export async function handleSaveLensConfig() {
   const backend = getLensConfig().backend || 'in-browser';
 
   if (backend === 'in-browser') {
-    saveLensConfig({ name, enabled, topK, backend });
+    // On-device: display name is auto-derived from active library, not
+    // a user-facing field anymore. Preserve whatever _loadLibraryPicker
+    // last synced.
+    saveLensConfig({ enabled, topK, backend });
     _rerenderLensSection();
     _loadLocalLensStats();
     showNotification('Saved. Your documents stay on this device.', 'success');
@@ -614,7 +627,7 @@ export async function handleSaveLensConfig() {
     // Desktop engine doesn't need URL/key inputs — the Python lens
     // listens on fixed 127.0.0.1:8322 and the API key is generated by
     // the engine itself. Fetch it now so queries work immediately.
-    saveLensConfig({ name, enabled, topK, backend });
+    saveLensConfig({ enabled, topK, backend });
     try {
       if (!getLensKey()) {
         const cfg = await window.api?.invoke?.('get_lens_config');
@@ -629,7 +642,9 @@ export async function handleSaveLensConfig() {
     return;
   }
 
-  // external-server
+  // external-server: only backend where a user-entered display name is
+  // meaningful (it's a remote endpoint, not a named library).
+  const name = (document.getElementById('lens-name-input')?.value || '').trim();
   const url = (document.getElementById('lens-url-input')?.value || '').trim().replace(/\/+$/, '');
   const keyRaw = document.getElementById('lens-key-input')?.value || '';
   const testProbe = (document.getElementById('lens-test-probe-input')?.value || '').trim() || DEFAULT_TEST_PROBE;
@@ -704,19 +719,12 @@ async function _getLocalLens() {
 async function _loadLocalLensStats() {
   const stats = document.getElementById('lens-local-stats');
   const list = document.getElementById('lens-local-doc-list');
-  const librarySelect = document.getElementById('lens-local-library-select');
   if (!stats) return;
   try {
     const lens = await _getLocalLens();
-    // Populate the library picker. Happens on every stats refresh so
-    // create/rename/delete all show their effect without a dedicated
-    // refresh path.
-    if (librarySelect) {
-      const { libraries, activeId } = await lens.listLibraries();
-      librarySelect.innerHTML = libraries.map((l) =>
-        `<option value="${escapeAttr(l.id)}" ${l.id === activeId ? 'selected' : ''}>${escapeHTML(l.name)}</option>`
-      ).join('');
-    }
+    // Library picker is populated by _loadLibraryPicker() at the same
+    // mount point (#lens-library-select) for both backends — no need to
+    // touch it here.
     const s = await lens.getStats();
     if (s.total_chunks === 0) {
       stats.innerHTML = '<span style="color:var(--text-muted)">No documents indexed yet.</span>';
@@ -857,77 +865,194 @@ export function handleLocalLensClear() {
 }
 
 // ── Library management handlers ────────────────────────────────
+//
+// These dispatch per active backend. Both on-device engines (in-browser
+// OPFS and the Python desktop engine) implement the same contract —
+// list/create/activate/rename/delete — so the UI stays identical across
+// environments. external-server has no library concept (it's a remote
+// RAG endpoint), so all handlers no-op there.
 
-export async function handleLocalLensActivate(libraryId) {
+async function _libList() {
+  const cfg = getLensConfig();
+  if (cfg.backend === 'in-browser') {
+    const lens = await _getLocalLens();
+    return lens.listLibraries(); // {libraries, activeId}
+  }
+  if (cfg.backend === 'desktop-engine' && window.api?.invoke) {
+    return window.api.invoke('list_libraries');
+  }
+  return { libraries: [], activeId: '' };
+}
+
+async function _libCreate(name) {
+  const cfg = getLensConfig();
+  if (cfg.backend === 'in-browser') {
+    const lens = await _getLocalLens();
+    const created = await lens.createLibrary(name);
+    await lens.activateLibrary(created.id);
+    return created;
+  }
+  if (cfg.backend === 'desktop-engine' && window.api?.invoke) {
+    const res = await window.api.invoke('create_library', { name });
+    // Activate immediately so the user lands in their new library.
+    if (res?.library?.id) {
+      await window.api.invoke('activate_library', { id: res.library.id });
+    }
+    return res?.library;
+  }
+  throw new Error('Libraries are not supported for this backend');
+}
+
+async function _libActivate(id) {
+  const cfg = getLensConfig();
+  if (cfg.backend === 'in-browser') {
+    const lens = await _getLocalLens();
+    return lens.activateLibrary(id);
+  }
+  if (cfg.backend === 'desktop-engine' && window.api?.invoke) {
+    return window.api.invoke('activate_library', { id });
+  }
+}
+
+async function _libRename(id, name) {
+  const cfg = getLensConfig();
+  if (cfg.backend === 'in-browser') {
+    const lens = await _getLocalLens();
+    return lens.renameLibrary(id, name);
+  }
+  if (cfg.backend === 'desktop-engine' && window.api?.invoke) {
+    return window.api.invoke('rename_library', { id, name });
+  }
+}
+
+async function _libDelete(id) {
+  const cfg = getLensConfig();
+  if (cfg.backend === 'in-browser') {
+    const lens = await _getLocalLens();
+    return lens.deleteLibrary(id);
+  }
+  if (cfg.backend === 'desktop-engine' && window.api?.invoke) {
+    return window.api.invoke('delete_library', { id });
+  }
+}
+
+/// Populate #lens-library-select from the active backend and sync the
+/// stored display name with the active library. Safe to call repeatedly.
+/// Errors (first-run desktop engine, no libraries yet) surface as "No
+/// libraries yet" so the select never stays on the placeholder forever.
+async function _loadLibraryPicker() {
+  const sel = document.getElementById('lens-library-select');
+  try {
+    const { libraries, activeId } = await _libList();
+    // Sync cfg.name with the active library so the status chip reads
+    // the user-visible library name without extra async in render.
+    const active = libraries?.find((l) => l.id === activeId);
+    if (active && getLensConfig().name !== active.name) {
+      saveLensConfig({ name: active.name });
+      _updateLensStatusChip();
+    }
+    if (!sel) return;
+    if (!libraries || libraries.length === 0) {
+      sel.innerHTML = '<option value="">No libraries yet</option>';
+      return;
+    }
+    sel.innerHTML = libraries.map((l) =>
+      `<option value="${escapeAttr(l.id)}" ${l.id === activeId ? 'selected' : ''}>${escapeHTML(l.name)}</option>`
+    ).join('');
+  } catch (e) {
+    if (sel) sel.innerHTML = '<option value="">(engine not ready)</option>';
+  }
+}
+
+export async function handleLibraryActivate(libraryId) {
   if (!libraryId) return;
   try {
-    const lens = await _getLocalLens();
-    const info = await lens.activateLibrary(libraryId);
+    await _libActivate(libraryId);
     clearLensCache(); // stale query cache belongs to the previous library
     updateLensIndicator();
-    showNotification(`Switched to "${info.activeName}".`, 'info');
-    await _loadLocalLensStats();
+    showNotification('Switched library.', 'info');
+    await _loadLibraryPicker();
+    const cfg = getLensConfig();
+    if (cfg.backend === 'in-browser') await _loadLocalLensStats();
+    else if (cfg.backend === 'desktop-engine' && window.refreshKnowledgeBase) {
+      window.refreshKnowledgeBase();
+    }
+    _updateLensStatusChip();
   } catch (e) {
     showNotification(`Couldn't switch library: ${e?.message || e}.`, 'error');
   }
 }
 
-export async function handleLocalLensNewLibrary() {
+export async function handleLibraryNew() {
   const name = (typeof prompt === 'function' ? prompt('Name for the new library?') : '')?.trim();
   if (!name) return;
   try {
-    const lens = await _getLocalLens();
-    const created = await lens.createLibrary(name);
-    // Activate the new library so the user can start ingesting right away.
-    await lens.activateLibrary(created.id);
+    const created = await _libCreate(name);
     clearLensCache();
     updateLensIndicator();
-    showNotification(`Created "${created.name}". Drop documents to index them.`, 'success');
-    await _loadLocalLensStats();
+    showNotification(`Created "${created?.name || name}". Drop documents to index them.`, 'success');
+    await _loadLibraryPicker();
+    const cfg = getLensConfig();
+    if (cfg.backend === 'in-browser') await _loadLocalLensStats();
+    else if (cfg.backend === 'desktop-engine' && window.refreshKnowledgeBase) {
+      window.refreshKnowledgeBase();
+    }
+    _updateLensStatusChip();
   } catch (e) {
     showNotification(`Couldn't create library: ${e?.message || e}.`, 'error');
   }
 }
 
-export async function handleLocalLensRenameLibrary() {
+export async function handleLibraryRename() {
   try {
-    const lens = await _getLocalLens();
-    const { libraries, activeId } = await lens.listLibraries();
+    const { libraries, activeId } = await _libList();
     const active = libraries.find((l) => l.id === activeId);
     const current = active?.name || '';
     const next = (typeof prompt === 'function' ? prompt('Rename library:', current) : '')?.trim();
     if (!next || next === current) return;
-    await lens.renameLibrary(activeId, next);
+    await _libRename(activeId, next);
     showNotification(`Renamed to "${next}".`, 'info');
-    await _loadLocalLensStats();
+    await _loadLibraryPicker();
+    _updateLensStatusChip();
   } catch (e) {
     showNotification(`Couldn't rename library: ${e?.message || e}.`, 'error');
   }
 }
 
-export function handleLocalLensDeleteLibrary() {
+export function handleLibraryDelete() {
   showConfirmDialog('Delete the active library? Every document in it will be removed. This can\'t be undone.', async () => {
     try {
-      const lens = await _getLocalLens();
-      const { libraries, activeId } = await lens.listLibraries();
-      await lens.deleteLibrary(activeId);
+      const { libraries, activeId } = await _libList();
+      if (!activeId) return;
+      await _libDelete(activeId);
       clearLensCache();
       updateLensIndicator();
-      // If that was the last real library, the worker auto-created a new
-      // "My Library" default. Surface that to the user clearly.
       const remaining = libraries.length - 1;
       showNotification(
         remaining === 0
-          ? 'Library deleted. A fresh "My Library" is ready for new documents.'
+          ? 'Library deleted. A fresh one will be created automatically.'
           : 'Library deleted.',
         'info',
       );
-      await _loadLocalLensStats();
+      await _loadLibraryPicker();
+      const cfg = getLensConfig();
+      if (cfg.backend === 'in-browser') await _loadLocalLensStats();
+      else if (cfg.backend === 'desktop-engine' && window.refreshKnowledgeBase) {
+        window.refreshKnowledgeBase();
+      }
+      _updateLensStatusChip();
     } catch (e) {
       showNotification(`Couldn't delete library: ${e?.message || e}.`, 'error');
     }
   });
 }
+
+// Legacy aliases for any outstanding callsites. Safe no-op if handlers
+// are referenced elsewhere (chat, context cards) — these just forward.
+export const handleLocalLensActivate = handleLibraryActivate;
+export const handleLocalLensNewLibrary = handleLibraryNew;
+export const handleLocalLensRenameLibrary = handleLibraryRename;
+export const handleLocalLensDeleteLibrary = handleLibraryDelete;
 
 export function handleToggleLens(checked) {
   saveLensConfig({ enabled: checked });
@@ -986,6 +1111,12 @@ Object.assign(window, {
   handleClearLensCache, handleRemoveLens, updateLensIndicator,
   handleLensBackendChange,
   handleLocalLensDeleteDoc, handleLocalLensClear,
+  // Shared library handlers (dispatch per backend)
+  handleLibraryActivate, handleLibraryNew, handleLibraryRename, handleLibraryDelete,
+  // Called by knowledge-base.js after desktop-engine setup completes, so
+  // the library picker above pops from "engine not ready" to the real list.
+  loadLensLibraryPicker: _loadLibraryPicker,
+  // Legacy aliases — preserved for any stray inline callsites
   handleLocalLensActivate, handleLocalLensNewLibrary,
   handleLocalLensRenameLibrary, handleLocalLensDeleteLibrary,
 });
