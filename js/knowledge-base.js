@@ -135,7 +135,7 @@ async function _pollSetupProgress() {
       _setupPollTimer = null;
       if (_setupPushUnsub) { try { _setupPushUnsub(); } catch {} _setupPushUnsub = null; }
       _state.stats = await fetchStats();
-      showNotification('Local knowledge engine ready', 'success');
+      showNotification('Knowledge engine ready — drop in your first document.', 'success');
     } else if (phaseTag === 'failed') {
       _state.setupRunning = false;
       clearInterval(_setupPollTimer);
@@ -306,13 +306,13 @@ function _phaseLabel(phase) {
   const pct = phase.progress != null ? ` (${Math.round(phase.progress * 100)}%)` : '';
   switch (tag) {
     case 'not_started': return 'Starting…';
-    case 'detecting_gpu': return '🖥️ Detecting GPU…';
-    case 'downloading_python': return `📥 Downloading Python${pct}`;
-    case 'installing_lens': return `📦 Installing engine${pct}`;
-    case 'downloading_onnx_runtime': return `⚡ Downloading ${phase.provider || 'ONNX'} runtime${pct}`;
-    case 'downloading_model': return `🧠 Downloading ${phase.name || 'model'}${pct}`;
-    case 'completed': return '✅ Setup complete';
-    case 'failed': return `❌ Failed: ${phase.error || 'unknown'}`;
+    case 'detecting_gpu': return 'Checking your hardware…';
+    case 'downloading_python': return `Downloading runtime${pct}`;
+    case 'installing_lens': return `Installing engine${pct}`;
+    case 'downloading_onnx_runtime': return `Installing hardware acceleration${pct}`;
+    case 'downloading_model': return `Downloading AI model${pct}`;
+    case 'completed': return 'Setup complete';
+    case 'failed': return `Failed: ${phase.error || 'unknown'}`;
     default: return String(tag);
   }
 }
@@ -453,7 +453,7 @@ async function runIngest(paths) {
       showNotification(
         skipped > 0
           ? `Indexed 0 excerpts from ${result.files_seen} files (${skipped} skipped — unsupported or too short). See list below.`
-          : 'No content found in selected files (try larger documents)',
+          : 'No readable text in those files. They may be empty, image-only scans, or in an unsupported format.',
         'info'
       );
     } else {
@@ -467,7 +467,7 @@ async function runIngest(paths) {
     // Refresh stats
     _state.stats = await fetchStats();
   } catch (e) {
-    showNotification(`Ingest failed: ${e}`, 'error');
+    showNotification(`Couldn't add documents: ${e?.message || e}. Try again, or restart the app if this repeats.`, 'error');
   } finally {
     clearInterval(progressTimer);
     _state.ingesting = false;
@@ -478,7 +478,7 @@ async function runIngest(paths) {
 
 export async function handleDeleteDocument(source) {
   if (!isDesktop()) return;
-  if (!confirm(`Delete "${source}" from your knowledge base? This removes all excerpts indexed from it.`)) {
+  if (!confirm(`Remove "${source}" from your knowledge base? This removes all excerpts indexed from it.`)) {
     return;
   }
   try {
@@ -487,7 +487,7 @@ export async function handleDeleteDocument(source) {
     _state.stats = await fetchStats();
     _renderSection();
   } catch (e) {
-    showNotification(`Delete failed: ${e}`, 'error');
+    showNotification(`Couldn't delete that document: ${e?.message || e}.`, 'error');
   }
 }
 
@@ -507,7 +507,7 @@ export async function handleClearAllDocuments() {
     _state.stats = await fetchStats();
     _renderSection();
   } catch (e) {
-    showNotification(`Clear failed: ${e}`, 'error');
+    showNotification(`Couldn't clear the library: ${e?.message || e}.`, 'error');
   }
 }
 
@@ -616,7 +616,7 @@ function _renderSkippedBlock() {
       ${skipped.length} file${skipped.length !== 1 ? 's' : ''} skipped in last ingest
       <button class="kb-doc-delete" onclick="event.preventDefault();handleDismissSkipped()" aria-label="Dismiss skipped list" title="Dismiss" style="float:right;margin-top:-2px">×</button>
     </summary>
-    <div style="font-size:11px;color:var(--text-muted);margin:8px 0 6px;line-height:1.4">Usually means the file was empty, an unsupported extension, or failed to parse. Rename or convert the files and try again.</div>
+    <div style="font-size:11px;color:var(--text-muted);margin:8px 0 6px;line-height:1.4">They were empty, in a file type we don't read yet, or couldn't be opened. Convert to PDF or Markdown and try again.</div>
     <ul style="list-style:none;padding:0;margin:0">${items}${overflow}</ul>
   </details>`;
 }
@@ -670,13 +670,13 @@ function _innerHtml() {
   if (!_state.setupComplete) {
     return `<div class="ai-provider-panel">
       <div class="ai-provider-desc">
-        Run an AI knowledge engine on your computer. Add your own documents
-        (research papers, clinical guides, notes) and the chat AI will reference
-        them when answering your health questions.
+        Run a local knowledge engine on this computer. Add your own documents —
+        research papers, clinical guides, notes — and the chat AI will ground
+        its answers in them.
       </div>
       <div style="font-size:13px;color:var(--text-muted);margin:10px 0">
-        First-time setup downloads ~3 GB (Python runtime + AI engine + embedding model).
-        Takes 5–15 min. Runs fully offline after.
+        First-time setup downloads about 3 GB and takes 5–15 minutes. After
+        that it works offline.
       </div>
       <button class="import-btn import-btn-primary" onclick="startKbSetup()">
         Set up engine
@@ -728,7 +728,7 @@ function _innerHtml() {
 
     <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border)">
       <button class="import-btn import-btn-primary" onclick="autoConfigureCustomLens()">
-        ⚡ Auto-configure Custom Knowledge Source
+        Use this as my chat knowledge source
       </button>
       <div style="font-size:11px;color:var(--text-muted);margin-top:6px">
         Connects the chat AI to this local engine in one click. After clicking,

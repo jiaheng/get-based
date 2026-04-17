@@ -333,11 +333,11 @@ ipcMain.handle('ingest_documents', async (_event, args) => {
         // actually contained (1 for single files, N for directories).
         filesDone += innerTotalSeen;
 
-        if (!finalLine) throw new Error(`Ingest of ${p} produced no result line`);
+        if (!finalLine) throw new Error(`The knowledge engine didn't return a result for ${p}.`);
         let parsed;
         try { parsed = JSON.parse(finalLine.trim()); }
-        catch (e) { throw new Error(`Bad ingest JSON: ${e.message}`); }
-        if (parsed.error) throw new Error(`Ingest error: ${parsed.error}`);
+        catch (e) { console.error('[kb] ingest JSON parse failed:', finalLine, e); throw new Error('The knowledge engine returned an unexpected response. Try again, or restart the app.'); }
+        if (parsed.error) throw new Error(`The knowledge engine reported: ${parsed.error}`);
         total.files_seen += Number(parsed.files_seen) || 0;
         total.chunks_indexed += Number(parsed.chunks_indexed) || 0;
         if (Array.isArray(parsed.skipped)) {
@@ -367,11 +367,11 @@ ipcMain.handle('get_knowledge_stats', async () => {
     }
   }
   const { stdout, stderr, ok } = await runLensCommand(['stats', '--json']);
-  if (!ok) throw new Error(`Stats failed: ${stderr}`);
+  if (!ok) { console.error('[kb] lens stats exited non-zero:', stderr); throw new Error('Couldn\'t read knowledge base stats.'); }
   let parsed;
   try { parsed = JSON.parse(stdout.trim()); }
-  catch (e) { throw new Error(`Bad stats JSON: ${e.message}`); }
-  if (parsed.error) throw new Error(parsed.error);
+  catch (e) { console.error('[kb] stats JSON parse failed:', stdout, e); throw new Error('The knowledge engine returned an unexpected response.'); }
+  if (parsed.error) throw new Error(`The knowledge engine reported: ${parsed.error}`);
   const documents = Array.isArray(parsed.documents)
     ? parsed.documents.map((d) => ({ source: String(d.source || ''), chunks: Number(d.chunks) || 0 }))
     : [];
@@ -393,10 +393,10 @@ ipcMain.handle('delete_document', async (_event, args) => {
   }
   return withLensPaused(async () => {
     const { stdout, stderr, ok } = await runLensCommand(['delete', '--json', source]);
-    if (!ok) throw new Error(`Delete failed: ${stderr}`);
+    if (!ok) { console.error('[kb] lens delete exited non-zero:', stderr); throw new Error('Couldn\'t delete that document.'); }
     let parsed;
     try { parsed = JSON.parse(stdout.trim()); }
-    catch (e) { throw new Error(`Bad delete JSON: ${e.message}`); }
+    catch (e) { console.error('[kb] delete JSON parse failed:', stdout, e); throw new Error('The knowledge engine returned an unexpected response.'); }
     return Number(parsed?.deleted_chunks) || 0;
   });
 });
@@ -414,10 +414,10 @@ ipcMain.handle('clear_knowledge', async () => {
   }
   return withLensPaused(async () => {
     const { stdout, stderr, ok } = await runLensCommand(['clear', '--json', '--yes']);
-    if (!ok) throw new Error(`Clear failed: ${stderr}`);
+    if (!ok) { console.error('[kb] lens clear exited non-zero:', stderr); throw new Error('Couldn\'t clear the knowledge base.'); }
     let parsed;
     try { parsed = JSON.parse(stdout.trim()); }
-    catch (e) { throw new Error(`Bad clear JSON: ${e.message}`); }
+    catch (e) { console.error('[kb] clear JSON parse failed:', stdout, e); throw new Error('The knowledge engine returned an unexpected response.'); }
     return Number(parsed?.deleted_chunks) || 0;
   });
 });
@@ -484,7 +484,7 @@ ipcMain.handle('install_update', async () => {
   // behavior; the renderer's banner UI always runs check first, so a
   // missing cache here means the user clicked install on a stale banner.
   if (!lastUpdateCheck) {
-    throw new Error('No update available. Re-check and try again.');
+    throw new Error('This update listing is stale. Click "Check for updates" again.');
   }
   await autoUpdater.downloadUpdate();
   // quitAndInstall restarts the app with the new version. Doesn't

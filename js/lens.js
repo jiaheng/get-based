@@ -167,72 +167,62 @@ export async function queryLens(queryHint, opts = {}) {
   if (!hasLens()) return null;
   const cfg = getLensConfig();
   const topK = typeof opts.topK === 'number' ? opts.topK : cfg.topK;
-  if (cfg.backend === 'local-browser') {
-    return _doLocalQuery(topK, cfg.name || 'Local Knowledge Base', queryHint, opts);
-  }
-  return _doQuery(cfg.url, getLensKey(), topK, cfg.name || 'Lens', queryHint, opts);
-}
-
-/// Local backend dispatch. Lazy-imports lens-local.js only when the user
-/// has opted into the browser backend — PWA users on the remote path
-/// don't pay the bundle cost.
-async function _doLocalQuery(topK, sourceName, queryHint, opts = {}) {
-  const profileId = state.currentProfile || 'default';
   const hint = String(queryHint || '').trim();
   if (!hint) return null;
+  if (cfg.backend === 'local-browser') {
+    const sourceName = cfg.name || 'Local Knowledge Base';
+    return queryWithCache('local-browser', sourceName, hint, topK, async () => {
+      const mod = await import('./lens-local.js');
+      const result = await mod.queryLensLocal(hint, { topK });
+      // queryLensLocal returns null if lens-local declines; also coerce
+      // empty results into the canonical {chunks:[], sourceName} shape.
+      if (!result) return [];
+      return result.chunks.map((c) => ({ text: c.text, source: c.source }));
+    });
+  }
+  const url = cfg.url;
+  const key = getLensKey();
+  if (!url || !key) return null;
+  const sourceName = cfg.name || 'Lens';
+  return queryWithCache(url, sourceName, hint, topK, (ctl) => _fetchRemoteChunks(url, key, hint, topK, opts, ctl));
+}
 
-  // Local cache still helps — embedding the query itself is ~8 ms on
-  // WASM and the search is ~10 ms/10k chunks, so a cache hit saves
-  // 20-30 ms per repeat. Matches remote cache TTL + bucketing.
-  const ck = cacheKey('local-browser', topK, profileId, hint);
+/// Shared cache + status envelope for every backend. `fetchFn(abortCtl)`
+/// returns a Promise<chunks[]>; caller shapes its own errors via throw.
+/// Keeping cache + status plumbing here means adding a third backend is
+/// just a third fetchFn — no re-plumbing of observability per call.
+async function queryWithCache(backendKey, sourceName, hint, topK, fetchFn) {
+  const profileId = state.currentProfile || 'default';
+  const ck = cacheKey(backendKey, topK, profileId, hint);
   const cached = cacheGet(ck);
   if (cached) {
-    if (isDebugMode()) console.log('[Lens] (local) cache hit');
+    if (isDebugMode()) console.log('[Lens] cache hit', backendKey);
     updateLensStatus({ state: 'active', lastChunkCount: cached.chunks.length, lastError: null, sourceName });
     return cached;
   }
-
   try {
-    const mod = await import('./lens-local.js');
-    const result = await mod.queryLensLocal(hint, { topK });
-    if (!result) {
-      updateLensStatus({ state: 'active', lastChunkCount: 0, lastError: null, sourceName });
-      return { chunks: [], sourceName };
-    }
-    // Conform to the same shape as remote results so chat.js doesn't care.
-    const normalized = {
-      chunks: result.chunks.map((c) => ({ text: c.text, source: c.source })),
-      sourceName,
-    };
-    cacheSet(ck, normalized);
-    updateLensStatus({ state: 'active', lastChunkCount: normalized.chunks.length, lastError: null, sourceName });
-    return normalized;
+    const rawChunks = await fetchFn();
+    const chunks = Array.isArray(rawChunks) ? rawChunks : [];
+    const result = { chunks, sourceName };
+    cacheSet(ck, result);
+    updateLensStatus({ state: 'active', lastChunkCount: chunks.length, lastError: null, sourceName });
+    return result;
   } catch (e) {
-    const msg = e?.message || 'unknown error';
-    if (isDebugMode()) console.warn('[Lens] (local) query failed:', msg);
+    const msg = (e && e.name === 'AbortError') ? 'timeout' : (e?.message) || 'unknown error';
+    if (isDebugMode()) console.warn('[Lens] query failed:', backendKey, msg);
     updateLensStatus({ state: 'error', lastError: msg });
     return null;
   }
 }
 
-async function _doQuery(url, key, topK, sourceName, queryHint, opts = {}) {
-  const profileId = state.currentProfile || 'default';
-  const hint = String(queryHint || '').trim();
-  if (!hint || !url || !key) return null;
-
-  const ck = cacheKey(url, topK, profileId, hint);
-  const cached = cacheGet(ck);
-  if (cached) {
-    if (isDebugMode()) console.log('[Lens] cache hit');
-    updateLensStatus({ state: 'active', lastChunkCount: cached.chunks.length, lastError: null, sourceName });
-    return cached;
-  }
-
-  const outerSignal = opts.signal;
+/// Remote-server backend — HTTP POST with bearer auth, strict transport
+/// settings (no credentials, no referrer, no redirects). Returns a flat
+/// array of chunks in the shared envelope shape.
+async function _fetchRemoteChunks(url, key, hint, topK, opts) {
+  const outerSignal = opts?.signal;
   const timeoutCtl = new AbortController();
   const timer = setTimeout(() => timeoutCtl.abort(), TIMEOUT_MS);
   const signal = anySignal(outerSignal, timeoutCtl.signal);
-
   try {
     const res = await fetch(url, {
       method: 'POST',
@@ -246,7 +236,6 @@ async function _doQuery(url, key, topK, sourceName, queryHint, opts = {}) {
       referrerPolicy: 'no-referrer',
       redirect: 'error',
     });
-    clearTimeout(timer);
     if (!res.ok) {
       let msg = `HTTP ${res.status}`;
       try { const err = await res.json(); if (err && err.error) msg = String(err.error); } catch {}
@@ -255,19 +244,11 @@ async function _doQuery(url, key, topK, sourceName, queryHint, opts = {}) {
     const text = await res.text();
     if (text.length > MAX_RESPONSE_BYTES) throw new Error(`Response exceeds ${MAX_RESPONSE_BYTES} bytes`);
     const data = JSON.parse(text);
-    const chunks = Array.isArray(data && data.chunks) ? data.chunks.slice(0, MAX_CHUNKS)
-      .map(c => ({ text: String(c && c.text || '').slice(0, 4000), source: c && c.source ? String(c.source).slice(0, 200) : '' }))
-      .filter(c => c.text) : [];
-    const result = { chunks, sourceName };
-    cacheSet(ck, result);
-    updateLensStatus({ state: 'active', lastChunkCount: chunks.length, lastError: null, sourceName });
-    return result;
-  } catch (e) {
+    return Array.isArray(data && data.chunks) ? data.chunks.slice(0, MAX_CHUNKS)
+      .map((c) => ({ text: String(c && c.text || '').slice(0, 4000), source: c && c.source ? String(c.source).slice(0, 200) : '' }))
+      .filter((c) => c.text) : [];
+  } finally {
     clearTimeout(timer);
-    const msg = (e && e.name === 'AbortError') ? 'timeout' : (e && e.message) || 'unknown error';
-    if (isDebugMode()) console.warn('[Lens] query failed:', msg);
-    updateLensStatus({ state: 'error', lastError: msg });
-    return null;
   }
 }
 
@@ -389,24 +370,24 @@ export function renderCustomLensSection() {
     <div class="ai-provider-desc">Connect a knowledge base to ground the AI's analysis in real sources — research papers, clinical guides, or any documents you choose. When enabled, the AI looks up the most relevant excerpts from your library before answering. <a href="/docs/guide/interpretive-lens#custom-knowledge-source-rag" target="_blank" rel="noopener" style="color:var(--accent)">Setup guide &rarr;</a></div>
     <div class="api-key-status" id="lens-status-chip">${statusChip}${lastInfo}</div>
 
-    <div style="margin-top:10px">
-      <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">Backend</label>
+    <fieldset style="margin-top:10px;border:0;padding:0;min-width:0">
+      <legend style="font-size:12px;color:var(--text-muted);margin-bottom:4px;padding:0">Where to run the search</legend>
       <div style="display:flex;gap:14px;flex-wrap:wrap">
         <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
           <input type="radio" name="lens-backend" value="remote" ${!isLocal ? 'checked' : ''} onchange="handleLensBackendChange('remote')">
-          Remote server
+          External server
         </label>
         <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
           <input type="radio" name="lens-backend" value="local-browser" ${isLocal ? 'checked' : ''} onchange="handleLensBackendChange('local-browser')">
-          Browser (local)
+          On this device
         </label>
       </div>
       <div style="font-size:11px;color:var(--text-muted);margin-top:6px">
         ${isLocal
-          ? 'Your documents stay on this device. First-time indexing is slower but queries are instant and work offline.'
-          : 'Connect to a lens server you run (or one run by someone you trust). Fastest for large corpora.'}
+          ? 'Your documents stay on this device. The first time you use it, we download a small AI model (~100 MB); after that it works offline.'
+          : 'Connect to a knowledge server you run (or one run by someone you trust). Fastest for large libraries.'}
       </div>
-    </div>
+    </fieldset>
 
     <div style="margin-top:10px;display:flex;align-items:center;gap:10px">
       <label class="toggle-switch" for="lens-enabled-toggle">
@@ -433,7 +414,7 @@ export function renderCustomLensSection() {
       <div style="margin-top:8px">
         <label style="font-size:12px;color:var(--text-muted)" for="lens-test-probe-input">Test query</label>
         <input type="text" class="api-key-input" id="lens-test-probe-input" value="${escapeAttr(cfg.testProbe || DEFAULT_TEST_PROBE)}" placeholder="${escapeAttr(DEFAULT_TEST_PROBE)}" style="margin-top:4px">
-        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Sent to your endpoint on Save &amp; Test to verify the connection. Pick a query your corpus is likely to have good matches for.</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Sent to your endpoint on Save &amp; Test to verify the connection. Pick a query your documents should have good matches for.</div>
       </div>
     </div>
 
@@ -450,8 +431,8 @@ export function renderCustomLensSection() {
       </div>
       <input type="file" id="lens-local-filepick" multiple style="display:none" accept=".txt,.md,.markdown,.rst,.json,.csv,.log,.pdf,.docx,.zip">
       <div id="lens-local-progress-wrap" style="display:none;margin-top:8px">
-        <progress id="lens-local-progress" value="0" max="100" style="width:100%;height:8px"></progress>
-        <div id="lens-local-progress-text" style="font-size:11px;color:var(--text-muted);margin-top:4px"></div>
+        <progress id="lens-local-progress" value="0" max="100" style="width:100%;height:8px" aria-label="Indexing progress"></progress>
+        <div id="lens-local-progress-text" role="status" aria-live="polite" style="font-size:11px;color:var(--text-muted);margin-top:4px"></div>
       </div>
       <div id="lens-local-doc-list" style="margin-top:10px"></div>
     </div>
@@ -470,8 +451,8 @@ export function renderCustomLensSection() {
 
     <div class="api-key-notice" style="margin-top:12px">
       ${isLocal
-        ? 'Your documents and queries never leave this device. The embedding model runs in a Web Worker; vectors persist in OPFS. First use downloads the model + library over HTTPS; after that the lens works offline.'
-        : 'Your questions are sent directly to the server you configure. Only connect to servers you control or trust. Your key is encrypted at rest on this device.'}
+        ? 'Your documents and questions never leave this device. First use downloads a small AI model (about 100 MB); after that it works offline.'
+        : 'Your questions are sent directly to the server you configure. Only connect to servers you control or trust.'}
     </div>
   </div>`;
 }
@@ -522,7 +503,7 @@ export async function handleSaveLensConfig() {
     saveLensConfig({ name, enabled, topK, backend });
     _rerenderLensSection();
     _loadLocalLensStats();
-    showNotification('Saved. Using browser-local corpus.', 'success');
+    showNotification('Saved. Your documents stay on this device.', 'success');
     return;
   }
 
@@ -572,17 +553,22 @@ export function handleLensBackendChange(backend) {
 /// Populate the local-corpus stats line + doc list + wire the drop handler.
 /// Lazy-imports lens-local.js so remote-only users don't pay the cost.
 /// Idempotent — called on panel render, backend toggle, and after ingest.
-let _localLens = null; // cached so drop / query / delete / clear share one handle
+///
+/// No local cache here: `openLocalLens()` memoizes its own `_ready`
+/// Promise, so repeated `await openLocalLens()` is free. One source of
+/// truth; no drift possible.
+async function _getLocalLens() {
+  const mod = await import('./lens-local.js');
+  return mod.openLocalLens();
+}
+
 async function _loadLocalLensStats() {
   const stats = document.getElementById('lens-local-stats');
   const list = document.getElementById('lens-local-doc-list');
   if (!stats) return;
   try {
-    if (!_localLens) {
-      const mod = await import('./lens-local.js');
-      _localLens = await mod.openLocalLens();
-    }
-    const s = await _localLens.getStats();
+    const lens = await _getLocalLens();
+    const s = await lens.getStats();
     if (s.total_chunks === 0) {
       stats.innerHTML = '<span style="color:var(--text-muted)">No documents indexed yet.</span>';
     } else {
@@ -647,7 +633,7 @@ async function _handleLocalLensIngest(fileList) {
   const bar = document.getElementById('lens-local-progress');
   const textEl = document.getElementById('lens-local-progress-text');
   if (wrap) wrap.style.display = '';
-  if (textEl) textEl.textContent = 'Extracting text from files…';
+  if (textEl) textEl.textContent = 'Reading files…';
 
   // Parse main-thread, hand text to worker (see lens-local-parsers.js for
   // why: module worker can't cleanly import the UMD parser bundles).
@@ -664,31 +650,28 @@ async function _handleLocalLensIngest(fileList) {
     return;
   }
 
-  if (!_localLens) {
-    const mod = await import('./lens-local.js');
-    _localLens = await mod.openLocalLens();
-  }
+  const lens = await _getLocalLens();
   const { subscribeProgress } = await import('./lens-local.js');
   const t0 = performance.now();
   const unsub = subscribeProgress((p) => {
     if (!bar || !textEl) return;
     if (p.stage === 'start') {
       bar.max = p.total;
-      textEl.textContent = `Starting: ${p.total} chunks across ${files.length} files`;
+      textEl.textContent = `Preparing ${p.total} excerpts across ${files.length} file${files.length !== 1 ? 's' : ''}…`;
     } else if (p.stage === 'embed') {
       bar.value = p.index;
       const rate = p.index / ((performance.now() - t0) / 1000);
-      textEl.textContent = `Embedding ${p.index}/${p.total} · ${rate.toFixed(1)}/s · ${p.source}`;
+      textEl.textContent = `Indexing ${p.index}/${p.total} · ${rate.toFixed(1)}/s · ${p.source}`;
     }
   });
   try {
-    const stats = await _localLens.ingest(files);
+    const stats = await lens.ingest(files);
     const dur = ((performance.now() - t0) / 1000).toFixed(1);
-    if (textEl) textEl.textContent = `Ingested ${stats.chunks_indexed} chunks from ${stats.files_seen} files in ${dur} s.`;
+    if (textEl) textEl.textContent = `Indexed ${stats.chunks_indexed} excerpts from ${stats.files_seen} file${stats.files_seen !== 1 ? 's' : ''} in ${dur}s.`;
     showNotification(`Indexed ${stats.chunks_indexed} excerpts from ${stats.files_seen} file${stats.files_seen !== 1 ? 's' : ''}.`, 'success');
   } catch (e) {
-    if (textEl) textEl.textContent = `Ingest failed: ${e.message}`;
-    showNotification(`Ingest failed: ${e.message}`, 'error');
+    if (textEl) textEl.textContent = `Couldn't index: ${e.message || e}`;
+    showNotification(`Couldn't index: ${e.message || e}`, 'error');
   } finally {
     unsub();
     setTimeout(() => { if (wrap) wrap.style.display = 'none'; }, 3000);
@@ -698,34 +681,28 @@ async function _handleLocalLensIngest(fileList) {
 
 export function handleLocalLensDeleteDoc(source) {
   if (!source) return;
-  showConfirmDialog(`Delete "${source}" from your local knowledge base?`, async () => {
-    if (!_localLens) {
-      const mod = await import('./lens-local.js');
-      _localLens = await mod.openLocalLens();
-    }
+  showConfirmDialog(`Remove "${source}" from your knowledge base?`, async () => {
     try {
-      const deleted = await _localLens.deleteDocument(source);
+      const lens = await _getLocalLens();
+      const deleted = await lens.deleteDocument(source);
       showNotification(`Removed ${deleted} excerpt${deleted !== 1 ? 's' : ''}.`, 'success');
       await _loadLocalLensStats();
     } catch (e) {
-      showNotification(`Delete failed: ${e.message}`, 'error');
+      showNotification(`Couldn't delete that document: ${e?.message || e}.`, 'error');
     }
   });
 }
 
 export function handleLocalLensClear() {
-  showConfirmDialog('Clear every document from your local knowledge base? This cannot be undone.', async () => {
-    if (!_localLens) {
-      const mod = await import('./lens-local.js');
-      _localLens = await mod.openLocalLens();
-    }
+  showConfirmDialog('Clear every document from your knowledge base? This can\'t be undone.', async () => {
     try {
-      await _localLens.clear();
+      const lens = await _getLocalLens();
+      await lens.clear();
       clearLensCache(); // stale query cache no longer points at anything real
-      showNotification('Local knowledge base cleared.', 'success');
+      showNotification('Knowledge base cleared.', 'success');
       await _loadLocalLensStats();
     } catch (e) {
-      showNotification(`Clear failed: ${e.message}`, 'error');
+      showNotification(`Couldn't clear the knowledge base: ${e?.message || e}.`, 'error');
     }
   });
 }
@@ -751,22 +728,21 @@ export function handleRemoveLens() {
   // OPFS corpus with the user's indexed documents — leaving that behind
   // after a "Remove" would surprise the user, so we offer to wipe it too.
   const prompt = isLocal
-    ? 'Remove Knowledge Source? Your local config will be deleted AND every document you indexed will be wiped from OPFS. This cannot be undone.'
+    ? 'Remove Knowledge Source? This also deletes every document you indexed on this device. This can\'t be undone.'
     : 'Remove Knowledge Source? Your server URL and API key will be deleted.';
   showConfirmDialog(prompt, async () => {
     await removeLens();
     if (isLocal) {
       // Lazy-import so remote-only users don't pay the cost.
       try {
-        const mod = await import('./lens-local.js');
-        const lens = await mod.openLocalLens();
+        const lens = await _getLocalLens();
         await lens.clear();
       } catch (e) {
         console.warn('[lens] local corpus clear failed:', e);
       }
     }
     _rerenderLensSection();
-    showNotification(isLocal ? 'Lens removed and local corpus cleared' : 'Lens removed', 'info');
+    showNotification(isLocal ? 'Knowledge Source and indexed documents removed.' : 'Knowledge Source removed.', 'info');
   });
 }
 

@@ -31,7 +31,7 @@ export async function checkForUpdate({ silent = false } = {}) {
     return info;
   } catch (e) {
     if (!silent) {
-      showNotification(`Update check failed: ${e}`, 'error');
+      showNotification(`Couldn't check for updates — check your connection and try again.`, 'error');
     }
     console.warn('[Updater]', e);
     return null;
@@ -49,7 +49,7 @@ export async function installUpdateNow() {
     await invoke('install_update');
     // App restarts automatically — won't reach here
   } catch (e) {
-    showNotification(`Install failed: ${e}`, 'error');
+    showNotification('Install failed. Retry, or download the new version manually from github.com/elkimek/get-based/releases.', 'error');
     console.error('[Updater]', e);
     const actionsAgain = banner?.querySelector('.update-banner-actions');
     if (actionsAgain) {
@@ -78,13 +78,13 @@ function showUpdateBanner(info) {
   const html = `
     <div id="getbased-update-banner" data-version="${_esc(info.new_version)}" style="position:fixed;bottom:20px;right:20px;max-width:380px;background:var(--bg-secondary);border:1px solid var(--accent);border-radius:10px;padding:16px;box-shadow:0 8px 30px rgba(0,0,0,0.4);z-index:9000" role="dialog" aria-label="Update available">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <strong style="font-size:14px">Update available: ${_esc(info.new_version)}</strong>
+        <strong style="font-size:14px">getbased ${_esc(info.new_version)} is available</strong>
         <button onclick="dismissUpdateBanner()" aria-label="Dismiss" style="background:none;border:none;color:var(--text-muted);font-size:18px;cursor:pointer;line-height:1">×</button>
       </div>
       <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Current: ${_esc(info.current_version)}</div>
       ${notes ? `<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;max-height:100px;overflow-y:auto;line-height:1.5">${notes}</div>` : ''}
       <div class="update-banner-actions" style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="import-btn import-btn-primary" onclick="installUpdateNow()">Install &amp; Restart</button>
+        <button class="import-btn import-btn-primary" onclick="installUpdateNow()">Install and restart</button>
         <button class="import-btn import-btn-secondary" onclick="skipThisVersion()">Skip this version</button>
       </div>
     </div>`;

@@ -5,16 +5,15 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
-    version: '1.21.0', date: '2026-04-17', title: 'Desktop App + Browser-Local Lens',
+    version: '1.21.0', date: '2026-04-17', title: 'Desktop app + on-device Knowledge Source',
     items: [
-      'Native desktop app: Linux AppImage/deb, macOS DMG, Windows NSIS installer. Same web codebase under an Electron shell — GitHub Releases seeds auto-update, and a managed first-run installer downloads Python + the Lens engine so you don\'t need a system Python',
-      'Browser-local Lens: Custom Knowledge Source now has a Browser (local) backend. Your documents and queries never leave this device — embeddings compute in-process via MiniLM (transformers.js), vectors persist in OPFS. First use downloads the model + library over HTTPS; after that it works offline',
-      'Settings → Custom Knowledge Source has a backend toggle. Remote keeps the URL + Bearer flow. Local shows inline stats + drop-zone + doc list with per-file delete + clear-all',
-      'Retrieval quality: MMR reranker (λ=0.5, 3× oversample) diversifies top-K across documents, fixing queries like "vitamin D and circadian and cold" that previously concentrated on one topic',
-      'Document parsers for browser-local: PDF (pdf.js), DOCX (mammoth), ZIP recursion (JSZip). ZIPs expand inline and each inner doc becomes its own source',
-      'Security hardening throughout the Electron shell: IPC channel allowlist in preload, URL-scheme validation on shell.openExternal, will-navigate lock, Content-Security-Policy injection on every response, 2s quit timeout, install_update no longer re-checks the feed and can\'t be thrown by a transient 503',
-      'Cross-platform polish: Windows uses taskkill /F /T for cancel tree-kill, macOS uses ps -axo for child-process traversal, Linux walks /proc recursively. Drag-drop uses webUtils.getPathForFile (Electron 32 deprecated File.path)',
-      'CI workflow builds all three platforms on tag push or manual dispatch. Signing is optional — missing certs skip the sign step and produce unsigned artifacts that still work for testing',
+      'Native desktop app for Linux, macOS, and Windows. One-click install — no terminal needed. Auto-updates itself in the background.',
+      'On-device Knowledge Source: Settings → Custom Knowledge Source has a new "On this device" option. Add your own documents and the AI grounds its answers in them — everything stays on your device. First use downloads a small AI model (about 100 MB); after that it works offline.',
+      'Document parsers for on-device indexing: PDF, Word, Markdown, plain text, and ZIP archives (which expand inline — each inner doc becomes its own source).',
+      'Better retrieval variety — results now span multiple documents instead of piling up on one. Fixes queries like "vitamin D and circadian rhythm and cold exposure" that used to return only vitamin-D chunks.',
+      'Settings → Custom Knowledge Source has an inline drop-zone + document list when using the on-device option — add, preview, and remove files without leaving Settings.',
+      'Settings → Data → App Updates now has a manual "Check for updates" button for when you don\'t want to wait for the next auto-check.',
+      'Desktop app is hardened for everyday use: installer signing is supported, auto-update goes through GitHub Releases, and the shell is locked down against drive-by navigation.',
     ]
   },
   {

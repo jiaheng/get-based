@@ -182,7 +182,7 @@ export function openSettingsModal(tab) {
 
       <div class="settings-section" id="updates-section">
         <div class="ai-provider-panel">
-          <div class="ai-provider-desc">Get new versions delivered over GitHub Releases. The app checks automatically every 6 hours; use this button to check right now.</div>
+          <div class="ai-provider-desc">New versions install themselves — the app checks every 6 hours. Use this button to check now.</div>
           <div style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
             <button class="import-btn import-btn-secondary" id="check-updates-btn" onclick="handleManualUpdateCheck()">Check for updates</button>
             <span id="update-check-status" style="font-size:12px;color:var(--text-muted)">Current version: ${window.APP_VERSION || '?'}</span>

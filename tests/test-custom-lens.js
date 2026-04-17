@@ -289,7 +289,8 @@ return (async function() {
   console.log('\n20. testLensConnection disabled-toggle flow');
   assert('testLensConnection does not gate on hasLens()', !/function testLensConnection[\s\S]{0,100}if \(!hasLens/.test(lensSrc));
   assert('testLensConnection checks url + key directly', /cfg\.url[\s\S]{0,100}key/.test(lensSrc.split('function testLensConnection')[1] || ''));
-  assert('_doQuery helper exists (factored path)', lensSrc.includes('function _doQuery('));
+  assert('queryWithCache envelope exists (factored cache + status path)', lensSrc.includes('function queryWithCache('));
+  assert('remote backend fetcher extracted', lensSrc.includes('function _fetchRemoteChunks('));
 
   // ─── 21. BUG 3 regression: toggle does not re-render inputs ───
   console.log('\n21. Toggle does not re-render section');
