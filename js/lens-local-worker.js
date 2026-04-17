@@ -76,6 +76,25 @@ self.addEventListener('message', async (e) => {
 // ── Init: load model + open OPFS ───────────────────────────────────
 
 async function handleInit() {
+  // Test hook — `?mock=1` on the worker URL skips the real transformers.js
+  // load + WebGPU probe. Uses a deterministic text-hash stub embedder so
+  // tests/test-lens-local-worker.js can exercise the full message protocol
+  // + OPFS roundtrip in ~50 ms without the ~15s model download. Production
+  // path is unchanged.
+  const params = new URLSearchParams(self.location.search || '');
+  if (params.has('mock')) {
+    _embedder = mockEmbedder;
+    console.log('[lens-local] mock embedder active (test mode)');
+    await openOpfs();
+    await loadCorpusIntoMemory();
+    self.postMessage({
+      type: 'ready',
+      numChunks: _manifest.numChunks,
+      numDocs: _manifest.docs.length,
+    });
+    return;
+  }
+
   // Library loads from jsdelivr — the npm-dist bundle has bare module
   // specifiers (`onnxruntime-web/webgpu` etc.) that browsers can't resolve
   // without a bundler, and jsdelivr auto-rewrites them. Pin @4.1.0 for
@@ -437,4 +456,29 @@ async function writeSync(name, bytes) {
   } finally {
     sync.close();
   }
+}
+
+// ── Test-only: deterministic stub embedder ────────────────────────
+//
+// Text-hash → unit-normalized 384-float vector. Same text always maps to
+// the same vector, different texts to different vectors, so cosine and
+// MMR behave predictably in tests. Returns the shape transformers.js
+// pipelines return: an object with a `.data` Float32Array.
+async function mockEmbedder(text, _opts) {
+  const out = new Float32Array(DIM);
+  let h = 2166136261;
+  const s = String(text);
+  for (let i = 0; i < s.length; i++) {
+    h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  }
+  for (let i = 0; i < DIM; i++) {
+    h = Math.imul(h ^ (h >>> 13), 0x5bd1e995);
+    out[i] = ((h | 0) / 2147483647);
+  }
+  // Unit-normalize so cosine == dot product (matches the real model's output).
+  let norm = 0;
+  for (let i = 0; i < DIM; i++) norm += out[i] * out[i];
+  norm = Math.sqrt(norm) || 1;
+  for (let i = 0; i < DIM; i++) out[i] /= norm;
+  return { data: out };
 }
