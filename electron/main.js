@@ -25,7 +25,7 @@ import { SetupManager } from './setup.js';
 import { detectGpu, detectAll } from './gpu.js';
 import {
   LensManager, reapOrphanLensProcesses, runLensCommand, runLensCommandStreaming,
-  lensHttpGet, lensHttpDelete, percentEncodePath,
+  lensHttpGet, lensHttpDelete, lensHttpPost, lensHttpPatch, percentEncodePath,
 } from './lens-manager.js';
 import { apiKeyPath } from './paths.js';
 
@@ -420,6 +420,66 @@ ipcMain.handle('clear_knowledge', async () => {
     catch (e) { console.error('[kb] clear JSON parse failed:', stdout, e); throw new Error('The knowledge engine returned an unexpected response.'); }
     return Number(parsed?.deleted_chunks) || 0;
   });
+});
+
+// ── IPC: library registry ──────────────────────────────────────────
+//
+// Proxies to the Python lens server's /libraries endpoints. These are
+// HTTP-only — there's no CLI fallback because the server spins them up
+// via the same registry the CLI reads, so as long as the engine is
+// reachable, the operations complete in-process. If the server isn't
+// running, we start it first (start() is idempotent and serialized).
+async function _ensureLensRunning() {
+  const mgr = getLensManager();
+  const s = await mgr.status().catch(() => ({ running: false }));
+  if (s?.running) return;
+  await mgr.start();
+}
+
+ipcMain.handle('list_libraries', async () => {
+  await _ensureLensRunning();
+  const v = await lensHttpGet('/libraries');
+  return {
+    activeId: String(v?.activeId || ''),
+    libraries: Array.isArray(v?.libraries) ? v.libraries.map((l) => ({
+      id: String(l.id || ''),
+      name: String(l.name || ''),
+      createdAt: Number(l.createdAt) || 0,
+    })) : [],
+  };
+});
+
+ipcMain.handle('create_library', async (_event, args) => {
+  const name = (args?.name || '').toString().slice(0, 200);
+  await _ensureLensRunning();
+  const v = await lensHttpPost('/libraries', { name: name || 'Untitled' });
+  return v;
+});
+
+ipcMain.handle('activate_library', async (_event, args) => {
+  const id = (args?.id || '').toString();
+  if (!id) throw new Error('No library id provided');
+  await _ensureLensRunning();
+  const v = await lensHttpPost(`/libraries/${percentEncodePath(id)}/activate`, null);
+  return v;
+});
+
+ipcMain.handle('rename_library', async (_event, args) => {
+  const id = (args?.id || '').toString();
+  const name = (args?.name || '').toString().slice(0, 200);
+  if (!id) throw new Error('No library id provided');
+  if (!name.trim()) throw new Error('Name cannot be empty');
+  await _ensureLensRunning();
+  const v = await lensHttpPatch(`/libraries/${percentEncodePath(id)}`, { name });
+  return v;
+});
+
+ipcMain.handle('delete_library', async (_event, args) => {
+  const id = (args?.id || '').toString();
+  if (!id) throw new Error('No library id provided');
+  await _ensureLensRunning();
+  const v = await lensHttpDelete(`/libraries/${percentEncodePath(id)}`);
+  return v;
 });
 
 // ── IPC: auto-updater ──────────────────────────────────────────────

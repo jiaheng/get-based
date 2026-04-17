@@ -237,6 +237,40 @@ export async function lensHttpDelete(pathSuffix, { timeoutMs = 30000 } = {}) {
   }
 }
 
+/// POST/PATCH share one path — JSON body, bearer-auth, same error handling.
+async function _lensHttpJson(method, pathSuffix, body, timeoutMs) {
+  const apiKey = await readApiKey();
+  const url = `http://${DEFAULT_HOST}:${DEFAULT_PORT}${pathSuffix}`;
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    const resp = await fetch(url, {
+      method,
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        'content-type': 'application/json',
+      },
+      body: body == null ? undefined : JSON.stringify(body),
+      signal: ctl.signal,
+    });
+    if (!resp.ok) {
+      const txt = await resp.text().catch(() => '');
+      throw new Error(`HTTP ${resp.status}: ${redactBearer(txt)}`);
+    }
+    return resp.json();
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+export async function lensHttpPost(pathSuffix, body, { timeoutMs = 10000 } = {}) {
+  return _lensHttpJson('POST', pathSuffix, body, timeoutMs);
+}
+
+export async function lensHttpPatch(pathSuffix, body, { timeoutMs = 10000 } = {}) {
+  return _lensHttpJson('PATCH', pathSuffix, body, timeoutMs);
+}
+
 // ── LensManager class ──────────────────────────────────────────────
 
 export class LensManager {

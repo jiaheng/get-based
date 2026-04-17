@@ -30,6 +30,9 @@ const ALLOWED_INVOKE_CHANNELS = new Set([
   // Knowledge base
   'get_lens_config', 'ingest_documents', 'get_ingest_progress',
   'get_knowledge_stats', 'delete_document', 'clear_knowledge',
+  // Library registry
+  'list_libraries', 'create_library', 'activate_library',
+  'rename_library', 'delete_library',
   // Auto-updater
   'check_for_update', 'install_update',
 ]);
