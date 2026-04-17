@@ -130,15 +130,7 @@ export function openSettingsModal(tab) {
         ${renderPrivacySection()}
       </div>
 
-      ${window.isKnowledgeBaseAvailable && window.isKnowledgeBaseAvailable() ? `
-      <div class="settings-group-title">Local Knowledge Base</div>
-
-      <div class="settings-section" id="knowledge-base-section">
-        ${window.renderKnowledgeBaseSection ? window.renderKnowledgeBaseSection() : ''}
-      </div>
-      ` : ''}
-
-      <div class="settings-group-title">Custom Knowledge Source</div>
+      <div class="settings-group-title">Knowledge Base</div>
 
       <div class="settings-section" id="custom-lens-section">
         ${window.renderCustomLensSection ? window.renderCustomLensSection() : ''}

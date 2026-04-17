@@ -100,8 +100,8 @@ export function showDashboard(data) {
   // ── 2. Onboarding Banner (Step 2) ──
   html += renderOnboardingBanner();
 
-  // ── 2b. Knowledge Base discoverability banner (desktop-only, hidden once set up) ──
-  if (window.renderKbDashboardBanner) html += window.renderKbDashboardBanner();
+  // (KB dashboard banner removed — Knowledge Base is now discoverable via
+  // the unified Settings → AI → Knowledge Base section.)
 
   // ── 3. Interpretive Lens ──
   html += renderInterpretiveLensSection();

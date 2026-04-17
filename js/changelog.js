@@ -5,14 +5,15 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
-    version: '1.21.0', date: '2026-04-17', title: 'Desktop app + on-device Knowledge Source',
+    version: '1.21.0', date: '2026-04-17', title: 'Desktop app + Knowledge Base',
     items: [
       'Native desktop app for Linux, macOS, and Windows. One-click install — no terminal needed. Auto-updates itself in the background.',
-      'On-device Knowledge Source: Settings → Custom Knowledge Source has a new "On this device" option. Add your own documents and the AI grounds its answers in them — everything stays on your device. First use downloads a small AI model (about 100 MB); after that it works offline.',
-      'Multiple libraries: keep different collections separate — research papers, clinical guides, personal notes — and switch between them. Chat grounds its answers in whichever library is active. Create, rename, switch, delete from Settings.',
-      'Document parsers for on-device indexing: PDF, Word, Markdown, plain text, and ZIP archives (which expand inline — each inner doc becomes its own source).',
+      'Knowledge Base (Settings → AI): one section, pick your engine. "In-browser" runs entirely on your device (first use downloads a ~100 MB model, then works offline). "Desktop engine" uses the bundled Python backend when you\'re on the desktop app. "External server" connects to your own RAG endpoint.',
+      'The AI grounds its answers in whichever engine you choose — no more juggling two settings that did the same thing.',
+      'Multiple libraries (in-browser engine): keep research papers, clinical guides, and personal notes in separate collections and switch between them. Create, rename, switch, delete from Settings.',
+      'Document parsers for in-browser indexing: PDF, Word, Markdown, plain text, and ZIP archives (which expand inline — each inner doc becomes its own source).',
       'Better retrieval variety — results now span multiple documents instead of piling up on one. Fixes queries like "vitamin D and circadian rhythm and cold exposure" that used to return only vitamin-D chunks.',
-      'Settings → Custom Knowledge Source has an inline drop-zone + document list when using the on-device option — add, preview, and remove files without leaving Settings.',
+      'Inline drop-zone + document list under Settings → AI → Knowledge Base — add, preview, and remove files without leaving Settings.',
       'Settings → Data → App Updates now has a manual "Check for updates" button for when you don\'t want to wait for the next auto-check.',
       'Desktop app is hardened for everyday use: installer signing is supported, auto-update goes through GitHub Releases, and the shell is locked down against drive-by navigation.',
     ]

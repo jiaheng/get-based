@@ -136,7 +136,9 @@ return (async function() {
   localStorage.removeItem('labcharts-lens-key');
   window.updateKeyCache && window.updateKeyCache('labcharts-lens-key', '');
   assert('hasLens false with nothing', window.hasLens() === false);
-  window.saveLensConfig({ url: 'https://x.com', enabled: false, topK: 5 });
+  // external-server backend — URL + key gate. The default backend post-
+  // unification is in-browser, so we have to opt-in here.
+  window.saveLensConfig({ backend: 'external-server', url: 'https://x.com', enabled: false, topK: 5 });
   window.updateKeyCache && window.updateKeyCache('labcharts-lens-key', 'k');
   assert('hasLens false when disabled', window.hasLens() === false);
   window.saveLensConfig({ enabled: true });

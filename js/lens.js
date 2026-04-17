@@ -14,17 +14,28 @@ const SECRET_KEY = 'labcharts-lens-key';
 // docs, code docs, recipes…) can change it so the test result reflects their
 // actual content instead of always looking like "0 passages returned".
 const DEFAULT_TEST_PROBE = 'vitamin D deficiency supplementation';
-// backend: 'remote'         — POST to URL + Bearer key (today's behavior)
-//          'local-browser'  — in-process MiniLM via js/lens-local.js,
-//                             corpus in OPFS. No server, no network.
-//                             Works offline, slower on WASM but private.
+// Three backends under one UI:
+//   'desktop-engine' — local Python lens server at 127.0.0.1:8322 (Electron
+//                      only; first-run installs Python + model). Fastest,
+//                      handles large corpora. Backend for users who ran
+//                      the engine setup.
+//   'in-browser'     — MiniLM in a Web Worker, vectors in OPFS. Works in
+//                      every browser + Electron. No install, but smaller
+//                      capacity + WASM-slow inference.
+//   'external-server' — user-configured URL + Bearer key. For servers the
+//                       user runs themselves or someone they trust.
+//
+// Legacy names ('remote' → 'external-server', 'local-browser' → 'in-browser')
+// are migrated on read in getLensConfig. Old Electron users whose
+// auto-configure wired a localhost:8322 + bearer key get moved to
+// 'desktop-engine' automatically.
 const DEFAULT_CONFIG = {
   name: '',
   url: '',
   enabled: false,
   topK: 5,
   testProbe: DEFAULT_TEST_PROBE,
-  backend: 'remote',
+  backend: 'in-browser',
 };
 const TIMEOUT_MS = 30000;
 const CACHE_TTL_MS = 5 * 60 * 1000;
@@ -37,8 +48,30 @@ export function getLensConfig() {
   try {
     const raw = localStorage.getItem(CONFIG_KEY);
     if (!raw) return { ...DEFAULT_CONFIG };
-    return { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
+    return migrateLensConfig({ ...DEFAULT_CONFIG, ...JSON.parse(raw) });
   } catch { return { ...DEFAULT_CONFIG }; }
+}
+
+/// Rename/rebucket legacy backend values so users who had browser-local
+/// or external-URL configs from earlier v1.21.0 betas don't see their
+/// lens stop working on upgrade. Heuristic: if backend=remote and url
+/// points at the Python engine's default port, they were using the
+/// auto-configured desktop engine — promote to the new enum value.
+function migrateLensConfig(cfg) {
+  if (cfg.backend === 'remote') {
+    cfg.backend = isDesktopEnginePort(cfg.url) ? 'desktop-engine' : 'external-server';
+  } else if (cfg.backend === 'local-browser') {
+    cfg.backend = 'in-browser';
+  }
+  return cfg;
+}
+
+function isDesktopEnginePort(url) {
+  if (!url) return false;
+  try {
+    const u = new URL(url);
+    return (u.hostname === '127.0.0.1' || u.hostname === 'localhost') && u.port === '8322';
+  } catch { return false; }
 }
 
 export function saveLensConfig(partial) {
@@ -72,21 +105,30 @@ export async function removeLens() {
 export function hasLens() {
   const cfg = getLensConfig();
   if (!cfg.enabled) return false;
-  if (cfg.backend === 'local-browser') {
-    // Local backend needs OPFS + Web Workers AND at least one indexed
-    // chunk. Without the count check, hasLens() would be true on a fresh
+  if (cfg.backend === 'in-browser') {
+    // In-browser needs OPFS + Workers AND at least one indexed chunk.
+    // Without the count check, hasLens() would be true on a fresh
     // install and every chat query would spin the worker pointlessly —
     // the UI indicator would read "active" but `injectLensChunks`
-    // silently no-ops on an empty result. peekLocalCorpusSize reads a
-    // localStorage shadow written by lens-local.js after init / ingest
-    // / delete / clear.
+    // silently no-ops on empty results. peekLocalCorpusSize reads a
+    // localStorage shadow written by lens-local.js after each state
+    // change.
     if (typeof navigator === 'undefined' || !navigator.storage || typeof Worker === 'undefined') return false;
     try {
       const n = Number(localStorage.getItem('labcharts-lens-local-count')) || 0;
       return n > 0;
     } catch { return false; }
   }
-  // Default: remote URL requires a bearer key.
+  if (cfg.backend === 'desktop-engine') {
+    // Desktop engine needs the Electron IPC bridge + the generated API
+    // key. The URL is always 127.0.0.1:8322. We don't require a
+    // pre-fetched chunk count — the Python engine responds to empty
+    // queries with an empty list, which injectLensChunks no-ops on.
+    return typeof window !== 'undefined'
+      && !!window.api?.isDesktop
+      && !!getLensKey();
+  }
+  // external-server: URL + bearer key
   return !!(cfg.url && getLensKey());
 }
 
@@ -169,22 +211,33 @@ export async function queryLens(queryHint, opts = {}) {
   const topK = typeof opts.topK === 'number' ? opts.topK : cfg.topK;
   const hint = String(queryHint || '').trim();
   if (!hint) return null;
-  if (cfg.backend === 'local-browser') {
-    const sourceName = cfg.name || 'Local Knowledge Base';
-    return queryWithCache('local-browser', sourceName, hint, topK, async () => {
+  if (cfg.backend === 'in-browser') {
+    const sourceName = cfg.name || 'Knowledge Base';
+    return queryWithCache('in-browser', sourceName, hint, topK, async () => {
       const mod = await import('./lens-local.js');
       const result = await mod.queryLensLocal(hint, { topK });
-      // queryLensLocal returns null if lens-local declines; also coerce
-      // empty results into the canonical {chunks:[], sourceName} shape.
       if (!result) return [];
       return result.chunks.map((c) => ({ text: c.text, source: c.source }));
     });
   }
+  if (cfg.backend === 'desktop-engine') {
+    const key = getLensKey();
+    if (!key) return null;
+    // Fixed URL: the Python lens always listens on loopback:8322. Same
+    // fetch path as external-server, just hardcoded host/port so users
+    // don't have to configure it.
+    const url = 'http://127.0.0.1:8322/query';
+    const sourceName = cfg.name || 'Desktop Knowledge Base';
+    return queryWithCache('desktop-engine', sourceName, hint, topK,
+      () => _fetchRemoteChunks(url, key, hint, topK, opts));
+  }
+  // external-server
   const url = cfg.url;
   const key = getLensKey();
   if (!url || !key) return null;
   const sourceName = cfg.name || 'Lens';
-  return queryWithCache(url, sourceName, hint, topK, (ctl) => _fetchRemoteChunks(url, key, hint, topK, opts, ctl));
+  return queryWithCache(url, sourceName, hint, topK,
+    () => _fetchRemoteChunks(url, key, hint, topK, opts));
 }
 
 /// Shared cache + status envelope for every backend. `fetchFn(abortCtl)`
@@ -341,11 +394,18 @@ export function renderCustomLensSection() {
     });
   }
   const keySet = !!getLensKey();
-  const isLocal = cfg.backend === 'local-browser';
-  // Connected: backend-dependent. Remote needs URL + key; local only
-  // needs the backend toggle set. Browsers without OPFS / Workers
-  // would hasLens() == false, but that path is already feature-detected.
-  const connected = isLocal || (cfg.url && keySet);
+  const isBrowser = cfg.backend === 'in-browser';
+  const isDesktop = cfg.backend === 'desktop-engine';
+  const isExternal = cfg.backend === 'external-server';
+  const canUseDesktop = typeof window !== 'undefined' && !!window.api?.isDesktop;
+
+  // Connected: backend-dependent.
+  //   in-browser: always "ready" (feature-detected via hasLens elsewhere).
+  //   desktop-engine: needs the Python engine key. hasLens() gates on it.
+  //   external-server: needs URL + key.
+  const connected = isBrowser
+    || (isDesktop && keySet)
+    || (isExternal && cfg.url && keySet);
   const status = getLensStatus();
   const statusChip = !connected
     ? '<span style="color:var(--text-muted)">Not connected</span>'
@@ -360,32 +420,41 @@ export function renderCustomLensSection() {
       ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Last query: ${status.lastChunkCount} excerpt${status.lastChunkCount !== 1 ? 's' : ''}${status.sourceName ? ' from ' + escapeHTML(status.sourceName) : ''}</div>`
       : '';
 
-  // Remote-only fields, hidden when Browser backend is selected. The
-  // radio handler swaps the `display:none` so we don't have to re-render
-  // the whole panel on toggle — preserves scroll position + focus.
-  const remoteFieldsStyle = isLocal ? 'display:none' : '';
-  const localFieldsStyle = isLocal ? '' : 'display:none';
+  // Per-backend field visibility. The radio handler swaps display:none
+  // so we don't have to re-render the whole panel on toggle — preserves
+  // scroll position + focus.
+  const desktopFieldsStyle = isDesktop ? '' : 'display:none';
+  const browserFieldsStyle = isBrowser ? '' : 'display:none';
+  const externalFieldsStyle = isExternal ? '' : 'display:none';
 
   return `<div class="ai-provider-panel">
-    <div class="ai-provider-desc">Connect a knowledge base to ground the AI's analysis in real sources — research papers, clinical guides, or any documents you choose. When enabled, the AI looks up the most relevant excerpts from your library before answering. <a href="/docs/guide/interpretive-lens#custom-knowledge-source-rag" target="_blank" rel="noopener" style="color:var(--accent)">Setup guide &rarr;</a></div>
+    <div class="ai-provider-desc">A Knowledge Base grounds the AI's analysis in real documents you provide — research papers, clinical guides, personal notes. Pick an engine below, add your documents, and the AI references them when answering your questions.</div>
     <div class="api-key-status" id="lens-status-chip">${statusChip}${lastInfo}</div>
 
     <fieldset style="margin-top:10px;border:0;padding:0;min-width:0">
-      <legend style="font-size:12px;color:var(--text-muted);margin-bottom:4px;padding:0">Where to run the search</legend>
+      <legend style="font-size:12px;color:var(--text-muted);margin-bottom:4px;padding:0">Engine</legend>
       <div style="display:flex;gap:14px;flex-wrap:wrap">
+        ${canUseDesktop ? `
         <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
-          <input type="radio" name="lens-backend" value="remote" ${!isLocal ? 'checked' : ''} onchange="handleLensBackendChange('remote')">
-          External server
+          <input type="radio" name="lens-backend" value="desktop-engine" ${isDesktop ? 'checked' : ''} onchange="handleLensBackendChange('desktop-engine')">
+          Desktop (faster, one-time install)
+        </label>
+        ` : ''}
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+          <input type="radio" name="lens-backend" value="in-browser" ${isBrowser ? 'checked' : ''} onchange="handleLensBackendChange('in-browser')">
+          In-browser (no install, works anywhere)
         </label>
         <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
-          <input type="radio" name="lens-backend" value="local-browser" ${isLocal ? 'checked' : ''} onchange="handleLensBackendChange('local-browser')">
-          On this device
+          <input type="radio" name="lens-backend" value="external-server" ${isExternal ? 'checked' : ''} onchange="handleLensBackendChange('external-server')">
+          External server
         </label>
       </div>
       <div style="font-size:11px;color:var(--text-muted);margin-top:6px">
-        ${isLocal
-          ? 'Your documents stay on this device. The first time you use it, we download a small AI model (~100 MB); after that it works offline.'
-          : 'Connect to a knowledge server you run (or one run by someone you trust). Fastest for large libraries.'}
+        ${isDesktop
+          ? 'Runs a native Python engine on this computer. Fastest option; handles large libraries. One-time ~3 GB setup.'
+          : isBrowser
+            ? 'Runs entirely in this browser. No install — first use downloads a small AI model (~100 MB); after that it works offline.'
+            : 'Connect to a knowledge server you run (or one run by someone you trust). For remote or shared setups.'}
       </div>
     </fieldset>
 
@@ -399,10 +468,23 @@ export function renderCustomLensSection() {
 
     <div style="margin-top:10px">
       <label style="font-size:12px;color:var(--text-muted)" for="lens-name-input">Display name</label>
-      <input type="text" class="api-key-input" id="lens-name-input" value="${escapeAttr(cfg.name)}" placeholder="${isLocal ? 'e.g. My Research Library' : 'e.g. Functional Medicine Library'}" style="margin-top:4px">
+      <input type="text" class="api-key-input" id="lens-name-input" value="${escapeAttr(cfg.name)}" placeholder="${isBrowser ? 'e.g. My Research Library' : isDesktop ? 'e.g. Desktop Library' : 'e.g. Functional Medicine Library'}" style="margin-top:4px">
     </div>
 
-    <div id="lens-remote-fields" style="${remoteFieldsStyle}">
+    <!-- Desktop-engine: delegate the setup + ingest UI to knowledge-base.js.
+         That module already handles the first-run phase machine, stats line,
+         drop zone, doc list, and progress streaming. Mounting it here keeps
+         one UX surface — the user never thinks about "which panel is this" —
+         while the implementation stays in its natural home. -->
+    <div id="lens-desktop-fields" style="${desktopFieldsStyle}">
+      <div id="lens-desktop-kb-mount" style="margin-top:8px">
+        ${isDesktop && typeof window !== 'undefined' && window.renderKnowledgeBaseSection
+          ? window.renderKnowledgeBaseSection()
+          : '<div style="font-size:13px;color:var(--text-muted)">Desktop engine loading…</div>'}
+      </div>
+    </div>
+
+    <div id="lens-remote-fields" style="${externalFieldsStyle}">
       <div style="margin-top:8px">
         <label style="font-size:12px;color:var(--text-muted)" for="lens-url-input">Endpoint URL</label>
         <input type="text" class="api-key-input" id="lens-url-input" value="${escapeAttr(cfg.url)}" placeholder="https://your-server.example.com/query" style="margin-top:4px">
@@ -418,7 +500,7 @@ export function renderCustomLensSection() {
       </div>
     </div>
 
-    <div id="lens-local-fields" style="${localFieldsStyle}">
+    <div id="lens-local-fields" style="${browserFieldsStyle}">
       <div id="lens-local-libraries" style="margin-top:10px">
         <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px" for="lens-local-library-select">Library</label>
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
@@ -457,15 +539,17 @@ export function renderCustomLensSection() {
     </div>
 
     <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
-      <button class="import-btn import-btn-primary" onclick="handleSaveLensConfig()">${isLocal ? 'Save' : 'Save &amp; Test'}</button>
+      <button class="import-btn import-btn-primary" onclick="handleSaveLensConfig()">${isExternal ? 'Save &amp; Test' : 'Save'}</button>
       ${connected ? '<button class="import-btn import-btn-secondary" onclick="handleClearLensCache()">Clear cache</button>' : ''}
       ${connected ? '<button class="import-btn import-btn-secondary" onclick="handleRemoveLens()">Remove</button>' : ''}
     </div>
 
     <div class="api-key-notice" style="margin-top:12px">
-      ${isLocal
-        ? 'Your documents and questions never leave this device. First use downloads a small AI model (about 100 MB); after that it works offline.'
-        : 'Your questions are sent directly to the server you configure. Only connect to servers you control or trust.'}
+      ${isDesktop
+        ? 'Your documents and questions never leave this computer. The Python engine runs locally; no data is sent to any server.'
+        : isBrowser
+          ? 'Your documents and questions never leave this device. First use downloads a small AI model (about 100 MB); after that it works offline.'
+          : 'Your questions are sent directly to the server you configure. Only connect to servers you control or trust.'}
     </div>
   </div>`;
 }
@@ -481,12 +565,12 @@ function _updateLensStatusChip() {
   if (!chip) return;
   const cfg = getLensConfig();
   const keySet = !!getLensKey();
-  // Same connectedness rule as the main render — local-browser counts
-  // as connected because no URL/key is required. Without this, toggling
-  // "Enable Knowledge Source" in local mode flipped the chip to "Not
-  // connected" even though the lens was live.
-  const isLocal = cfg.backend === 'local-browser';
-  const connected = isLocal || (cfg.url && keySet);
+  // Same connectedness rule as the main render — per-backend condition.
+  const isBrowser = cfg.backend === 'in-browser';
+  const isDesktop = cfg.backend === 'desktop-engine';
+  const connected = isBrowser
+    || (isDesktop && keySet)
+    || (cfg.backend === 'external-server' && cfg.url && keySet);
   const status = getLensStatus();
   const statusChip = !connected
     ? '<span style="color:var(--text-muted)">Not connected</span>'
@@ -508,11 +592,9 @@ export async function handleSaveLensConfig() {
   const topK = Math.max(1, Math.min(10, parseInt(document.getElementById('lens-topk-input')?.value, 10) || 5));
   const enabled = !!document.getElementById('lens-enabled-toggle')?.checked;
   const backend = document.querySelector('input[name="lens-backend"]:checked')?.value
-    || getLensConfig().backend || 'remote';
+    || getLensConfig().backend || 'in-browser';
 
-  if (backend === 'local-browser') {
-    // Browser backend has no URL + no key. Still persists all shared
-    // fields (name, topK, enabled) so switching backends preserves them.
+  if (backend === 'in-browser') {
     saveLensConfig({ name, enabled, topK, backend });
     _rerenderLensSection();
     _loadLocalLensStats();
@@ -520,6 +602,26 @@ export async function handleSaveLensConfig() {
     return;
   }
 
+  if (backend === 'desktop-engine') {
+    // Desktop engine doesn't need URL/key inputs — the Python lens
+    // listens on fixed 127.0.0.1:8322 and the API key is generated by
+    // the engine itself. Fetch it now so queries work immediately.
+    saveLensConfig({ name, enabled, topK, backend });
+    try {
+      if (!getLensKey()) {
+        const cfg = await window.api?.invoke?.('get_lens_config');
+        if (cfg?.api_key) await saveLensKey(cfg.api_key);
+      }
+    } catch (e) {
+      showNotification(`Couldn't read the engine's API key: ${e?.message || e}.`, 'error');
+      return;
+    }
+    _rerenderLensSection();
+    showNotification('Saved. Using the desktop engine.', 'success');
+    return;
+  }
+
+  // external-server
   const url = (document.getElementById('lens-url-input')?.value || '').trim().replace(/\/+$/, '');
   const keyRaw = document.getElementById('lens-key-input')?.value || '';
   const testProbe = (document.getElementById('lens-test-probe-input')?.value || '').trim() || DEFAULT_TEST_PROBE;
@@ -550,15 +652,24 @@ export async function handleSaveLensConfig() {
 }
 
 /// Backend radio handler — saves the choice immediately (so a reload
-/// keeps the selection) and swaps field visibility without re-rendering,
-/// so unsaved edits in the name/topK inputs aren't lost.
-export function handleLensBackendChange(backend) {
+/// keeps the selection). Re-renders the whole panel since the per-backend
+/// sections have structurally different layouts (desktop-engine mounts
+/// the KB panel from knowledge-base.js, in-browser shows the library
+/// picker, external-server has URL/key fields).
+export async function handleLensBackendChange(backend) {
   saveLensConfig({ backend });
-  const remote = document.getElementById('lens-remote-fields');
-  const local = document.getElementById('lens-local-fields');
-  if (remote) remote.style.display = backend === 'local-browser' ? 'none' : '';
-  if (local) local.style.display = backend === 'local-browser' ? '' : 'none';
-  if (backend === 'local-browser') _loadLocalLensStats();
+  // Desktop-engine path auto-reads the generated API key so the user
+  // doesn't have to hit Save before chat can query. Silent — if the
+  // engine isn't set up yet, the KB panel will show its setup flow
+  // inside the mounted section anyway.
+  if (backend === 'desktop-engine' && !getLensKey() && window.api?.invoke) {
+    try {
+      const cfg = await window.api.invoke('get_lens_config');
+      if (cfg?.api_key) await saveLensKey(cfg.api_key);
+    } catch { /* engine not set up yet — fine, panel handles it */ }
+  }
+  _rerenderLensSection();
+  if (backend === 'in-browser') _loadLocalLensStats();
   _updateLensStatusChip();
   updateLensIndicator();
 }
@@ -818,18 +929,23 @@ export function handleClearLensCache() {
 
 export function handleRemoveLens() {
   const cfg = getLensConfig();
-  const isLocal = cfg.backend === 'local-browser';
-  // Branch the confirmation copy + cleanup per backend. Remote mode only
-  // holds a URL + encrypted key in localStorage. Local mode also owns an
-  // OPFS corpus with the user's indexed documents — leaving that behind
-  // after a "Remove" would surprise the user, so we offer to wipe it too.
-  const prompt = isLocal
-    ? 'Remove Knowledge Source? This also deletes every document you indexed on this device. This can\'t be undone.'
-    : 'Remove Knowledge Source? Your server URL and API key will be deleted.';
+  const isBrowser = cfg.backend === 'in-browser';
+  const isDesktop = cfg.backend === 'desktop-engine';
+  // Branch the confirmation copy + cleanup per backend.
+  //   external-server: only holds a URL + encrypted key in localStorage.
+  //   in-browser:      also owns an OPFS corpus with the user's indexed docs.
+  //   desktop-engine:  the Python engine's qdrant data lives on disk
+  //                    under user-data-dir; "Remove" here disconnects
+  //                    but does NOT uninstall the engine — users can
+  //                    reconnect later without re-running setup.
+  const prompt = isBrowser
+    ? 'Remove Knowledge Source? This also deletes every document you indexed in the browser. This can\'t be undone.'
+    : isDesktop
+      ? 'Disconnect from the desktop engine? Your indexed documents stay on disk — you can reconnect later without re-running setup. To remove everything, use "Remove all" inside the engine panel first.'
+      : 'Remove Knowledge Source? Your server URL and API key will be deleted.';
   showConfirmDialog(prompt, async () => {
     await removeLens();
-    if (isLocal) {
-      // Lazy-import so remote-only users don't pay the cost.
+    if (isBrowser) {
       try {
         const lens = await _getLocalLens();
         await lens.clear();
@@ -838,7 +954,12 @@ export function handleRemoveLens() {
       }
     }
     _rerenderLensSection();
-    showNotification(isLocal ? 'Knowledge Source and indexed documents removed.' : 'Knowledge Source removed.', 'info');
+    showNotification(
+      isBrowser ? 'Knowledge Source and indexed documents removed.'
+      : isDesktop ? 'Disconnected from desktop engine.'
+      : 'Knowledge Source removed.',
+      'info',
+    );
   });
 }
 
