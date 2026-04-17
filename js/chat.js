@@ -427,13 +427,14 @@ export function renameThread(threadId, newName) {
   }
 }
 
-export function renameThreadPrompt(threadId) {
+export async function renameThreadPrompt(threadId) {
   const thread = state.chatThreads.find(t => t.id === threadId);
   if (!thread) return;
-  const name = prompt('Rename conversation:', thread.name);
-  if (name !== null && name.trim()) {
-    renameThread(threadId, name);
-  }
+  const name = await window.showPromptDialog('Rename conversation:', {
+    defaultValue: thread.name,
+    okLabel: 'Rename',
+  });
+  if (name) renameThread(threadId, name);
 }
 
 export function autoNameThread(threadId, firstMessage) {

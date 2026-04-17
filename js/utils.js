@@ -120,6 +120,57 @@ export function showConfirmDialog(message, onConfirm) {
   document.getElementById("confirm-cancel").focus();
 }
 
+/// Prompt dialog that works in Electron. Chromium disables window.prompt()
+/// in file:// contexts and Electron removed it entirely (security model:
+/// sync dialogs block the renderer and can be abused). Returns a Promise
+/// that resolves to the trimmed string on OK, or null on Cancel / Esc /
+/// backdrop-click. Reuses the confirm-dialog CSS so both dialogs look
+/// consistent.
+export function showPromptDialog(message, { defaultValue = '', okLabel = 'OK', cancelLabel = 'Cancel', placeholder = '' } = {}) {
+  return new Promise((resolve) => {
+    let overlay = document.getElementById('prompt-dialog-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'prompt-dialog-overlay';
+      overlay.className = 'confirm-overlay';
+      document.body.appendChild(overlay);
+    }
+    overlay.innerHTML = `<div class="confirm-dialog" role="dialog" aria-modal="true" aria-label="Prompt">
+      <p class="confirm-message">${escapeHTML(message)}</p>
+      <input type="text" id="prompt-dialog-input" class="api-key-input"
+             value="${escapeAttr(defaultValue)}"
+             placeholder="${escapeAttr(placeholder)}"
+             style="width:100%;margin:8px 0 14px;box-sizing:border-box"
+             aria-label="${escapeAttr(message)}">
+      <div class="confirm-actions">
+        <button class="confirm-btn confirm-btn-cancel" id="prompt-cancel">${escapeHTML(cancelLabel)}</button>
+        <button class="confirm-btn confirm-btn-danger" id="prompt-ok" style="background:var(--accent)">${escapeHTML(okLabel)}</button>
+      </div></div>`;
+    overlay.classList.add('show');
+
+    const input = document.getElementById('prompt-dialog-input');
+    const ok = document.getElementById('prompt-ok');
+    const cancel = document.getElementById('prompt-cancel');
+
+    const close = (value) => {
+      overlay.classList.remove('show');
+      document.removeEventListener('keydown', onKey);
+      resolve(value);
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); close(null); }
+      else if (e.key === 'Enter') { e.preventDefault(); close(input.value.trim() || null); }
+    };
+
+    ok.onclick = () => close(input.value.trim() || null);
+    cancel.onclick = () => close(null);
+    overlay.onclick = (e) => { if (e.target === overlay) close(null); };
+    document.addEventListener('keydown', onKey);
+    // Autofocus the input + select default text so the user can just type.
+    setTimeout(() => { input.focus(); input.select(); }, 0);
+  });
+}
+
 export function hasCardContent(obj) {
   if (!obj) return false;
   for (const [key, val] of Object.entries(obj)) {
@@ -132,4 +183,4 @@ export function hasCardContent(obj) {
 
 export function escapeAttr(s) { return escapeHTML(s).replace(/'/g, '&#39;'); }
 
-Object.assign(window, { showNotification, showConfirmDialog, isDebugMode, setDebugMode, isPIIReviewEnabled, setPIIReviewEnabled, isAnalyticsEnabled, setAnalyticsEnabled, hasCardContent, escapeAttr });
+Object.assign(window, { showNotification, showConfirmDialog, showPromptDialog, isDebugMode, setDebugMode, isPIIReviewEnabled, setPIIReviewEnabled, isAnalyticsEnabled, setAnalyticsEnabled, hasCardContent, escapeAttr });

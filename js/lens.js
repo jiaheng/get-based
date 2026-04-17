@@ -3,7 +3,7 @@
 
 import { state } from './state.js';
 import { getCachedKey, updateKeyCache, encryptedSetItem } from './crypto.js';
-import { hashString, showNotification, showConfirmDialog, isDebugMode, escapeHTML, escapeAttr } from './utils.js';
+import { hashString, showNotification, showConfirmDialog, showPromptDialog, isDebugMode, escapeHTML, escapeAttr } from './utils.js';
 
 const CONFIG_KEY = 'labcharts-lens-config';
 const SECRET_KEY = 'labcharts-lens-key';
@@ -994,7 +994,12 @@ export async function handleLibraryActivate(libraryId) {
 }
 
 export async function handleLibraryNew() {
-  const name = (typeof prompt === 'function' ? prompt('Name for the new library?') : '')?.trim();
+  // Electron strips window.prompt(), so use the in-app dialog. Works on
+  // both desktop + PWA since it's pure DOM.
+  const name = await showPromptDialog('Name for the new library?', {
+    placeholder: 'e.g. Research Papers',
+    okLabel: 'Create',
+  });
   if (!name) return;
   try {
     const created = await _libCreate(name);
@@ -1018,7 +1023,10 @@ export async function handleLibraryRename() {
     const { libraries, activeId } = await _libList();
     const active = libraries.find((l) => l.id === activeId);
     const current = active?.name || '';
-    const next = (typeof prompt === 'function' ? prompt('Rename library:', current) : '')?.trim();
+    const next = await showPromptDialog('Rename library:', {
+      defaultValue: current,
+      okLabel: 'Rename',
+    });
     if (!next || next === current) return;
     await _libRename(activeId, next);
     showNotification(`Renamed to "${next}".`, 'info');

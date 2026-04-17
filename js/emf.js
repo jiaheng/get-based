@@ -331,7 +331,7 @@ export function selectEMFRoom(assessmentId, roomIdx) {
   renderEMFEditor(document.getElementById('detail-modal'));
 }
 
-export function handleEMFRoomDropdown(assessmentId, currentRoomIdx, value, selectEl) {
+export async function handleEMFRoomDropdown(assessmentId, currentRoomIdx, value, selectEl) {
   // Switch to existing room
   if (value.startsWith('_room_')) {
     const idx = parseInt(value.slice(6));
@@ -354,13 +354,16 @@ export function handleEMFRoomDropdown(assessmentId, currentRoomIdx, value, selec
   }
   // Custom room
   if (value === '_custom') {
-    const name = prompt('Room name:');
-    if (name && name.trim()) {
+    const name = await window.showPromptDialog('Room name:', {
+      placeholder: 'e.g. Master Bedroom',
+      okLabel: 'Create',
+    });
+    if (name) {
       collectTags();
       const assessments = ensureAssessments();
       const a = assessments.find(x => x.id === assessmentId);
       if (!a) return;
-      a.rooms.push(newRoom(name.trim()));
+      a.rooms.push(newRoom(name));
       _activeRoomIdx = a.rooms.length - 1;
       saveImportedData();
       renderEMFEditor(document.getElementById('detail-modal'));

@@ -482,39 +482,44 @@ async function runIngest(paths) {
   }
 }
 
-export async function handleDeleteDocument(source) {
+export function handleDeleteDocument(source) {
   if (!isDesktop()) return;
-  if (!confirm(`Remove "${source}" from your knowledge base? This removes all excerpts indexed from it.`)) {
-    return;
-  }
-  try {
-    const deleted = await invoke('delete_document', { source });
-    showNotification(`Removed ${deleted} excerpts for ${source}`, 'success');
-    _state.stats = await fetchStats();
-    _renderSection();
-  } catch (e) {
-    showNotification(`Couldn't delete that document: ${e?.message || e}.`, 'error');
-  }
+  // Custom dialog instead of window.confirm() — Electron strips the
+  // blocking native ones.
+  window.showConfirmDialog(
+    `Remove "${source}" from your knowledge base? This removes all excerpts indexed from it.`,
+    async () => {
+      try {
+        const deleted = await invoke('delete_document', { source });
+        showNotification(`Removed ${deleted} excerpts for ${source}`, 'success');
+        _state.stats = await fetchStats();
+        _renderSection();
+      } catch (e) {
+        showNotification(`Couldn't delete that document: ${e?.message || e}.`, 'error');
+      }
+    },
+  );
 }
 
-export async function handleClearAllDocuments() {
+export function handleClearAllDocuments() {
   if (!isDesktop() || _state.ingesting) return;
   const docCount = (_state.stats?.documents || []).length;
   const chunkCount = _state.stats?.total_chunks || 0;
   if (docCount === 0) return;
-  const confirmed = window.confirm(
-    `Remove all ${docCount} document${docCount !== 1 ? 's' : ''} (${chunkCount} excerpt${chunkCount !== 1 ? 's' : ''}) from your knowledge base? This cannot be undone.`
+  window.showConfirmDialog(
+    `Remove all ${docCount} document${docCount !== 1 ? 's' : ''} (${chunkCount} excerpt${chunkCount !== 1 ? 's' : ''}) from your knowledge base? This cannot be undone.`,
+    async () => {
+      try {
+        const deleted = await invoke('clear_knowledge');
+        showNotification(`Removed ${deleted} excerpts (all documents)`, 'success');
+        _state.lastSkipped = [];
+        _state.stats = await fetchStats();
+        _renderSection();
+      } catch (e) {
+        showNotification(`Couldn't clear the library: ${e?.message || e}.`, 'error');
+      }
+    },
   );
-  if (!confirmed) return;
-  try {
-    const deleted = await invoke('clear_knowledge');
-    showNotification(`Removed ${deleted} excerpts (all documents)`, 'success');
-    _state.lastSkipped = [];
-    _state.stats = await fetchStats();
-    _renderSection();
-  } catch (e) {
-    showNotification(`Couldn't clear the library: ${e?.message || e}.`, 'error');
-  }
 }
 
 /// User hit "Cancel" during the initial setup download. Main side flips a
