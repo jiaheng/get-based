@@ -16,7 +16,7 @@
 //   - Phase 4: renderer JS swaps isTauri() → isDesktop() to talk to these handlers
 //   - Phase 7: electron-updater wiring for check_for_update / install_update
 
-import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, session, shell } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -470,17 +470,25 @@ ipcMain.handle('install_update', async () => {
 app.whenReady().then(async () => {
   // Inject CSP headers on every response. Packaged builds load index.html
   // over file:// where same-origin is permissive and there is no server to
-  // set CSP at the transport layer, so we do it here. The policy allows
-  // inline styles (Chart.js legends, some compat shims set `style=`) but
-  // keeps script-src tight to 'self'. connect-src covers provider APIs,
-  // sync relay, and the local lens server. data:/blob: for image imports.
+  // set CSP at the transport layer, so we do it here.
+  //
+  // 'unsafe-inline' + 'unsafe-eval' in script-src: the app uses inline
+  // onclick="..." handlers pervasively (knowledge-base.js, lens.js,
+  // settings.js, etc.) and transformers.js internally uses eval() for
+  // dynamic kernel compilation. Stripping either breaks every button in
+  // the app. 'unsafe-inline' weakens CSP against XSS but the preload
+  // bridge's channel allowlist + will-navigate lock + openExternal
+  // scheme guard are the real defensive layers here.
+  // connect-src covers AI provider APIs, sync relay, local lens server,
+  // and https: for CDN model downloads (first-run transformers.js
+  // fetches the model from Hugging Face).
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
           "default-src 'self';"
-          + " script-src 'self';"
+          + " script-src 'self' 'unsafe-inline' 'unsafe-eval';"
           + " style-src 'self' 'unsafe-inline';"
           + " img-src 'self' data: blob: https:;"
           + " font-src 'self' data:;"
@@ -493,6 +501,23 @@ app.whenReady().then(async () => {
       },
     });
   });
+
+  // Hide the default native menu bar (File / Edit / View / Window / Help).
+  // The app has its own header-based navigation, and the native menu's
+  // system chrome doesn't match the dark theme on Linux / Windows. macOS
+  // keeps a minimal app menu because that platform requires one for
+  // quit / about / etc.
+  if (process.platform !== 'darwin') {
+    Menu.setApplicationMenu(null);
+  } else {
+    // Trimmed macOS menu — just the system-required entries and Edit
+    // (so Cmd+C/V/Z work). Everything else comes from the web UI.
+    Menu.setApplicationMenu(Menu.buildFromTemplate([
+      { role: 'appMenu' },
+      { role: 'editMenu' },
+      { role: 'windowMenu' },
+    ]));
+  }
 
   // Reap orphan lens processes BEFORE any IPC handler wires up. An abrupt
   // app quit (SIGKILL, crash, battery cutoff) leaves the spawned lens
