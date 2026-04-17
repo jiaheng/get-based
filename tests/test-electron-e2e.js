@@ -60,17 +60,31 @@ console.log('=== electron E2E ===\n');
 console.log('spawning electron…');
 // Use a high non-standard port so multiple test runs don't collide.
 const DEBUG_PORT = 9229 + Math.floor(Math.random() * 1000);
+// Fresh user-data dir per run — prevents service-worker registrations
+// and OPFS state from previous test runs (or the Puppeteer browser
+// suite that ran just before) from triggering an unregister-and-reload
+// race that kills executeJavaScript with "Execution context was
+// destroyed". Also makes the test hermetic.
+const userDataDir = path.join(process.env.RUNNER_TEMP || '/tmp', `electron-e2e-${process.pid}-${Date.now()}`);
+
 const electron = spawn('node', [
   electronBin,
   projectRoot,
   `--remote-debugging-port=${DEBUG_PORT}`,
   '--remote-allow-origins=*',
   '--no-sandbox', // required on some CI images
+  `--user-data-dir=${userDataDir}`,
 ], {
   env: {
     ...process.env,
-    // Force packaged-like path so CSP + will-navigate kick in like production.
-    ELECTRON_DEV: '',
+    // Dev mode — points Electron at localhost:8000 where the service
+    // worker is auto-unregistered. Packaged-path via file:// triggers
+    // SW registration, which causes a page-reload-on-activation race
+    // that kills puppeteer.executeJavaScript mid-eval with "Execution
+    // context was destroyed". CSP + will-navigate still kick in under
+    // localhost because main.js's webRequest hook runs on every
+    // response, not just file://.
+    ELECTRON_DEV: '1',
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -85,6 +99,12 @@ let browser = null;
 async function cleanup() {
   try { if (browser) await browser.disconnect(); } catch {}
   try { electron.kill('SIGKILL'); } catch {}
+  // Don't leave the per-run userData dir behind — it accumulates on CI.
+  // Fire-and-forget; we're in cleanup, not validation.
+  try {
+    const fs = await import('node:fs/promises');
+    await fs.rm(userDataDir, { recursive: true, force: true });
+  } catch {}
 }
 
 process.on('uncaughtException', async (e) => {
@@ -134,12 +154,20 @@ try {
     throw new Error(`no renderer page found (targets: ${seen})`);
   }
 
-  // Wait for window.api to appear — it's injected by the preload bridge
-  // during early document setup. Every IPC call after this can trust it.
+  // Wait for the renderer to reach steady-state. Without this, executeJavaScript
+  // races with early-load navigation and throws "Execution context was
+  // destroyed". Network-idle + window.api presence + readyState:complete is
+  // the belt-and-suspenders combo.
+  try {
+    await appPage.waitForFunction(() => document.readyState === 'complete', { timeout: 10000 });
+  } catch {}
   const apiReady = await appPage.waitForFunction(
     () => typeof window !== 'undefined' && window.api && typeof window.api.invoke === 'function',
     { timeout: 15000 },
   ).then(() => true).catch(() => false);
+  // Extra settle — gives rAF-scheduled init in lens.js, settings.js etc. a
+  // chance to run before we inject evaluate() calls.
+  await sleep(250);
   assert('preload bridge exposed window.api.invoke in renderer', apiReady);
 
   if (!apiReady) throw new Error('window.api never attached; preload may be broken');

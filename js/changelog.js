@@ -9,6 +9,7 @@ const CHANGELOG = [
     items: [
       'Native desktop app for Linux, macOS, and Windows. One-click install — no terminal needed. Auto-updates itself in the background.',
       'On-device Knowledge Source: Settings → Custom Knowledge Source has a new "On this device" option. Add your own documents and the AI grounds its answers in them — everything stays on your device. First use downloads a small AI model (about 100 MB); after that it works offline.',
+      'Multiple libraries: keep different collections separate — research papers, clinical guides, personal notes — and switch between them. Chat grounds its answers in whichever library is active. Create, rename, switch, delete from Settings.',
       'Document parsers for on-device indexing: PDF, Word, Markdown, plain text, and ZIP archives (which expand inline — each inner doc becomes its own source).',
       'Better retrieval variety — results now span multiple documents instead of piling up on one. Fixes queries like "vitamin D and circadian rhythm and cold exposure" that used to return only vitamin-D chunks.',
       'Settings → Custom Knowledge Source has an inline drop-zone + document list when using the on-device option — add, preview, and remove files without leaving Settings.',

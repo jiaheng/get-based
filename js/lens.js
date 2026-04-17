@@ -419,7 +419,20 @@ export function renderCustomLensSection() {
     </div>
 
     <div id="lens-local-fields" style="${localFieldsStyle}">
-      <div id="lens-local-stats" style="margin-top:10px;padding:10px 14px;background:var(--bg-secondary);border-radius:6px;font-size:13px;color:var(--text-muted)">Loading corpus stats…</div>
+      <div id="lens-local-libraries" style="margin-top:10px">
+        <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px" for="lens-local-library-select">Library</label>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <select id="lens-local-library-select" onchange="handleLocalLensActivate(this.value)"
+                  style="flex:1;min-width:180px;padding:6px 8px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border);border-radius:4px;font-size:13px">
+            <option value="">Loading…</option>
+          </select>
+          <button class="import-btn import-btn-secondary" onclick="handleLocalLensNewLibrary()" style="font-size:12px;padding:6px 10px" title="New library">+ New</button>
+          <button class="import-btn import-btn-secondary" onclick="handleLocalLensRenameLibrary()" style="font-size:12px;padding:6px 10px" title="Rename active library">Rename</button>
+          <button class="import-btn import-btn-secondary" onclick="handleLocalLensDeleteLibrary()" style="font-size:12px;padding:6px 10px" title="Delete active library">Delete</button>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Separate libraries let you keep different collections — research papers, clinical guides, personal notes — without mixing them. Chat grounds its answers in whichever library is active.</div>
+      </div>
+      <div id="lens-local-stats" style="margin-top:10px;padding:10px 14px;background:var(--bg-secondary);border-radius:6px;font-size:13px;color:var(--text-muted)">Loading stats…</div>
       <div id="lens-local-drop"
            role="button" tabindex="0"
            aria-label="Add documents — drop files here or press Enter to open the file picker"
@@ -565,9 +578,19 @@ async function _getLocalLens() {
 async function _loadLocalLensStats() {
   const stats = document.getElementById('lens-local-stats');
   const list = document.getElementById('lens-local-doc-list');
+  const librarySelect = document.getElementById('lens-local-library-select');
   if (!stats) return;
   try {
     const lens = await _getLocalLens();
+    // Populate the library picker. Happens on every stats refresh so
+    // create/rename/delete all show their effect without a dedicated
+    // refresh path.
+    if (librarySelect) {
+      const { libraries, activeId } = await lens.listLibraries();
+      librarySelect.innerHTML = libraries.map((l) =>
+        `<option value="${escapeAttr(l.id)}" ${l.id === activeId ? 'selected' : ''}>${escapeHTML(l.name)}</option>`
+      ).join('');
+    }
     const s = await lens.getStats();
     if (s.total_chunks === 0) {
       stats.innerHTML = '<span style="color:var(--text-muted)">No documents indexed yet.</span>';
@@ -707,6 +730,79 @@ export function handleLocalLensClear() {
   });
 }
 
+// ── Library management handlers ────────────────────────────────
+
+export async function handleLocalLensActivate(libraryId) {
+  if (!libraryId) return;
+  try {
+    const lens = await _getLocalLens();
+    const info = await lens.activateLibrary(libraryId);
+    clearLensCache(); // stale query cache belongs to the previous library
+    updateLensIndicator();
+    showNotification(`Switched to "${info.activeName}".`, 'info');
+    await _loadLocalLensStats();
+  } catch (e) {
+    showNotification(`Couldn't switch library: ${e?.message || e}.`, 'error');
+  }
+}
+
+export async function handleLocalLensNewLibrary() {
+  const name = (typeof prompt === 'function' ? prompt('Name for the new library?') : '')?.trim();
+  if (!name) return;
+  try {
+    const lens = await _getLocalLens();
+    const created = await lens.createLibrary(name);
+    // Activate the new library so the user can start ingesting right away.
+    await lens.activateLibrary(created.id);
+    clearLensCache();
+    updateLensIndicator();
+    showNotification(`Created "${created.name}". Drop documents to index them.`, 'success');
+    await _loadLocalLensStats();
+  } catch (e) {
+    showNotification(`Couldn't create library: ${e?.message || e}.`, 'error');
+  }
+}
+
+export async function handleLocalLensRenameLibrary() {
+  try {
+    const lens = await _getLocalLens();
+    const { libraries, activeId } = await lens.listLibraries();
+    const active = libraries.find((l) => l.id === activeId);
+    const current = active?.name || '';
+    const next = (typeof prompt === 'function' ? prompt('Rename library:', current) : '')?.trim();
+    if (!next || next === current) return;
+    await lens.renameLibrary(activeId, next);
+    showNotification(`Renamed to "${next}".`, 'info');
+    await _loadLocalLensStats();
+  } catch (e) {
+    showNotification(`Couldn't rename library: ${e?.message || e}.`, 'error');
+  }
+}
+
+export function handleLocalLensDeleteLibrary() {
+  showConfirmDialog('Delete the active library? Every document in it will be removed. This can\'t be undone.', async () => {
+    try {
+      const lens = await _getLocalLens();
+      const { libraries, activeId } = await lens.listLibraries();
+      await lens.deleteLibrary(activeId);
+      clearLensCache();
+      updateLensIndicator();
+      // If that was the last real library, the worker auto-created a new
+      // "My Library" default. Surface that to the user clearly.
+      const remaining = libraries.length - 1;
+      showNotification(
+        remaining === 0
+          ? 'Library deleted. A fresh "My Library" is ready for new documents.'
+          : 'Library deleted.',
+        'info',
+      );
+      await _loadLocalLensStats();
+    } catch (e) {
+      showNotification(`Couldn't delete library: ${e?.message || e}.`, 'error');
+    }
+  });
+}
+
 export function handleToggleLens(checked) {
   saveLensConfig({ enabled: checked });
   // Don't re-render the section — it would discard unsaved field edits.
@@ -754,4 +850,6 @@ Object.assign(window, {
   handleClearLensCache, handleRemoveLens, updateLensIndicator,
   handleLensBackendChange,
   handleLocalLensDeleteDoc, handleLocalLensClear,
+  handleLocalLensActivate, handleLocalLensNewLibrary,
+  handleLocalLensRenameLibrary, handleLocalLensDeleteLibrary,
 });

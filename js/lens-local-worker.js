@@ -44,29 +44,42 @@ const CHUNK_OVERLAP = 50;
 const CHUNK_MIN = 50;
 
 let _embedder = null;
-let _rootDir = null;            // OPFS FileSystemDirectoryHandle
-let _manifest = null;           // { numChunks, dim, modelId, indexedAt, docs: [{source, chunks}] }
-let _vectors = null;            // Float32Array of all vectors, length = numChunks * dim
-let _chunks = null;             // [{source, text}], length = numChunks
+let _rootDir = null;            // OPFS FileSystemDirectoryHandle at /lens-local/
+let _libraries = [];            // [{id, name, createdAt}]
+let _activeId = null;           // Currently active library id
+let _manifest = null;           // Active library's manifest (loaded on activate)
+let _vectors = null;            // Active library's packed Float32Array
+let _chunks = null;             // Active library's [{source, text}]
 
 const OPFS_SUBDIR = 'lens-local';
 const FILE_MANIFEST = 'manifest.json';
 const FILE_VECTORS = 'vectors.bin';
 const FILE_CHUNKS = 'chunks.json';
+const FILE_LIBRARIES = '_libraries.json'; // top-level, inside /lens-local/
+const DEFAULT_LIBRARY_NAME = 'My Library';
 
 // ── Message dispatch ───────────────────────────────────────────────
+//
+// Every handler (ingest, query, stats, delete, clear) scopes to the ACTIVE
+// library. Library-management handlers (activate, create, rename, delete,
+// list) manage _libraries metadata + OPFS subdirectories.
 
 self.addEventListener('message', async (e) => {
   const msg = e.data || {};
   try {
     switch (msg.type) {
-      case 'init':        return handleInit();
-      case 'ingest':      return handleIngest(msg.files || []);
-      case 'query':       return handleQuery(msg.text, msg.topK || 10);
-      case 'stats':       return handleStats();
-      case 'delete':      return handleDelete(msg.source);
-      case 'clear':       return handleClear();
-      default:            throw new Error(`Unknown message type: ${msg.type}`);
+      case 'init':              return handleInit();
+      case 'ingest':            return handleIngest(msg.files || []);
+      case 'query':             return handleQuery(msg.text, msg.topK || 10);
+      case 'stats':             return handleStats();
+      case 'delete':            return handleDelete(msg.source);
+      case 'clear':             return handleClear();
+      case 'list_libraries':    return handleListLibraries();
+      case 'activate_library':  return handleActivateLibrary(msg.libraryId);
+      case 'create_library':    return handleCreateLibrary(msg.name);
+      case 'rename_library':    return handleRenameLibrary(msg.libraryId, msg.name);
+      case 'delete_library':    return handleDeleteLibrary(msg.libraryId);
+      default:                  throw new Error(`Unknown message type: ${msg.type}`);
     }
   } catch (err) {
     self.postMessage({ type: 'error', message: err.message || String(err) });
@@ -87,11 +100,7 @@ async function handleInit() {
     console.log('[lens-local] mock embedder active (test mode)');
     await openOpfs();
     await loadCorpusIntoMemory();
-    self.postMessage({
-      type: 'ready',
-      numChunks: _manifest.numChunks,
-      numDocs: _manifest.docs.length,
-    });
+    self.postMessage(readyPayload());
     return;
   }
 
@@ -151,11 +160,22 @@ async function handleInit() {
 
   await openOpfs();
   await loadCorpusIntoMemory();
-  self.postMessage({
+  self.postMessage(readyPayload());
+}
+
+/// Shape of the `ready` message + the response from any library-management
+/// op. Keeps libraries + active context in one place — every state change
+/// (activate, ingest, delete, clear) re-emits this so the renderer always
+/// has the current picture without re-polling.
+function readyPayload() {
+  return {
     type: 'ready',
-    numChunks: _manifest.numChunks,
-    numDocs: _manifest.docs.length,
-  });
+    libraries: _libraries.slice(),
+    activeId: _activeId,
+    activeName: _libraries.find((l) => l.id === _activeId)?.name || '',
+    numChunks: _manifest?.numChunks || 0,
+    numDocs: _manifest?.docs?.length || 0,
+  };
 }
 
 async function openOpfs() {
@@ -167,36 +187,79 @@ async function openOpfs() {
   // get auto-granted. Best-effort — if the request fails we still proceed.
   try { await navigator.storage.persist?.(); } catch {}
 
-  // Diagnostic: list what's actually in the OPFS dir on boot. Shows in
-  // the main thread's DevTools console so persistence problems are
-  // visible without any UI work.
-  const foundFiles = [];
-  try {
-    for await (const [name] of _rootDir.entries()) foundFiles.push(name);
-  } catch (e) {
-    console.warn('[lens-local] OPFS listing failed:', e);
-  }
-  console.log('[lens-local] OPFS dir contents on boot:', foundFiles);
+  // Load or initialise the library registry. The registry lives at
+  // /lens-local/_libraries.json and is the source of truth for which
+  // libraries exist + which is active. Each library's data lives under
+  // /lens-local/<libraryId>/ (manifest.json, vectors.bin, chunks.json).
+  await loadOrMigrateLibraries();
+  console.log('[lens-local] Libraries:', _libraries.map((l) => `${l.id}=${l.name}`).join(', '),
+              'active:', _activeId);
 
-  // Manifest first — drives everything else. Missing = fresh store.
+  // Load the active library's manifest. Missing = fresh store for this
+  // library, which is legitimate right after create_library.
+  await loadActiveManifest();
+}
+
+/// First-run migration: if a legacy flat-layout store exists
+/// (/lens-local/manifest.json at top level), move it into
+/// /lens-local/default/ and create a "My Library" entry.
+async function loadOrMigrateLibraries() {
+  let registry = null;
+  try {
+    const text = await readOpfsFileFrom(_rootDir, FILE_LIBRARIES);
+    registry = JSON.parse(text);
+  } catch { /* no registry yet */ }
+
+  if (registry && Array.isArray(registry.libraries) && registry.libraries.length > 0) {
+    _libraries = registry.libraries;
+    _activeId = registry.activeId || _libraries[0].id;
+    if (!_libraries.some((l) => l.id === _activeId)) _activeId = _libraries[0].id;
+    return;
+  }
+
+  // Check for legacy flat-layout store (pre-multi-library).
+  let hasLegacy = false;
+  try {
+    await _rootDir.getFileHandle(FILE_MANIFEST);
+    hasLegacy = true;
+  } catch {}
+
+  if (hasLegacy) {
+    console.log('[lens-local] Migrating legacy single-library store to /default/');
+    const defaultDir = await _rootDir.getDirectoryHandle('default', { create: true });
+    for (const fn of [FILE_MANIFEST, FILE_VECTORS, FILE_CHUNKS]) {
+      try {
+        const srcBytes = await readBinaryFrom(_rootDir, fn);
+        await writeBinaryTo(defaultDir, fn, new Uint8Array(srcBytes));
+        await _rootDir.removeEntry(fn);
+      } catch (e) {
+        console.warn(`[lens-local] Migration: ${fn} skip — ${e.message}`);
+      }
+    }
+    _libraries = [{ id: 'default', name: DEFAULT_LIBRARY_NAME, createdAt: Date.now() }];
+    _activeId = 'default';
+    await persistLibraries();
+    return;
+  }
+
+  // Fresh install — create a single default library so the UI always has
+  // something to show. User can rename it later.
+  _libraries = [{ id: 'default', name: DEFAULT_LIBRARY_NAME, createdAt: Date.now() }];
+  _activeId = 'default';
+  await _rootDir.getDirectoryHandle('default', { create: true });
+  await persistLibraries();
+}
+
+async function loadActiveManifest() {
+  const dir = await activeLibraryDir();
   let manifest;
   try {
-    manifest = JSON.parse(await readOpfsFile(FILE_MANIFEST));
+    manifest = JSON.parse(await readOpfsFileFrom(dir, FILE_MANIFEST));
     if (manifest.dim !== DIM || manifest.modelId !== MODEL_ID) {
-      // Incompatible previous store (dim or model changed). Safer to wipe
-      // than to surface garbage results from stale embeddings.
       console.warn('[lens-local] Incompatible existing store — wiping.', manifest);
       manifest = null;
-    } else {
-      console.log('[lens-local] Loaded manifest:', {
-        numChunks: manifest.numChunks,
-        docs: manifest.docs.length,
-      });
     }
-  } catch (e) {
-    console.log('[lens-local] No existing manifest:', e?.message || 'missing');
-    manifest = null;
-  }
+  } catch { manifest = null; }
 
   _manifest = manifest || {
     numChunks: 0,
@@ -208,29 +271,49 @@ async function openOpfs() {
 }
 
 async function loadCorpusIntoMemory() {
+  const dir = await activeLibraryDir();
   if (_manifest.numChunks === 0) {
     _vectors = new Float32Array(0);
     _chunks = [];
     return;
   }
-  const vecBytes = await readOpfsBinary(FILE_VECTORS);
+  let vecBytes, chunksText;
+  try {
+    vecBytes = await readBinaryFrom(dir, FILE_VECTORS);
+    chunksText = await readOpfsFileFrom(dir, FILE_CHUNKS);
+  } catch (e) {
+    console.warn('[lens-local] Data file missing — resetting to empty.', e.message);
+    _manifest.numChunks = 0;
+    _manifest.docs = [];
+    _vectors = new Float32Array(0);
+    _chunks = [];
+    await persistAll();
+    return;
+  }
   _vectors = new Float32Array(vecBytes);
-  _chunks = JSON.parse(await readOpfsFile(FILE_CHUNKS));
-  // Sanity check — a partial write could leave these out of sync.
+  _chunks = JSON.parse(chunksText);
   const expected = _manifest.numChunks * DIM;
   if (_vectors.length !== expected || _chunks.length !== _manifest.numChunks) {
-    console.warn('[lens-local] Manifest/data length mismatch — resetting to empty.', {
-      expectedVecLen: expected,
-      gotVecLen: _vectors.length,
-      expectedChunks: _manifest.numChunks,
-      gotChunks: _chunks.length,
-    });
+    console.warn('[lens-local] Manifest/data length mismatch — resetting to empty.');
     _manifest.numChunks = 0;
     _manifest.docs = [];
     _vectors = new Float32Array(0);
     _chunks = [];
     await persistAll();
   }
+}
+
+/// Resolve the active library's directory handle. Creates if missing
+/// (shouldn't happen after init, but defensive against orphaned registry
+/// entries from a partial delete).
+async function activeLibraryDir() {
+  if (!_activeId) throw new Error('No active library');
+  return _rootDir.getDirectoryHandle(_activeId, { create: true });
+}
+
+async function persistLibraries() {
+  const payload = { activeId: _activeId, libraries: _libraries };
+  await writeSync(FILE_LIBRARIES, new TextEncoder().encode(JSON.stringify(payload)));
 }
 
 // ── Ingest ────────────────────────────────────────────────────────
@@ -398,6 +481,96 @@ async function handleClear() {
   self.postMessage({ type: 'clear_done' });
 }
 
+// ── Library management ──────────────────────────────────────────
+
+function handleListLibraries() {
+  self.postMessage({
+    type: 'libraries_list',
+    libraries: _libraries.slice(),
+    activeId: _activeId,
+  });
+}
+
+/// Swap the active library. Loads the new library's manifest + corpus
+/// into memory; the previous library's memory is released for GC.
+async function handleActivateLibrary(libraryId) {
+  if (!_libraries.some((l) => l.id === libraryId)) {
+    throw new Error(`No library with id "${libraryId}"`);
+  }
+  if (libraryId === _activeId) {
+    self.postMessage(readyPayload());
+    return;
+  }
+  _activeId = libraryId;
+  await persistLibraries();
+  await loadActiveManifest();
+  await loadCorpusIntoMemory();
+  self.postMessage(readyPayload());
+}
+
+/// Create a new library with the given display name. Generates a random
+/// id for the directory — decoupled from the user-facing name so renames
+/// don't require moving data.
+async function handleCreateLibrary(name) {
+  const label = String(name || '').trim() || 'Untitled library';
+  const id = `lib-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  _libraries.push({ id, name: label, createdAt: Date.now() });
+  await _rootDir.getDirectoryHandle(id, { create: true });
+  await persistLibraries();
+  self.postMessage({
+    type: 'library_created',
+    id, name: label,
+    libraries: _libraries.slice(),
+    activeId: _activeId,
+  });
+}
+
+async function handleRenameLibrary(libraryId, name) {
+  const lib = _libraries.find((l) => l.id === libraryId);
+  if (!lib) throw new Error(`No library with id "${libraryId}"`);
+  lib.name = String(name || '').trim() || lib.name;
+  await persistLibraries();
+  self.postMessage({
+    type: 'library_renamed',
+    id: libraryId, name: lib.name,
+    libraries: _libraries.slice(),
+    activeId: _activeId,
+  });
+}
+
+/// Remove a library's on-disk data + registry entry. If the active
+/// library is deleted, switch to the first remaining library. If this
+/// would leave zero libraries, auto-create a default so the UI always
+/// has something to show.
+async function handleDeleteLibrary(libraryId) {
+  const idx = _libraries.findIndex((l) => l.id === libraryId);
+  if (idx === -1) throw new Error(`No library with id "${libraryId}"`);
+  try { await _rootDir.removeEntry(libraryId, { recursive: true }); } catch {}
+  _libraries.splice(idx, 1);
+  if (_libraries.length === 0) {
+    // Auto-create a default so the UI never has to handle an empty list.
+    const id = 'default';
+    _libraries = [{ id, name: DEFAULT_LIBRARY_NAME, createdAt: Date.now() }];
+    _activeId = id;
+    await _rootDir.getDirectoryHandle(id, { create: true });
+  } else if (libraryId === _activeId) {
+    _activeId = _libraries[0].id;
+  }
+  await persistLibraries();
+  if (libraryId === _activeId || _libraries.length === 1) {
+    await loadActiveManifest();
+    await loadCorpusIntoMemory();
+  }
+  self.postMessage({
+    type: 'library_deleted',
+    id: libraryId,
+    libraries: _libraries.slice(),
+    activeId: _activeId,
+    numChunks: _manifest?.numChunks || 0,
+    numDocs: _manifest?.docs?.length || 0,
+  });
+}
+
 // ── OPFS I/O ──────────────────────────────────────────────────────
 //
 // Uses FileSystemSyncAccessHandle — worker-only API, synchronous reads
@@ -408,46 +581,45 @@ async function handleClear() {
 // worker uses under the hood.
 
 async function persistAll() {
-  await writeSync(FILE_MANIFEST, new TextEncoder().encode(JSON.stringify(_manifest)));
-  await writeSync(FILE_VECTORS, new Uint8Array(_vectors.buffer, _vectors.byteOffset, _vectors.byteLength));
-  await writeSync(FILE_CHUNKS, new TextEncoder().encode(JSON.stringify(_chunks)));
+  const dir = await activeLibraryDir();
+  await writeBinaryTo(dir, FILE_MANIFEST, new TextEncoder().encode(JSON.stringify(_manifest)));
+  await writeBinaryTo(dir, FILE_VECTORS, new Uint8Array(_vectors.buffer, _vectors.byteOffset, _vectors.byteLength));
+  await writeBinaryTo(dir, FILE_CHUNKS, new TextEncoder().encode(JSON.stringify(_chunks)));
 }
 
-async function readOpfsFile(name) {
-  const bytes = await readSync(name);
-  return new TextDecoder().decode(bytes);
+/// Read a text file from a specific directory handle. Thin wrapper over
+/// readBinaryFrom that UTF-8-decodes. Used for manifest.json + chunks.json
+/// + _libraries.json.
+async function readOpfsFileFrom(dir, name) {
+  const bytes = await readBinaryFrom(dir, name);
+  return new TextDecoder().decode(new Uint8Array(bytes));
 }
 
-async function readOpfsBinary(name) {
-  const bytes = await readSync(name);
-  // Copy into a fresh ArrayBuffer so the caller can safely use .buffer
-  // without worrying about byteOffset on a subarray view.
-  const copy = new Uint8Array(bytes.byteLength);
-  copy.set(bytes);
-  return copy.buffer;
-}
-
-/// Read entire file as Uint8Array. Returns empty Uint8Array if the file
-/// doesn't exist (caller can distinguish by byteLength === 0 if needed).
-async function readSync(name) {
-  const handle = await _rootDir.getFileHandle(name);
+/// Read an entire file as an ArrayBuffer. The sync-access handle returns a
+/// view backed by a scratch Uint8Array; we copy into a fresh buffer so the
+/// caller can safely use .buffer without worrying about byteOffset on a
+/// subarray view.
+async function readBinaryFrom(dir, name) {
+  const handle = await dir.getFileHandle(name);
   const sync = await handle.createSyncAccessHandle();
   try {
     const size = sync.getSize();
     const buf = new Uint8Array(size);
     sync.read(buf, { at: 0 });
-    return buf;
+    const copy = new Uint8Array(buf.byteLength);
+    copy.set(buf);
+    return copy.buffer;
   } finally {
     sync.close();
   }
 }
 
-/// Write bytes atomically: truncate + write + flush + close. flush() is
-/// what guarantees the data actually hit disk before we return; without
-/// it the browser may coalesce writes and lose data on reload if the tab
-/// closes between write and coalesce.
-async function writeSync(name, bytes) {
-  const handle = await _rootDir.getFileHandle(name, { create: true });
+/// Write bytes atomically to a specific directory: truncate + write +
+/// flush + close. flush() is what guarantees the data actually hit disk
+/// before we return; without it the browser may coalesce writes and lose
+/// data on reload if the tab closes between write and coalesce.
+async function writeBinaryTo(dir, name, bytes) {
+  const handle = await dir.getFileHandle(name, { create: true });
   const sync = await handle.createSyncAccessHandle();
   try {
     sync.truncate(0);
@@ -456,6 +628,12 @@ async function writeSync(name, bytes) {
   } finally {
     sync.close();
   }
+}
+
+/// Backward-compat shim: writeSync against the root lens-local/ dir. Used
+/// for _libraries.json (which lives at top level, not inside any library).
+async function writeSync(name, bytes) {
+  return writeBinaryTo(_rootDir, name, bytes);
 }
 
 // ── Test-only: deterministic stub embedder ────────────────────────

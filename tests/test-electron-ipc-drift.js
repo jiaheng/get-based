@@ -103,6 +103,13 @@ assert(
 
 // ── Sanity: known channels must be present ─────────────────────
 
+// Every ipcMain.handle channel in main.js. If a channel is added/removed,
+// update this list to match — the drift test makes sure preload's
+// allowlist is always in sync. NOTE: these are Electron main-process IPC
+// channels. The browser-local lens's per-library worker-message types
+// (activate_library, create_library, etc.) live in lens-local-worker.js's
+// switch statement and are not Electron IPC — they're postMessage to the
+// Web Worker. They're tested by test-lens-local-worker.js.
 const mustHave = [
   'get_setup_status', 'run_setup', 'cancel_setup', 'reset_setup',
   'detect_gpu', 'detect_all_gpus',

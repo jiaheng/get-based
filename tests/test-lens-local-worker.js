@@ -142,6 +142,72 @@ return (async function() {
       /unknown/i.test(e.message));
   }
 
+  // ─── Phase 10: multi-library — init exposes "default" library ───
+  console.log('%c[10] Multi-library: default present', 'font-weight:bold');
+  worker.terminate();
+  worker = spawnWorker();
+  const libReady = await roundTrip(worker, { type: 'init' }, 'ready');
+  assert('init returns libraries array',
+    Array.isArray(libReady.libraries) && libReady.libraries.length >= 1);
+  assert('init has an activeId',
+    typeof libReady.activeId === 'string' && libReady.activeId.length > 0);
+  assert('init has an activeName',
+    typeof libReady.activeName === 'string');
+
+  // ─── Phase 11: create a second library ───
+  console.log('%c[11] Multi-library: create second', 'font-weight:bold');
+  const created = await roundTrip(worker, { type: 'create_library', name: 'Research' }, 'library_created');
+  assert('library_created returns generated id',
+    typeof created.id === 'string' && created.id.length > 0);
+  assert('library_created echoes name', created.name === 'Research');
+  assert('library_created libraries list now has 2 entries',
+    Array.isArray(created.libraries) && created.libraries.length >= 2);
+
+  // ─── Phase 12: new library is isolated from default ───
+  console.log('%c[12] Multi-library: isolation', 'font-weight:bold');
+  await roundTrip(worker, { type: 'activate_library', libraryId: created.id }, 'ready');
+  const researchStats = await roundTrip(worker, { type: 'stats' }, 'stats_result');
+  assert('new library starts empty (isolated from default)',
+    researchStats.total_chunks === 0 && researchStats.documents.length === 0);
+
+  // Ingest into the new library, then switch back — the switched-to
+  // library must still be empty.
+  await roundTrip(worker, {
+    type: 'ingest',
+    files: [{ name: 'research-only.md', text: 'Content limited to the research library.' + ' filler '.repeat(20) }],
+  }, 'ingest_done', 10000);
+  const researchAfter = await roundTrip(worker, { type: 'stats' }, 'stats_result');
+  assert('new library ingest lands in the new library',
+    researchAfter.total_chunks > 0);
+
+  // ─── Phase 13: rename ───
+  console.log('%c[13] Multi-library: rename', 'font-weight:bold');
+  const renamed = await roundTrip(worker, { type: 'rename_library', libraryId: created.id, name: 'Kruse Research' }, 'library_renamed');
+  assert('library_renamed returns new name', renamed.name === 'Kruse Research');
+
+  // ─── Phase 14: delete a non-active library ───
+  console.log('%c[14] Multi-library: delete non-active', 'font-weight:bold');
+  // Activate default, then delete Kruse Research. Active corpus must be unaffected.
+  await roundTrip(worker, { type: 'activate_library', libraryId: 'default' }, 'ready');
+  const defaultStats = await roundTrip(worker, { type: 'stats' }, 'stats_result');
+  const deleted = await roundTrip(worker, { type: 'delete_library', libraryId: created.id }, 'library_deleted');
+  assert('library_deleted returns remaining libraries',
+    Array.isArray(deleted.libraries) && !deleted.libraries.some((l) => l.id === created.id));
+  const defaultAfterDelete = await roundTrip(worker, { type: 'stats' }, 'stats_result');
+  assert('active library stats unchanged after non-active delete',
+    defaultAfterDelete.total_chunks === defaultStats.total_chunks);
+
+  // ─── Phase 15: deleting the last library auto-creates a default ───
+  console.log('%c[15] Multi-library: delete last keeps one', 'font-weight:bold');
+  // Currently only "default" remains. Deleting it should auto-create a
+  // fresh "My Library" rather than leaving the user with zero libraries.
+  const defaultLibId = deleted.libraries[0].id;
+  const afterLast = await roundTrip(worker, { type: 'delete_library', libraryId: defaultLibId }, 'library_deleted');
+  assert('auto-created a fallback library (never zero)',
+    afterLast.libraries.length === 1);
+  assert('fallback library has empty stats',
+    afterLast.numChunks === 0);
+
   worker.terminate();
 
   console.log('\n' + results.join('\n'));

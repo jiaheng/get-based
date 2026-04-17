@@ -35,6 +35,10 @@ function ensureWorker() {
       case 'stats_result':
       case 'delete_done':
       case 'clear_done':
+      case 'libraries_list':
+      case 'library_created':
+      case 'library_renamed':
+      case 'library_deleted':
         if (_inflight) { _inflight.resolve(msg); _inflight = null; }
         return;
       case 'error':
@@ -90,12 +94,18 @@ export async function openLocalLens() {
     const ready = await send({ type: 'init' });
     writeCachedCount(ready.numChunks);
     return {
+      // Initial state snapshot. Mutable on the wire — callers get the
+      // latest via getStats / listLibraries; the `numChunks`/`numDocs`
+      // here only reflect the moment of init.
       numChunks: ready.numChunks,
       numDocs: ready.numDocs,
+      libraries: ready.libraries || [],
+      activeId: ready.activeId,
+      activeName: ready.activeName,
+
+      // Corpus ops — all scope to the active library.
       ingest: async (files) => {
         const r = await send({ type: 'ingest', files });
-        // Re-fetch stats rather than trusting r.stats.chunks_indexed —
-        // delete + ingest combos could skew an incremental count.
         const s = await send({ type: 'stats' });
         writeCachedCount(s.total_chunks);
         return r.stats;
@@ -121,6 +131,41 @@ export async function openLocalLens() {
         await send({ type: 'clear' });
         writeCachedCount(0);
       },
+
+      // Library management — metadata ops on the library registry.
+      listLibraries: async () => {
+        const r = await send({ type: 'list_libraries' });
+        return { libraries: r.libraries, activeId: r.activeId };
+      },
+      activateLibrary: async (libraryId) => {
+        const r = await send({ type: 'activate_library', libraryId });
+        writeCachedCount(r.numChunks);
+        return {
+          libraries: r.libraries,
+          activeId: r.activeId,
+          activeName: r.activeName,
+          numChunks: r.numChunks,
+          numDocs: r.numDocs,
+        };
+      },
+      createLibrary: async (name) => {
+        const r = await send({ type: 'create_library', name });
+        return { id: r.id, name: r.name, libraries: r.libraries };
+      },
+      renameLibrary: async (libraryId, name) => {
+        const r = await send({ type: 'rename_library', libraryId, name });
+        return { id: r.id, name: r.name, libraries: r.libraries };
+      },
+      deleteLibrary: async (libraryId) => {
+        const r = await send({ type: 'delete_library', libraryId });
+        writeCachedCount(r.numChunks);
+        return {
+          libraries: r.libraries,
+          activeId: r.activeId,
+          numChunks: r.numChunks,
+          numDocs: r.numDocs,
+        };
+      },
     };
   })();
   return _ready;
@@ -136,7 +181,8 @@ export function subscribeProgress(fn) {
 
 /// Drop-in for the existing queryLens() in js/lens.js. Returns the same
 /// shape (or null if not configured) so chat.js doesn't need to know
-/// which backend answered.
+/// which backend answered. sourceName reflects the ACTIVE library's name
+/// so chat citations show which collection the excerpts came from.
 export async function queryLensLocal(queryHint, opts = {}) {
   const hint = String(queryHint || '').trim();
   if (!hint) return null;
@@ -146,5 +192,9 @@ export async function queryLensLocal(queryHint, opts = {}) {
   // similarity_floor env. 0.3 is permissive enough for MiniLM.
   const floor = typeof opts.floor === 'number' ? opts.floor : 0.3;
   const kept = chunks.filter((c) => c.score >= floor);
-  return { chunks: kept, sourceName: 'Local (browser)' };
+  // Re-query libraries to get the current active name (it may have been
+  // renamed since init); cheap — just a metadata read in the worker.
+  const { libraries, activeId } = await lens.listLibraries();
+  const activeName = libraries.find((l) => l.id === activeId)?.name || 'On this device';
+  return { chunks: kept, sourceName: activeName };
 }
