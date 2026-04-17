@@ -480,7 +480,11 @@ export function renderCustomLensSection() {
          one UX surface — the user never thinks about "which panel is this" —
          while the implementation stays in its natural home. -->
     <div id="lens-desktop-fields" style="${desktopFieldsStyle}">
-      <div id="lens-desktop-kb-mount" style="margin-top:8px">
+      <!-- #knowledge-base-section is the id that js/knowledge-base.js re-renders
+           into after its async fetchSetupStatus+fetchStats lands. If this div
+           is missing that id, the panel stays stuck on "Loading knowledge base…"
+           because the module's _renderSection() can't find its mount point. -->
+      <div id="knowledge-base-section" style="margin-top:8px">
         ${isDesktop && typeof window !== 'undefined' && window.renderKnowledgeBaseSection
           ? window.renderKnowledgeBaseSection()
           : '<div style="font-size:13px;color:var(--text-muted)">Desktop engine loading…</div>'}
