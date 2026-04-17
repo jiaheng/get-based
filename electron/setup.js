@@ -23,6 +23,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import {
   dataDir, lensDir, pythonDir, venvDir, modelsDir,
   lensSourceDir, setupMarkerPath, embeddingModelPath,
@@ -522,13 +523,17 @@ async function copyBundledLensSourceTo(target) {
 }
 
 function bundledLensSourcePath() {
-  // Electron packaging: app.getAppPath() points at the app.asar directory
-  // when packaged; we'll switch to process.resourcesPath + 'lens' once
-  // electron-builder config lists lens/ under extraResources. For now, the
-  // app runs either from the repo root (dev) or from an unpacked app.asar
-  // with lens/ copied alongside — both resolve via __dirname + '../lens'.
+  // Packaged app: electron-builder's `extraResources` copies lens/ to
+  // process.resourcesPath/lens, outside app.asar so fs can read from it.
+  // Dev: fall back to the checked-in lens/ at repo root. process.defaultApp
+  // is true when the app is running from source (electron .) and absent
+  // from packaged builds, which is the cleanest platform-agnostic way to
+  // distinguish the two modes.
+  if (process.resourcesPath && !process.defaultApp) {
+    return path.join(process.resourcesPath, 'lens');
+  }
   const url = new URL('../lens', import.meta.url);
-  return url.pathname;
+  return fileURLToPath(url);
 }
 
 async function copyDir(src, dst) {

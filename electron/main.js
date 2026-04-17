@@ -20,6 +20,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { SetupManager } from './setup.js';
 import { detectGpu, detectAll } from './gpu.js';
 import {
@@ -27,6 +28,15 @@ import {
   lensHttpGet, lensHttpDelete, percentEncodePath,
 } from './lens-manager.js';
 import { apiKeyPath } from './paths.js';
+
+// electron-updater is CommonJS-only (electron/electron-userland#10219).
+// createRequire is the standard interop from ESM → CJS.
+const require = createRequire(import.meta.url);
+const { autoUpdater } = require('electron-updater');
+// We drive download + install ourselves from the renderer's two-step UI
+// (check → confirm → install), so auto-download + auto-install are off.
+autoUpdater.autoDownload = false;
+autoUpdater.autoInstallOnAppQuit = false;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, '..');
@@ -321,17 +331,64 @@ ipcMain.handle('clear_knowledge', async () => {
   });
 });
 
-// ── IPC: auto-updater (phase 7 stubs) ──────────────────────────────
+// ── IPC: auto-updater ──────────────────────────────────────────────
+//
+// Backed by electron-updater + the GitHub publish config in package.json's
+// `build` block. Two-step flow: renderer calls check_for_update first, and
+// only downloads + installs when the user confirms the banner.
 
-ipcMain.handle('check_for_update', async () => ({
-  available: false,
-  current_version: app.getVersion(),
-  new_version: null,
-  notes: null,
-  date: null,
-}));
+/// Flatten electron-updater's releaseNotes into a single string. Windows
+/// returns an array of { version, note } when `releaseNotes: 'all'` is
+/// set; every other platform returns a plain string.
+function extractReleaseNotes(raw) {
+  if (!raw) return null;
+  if (typeof raw === 'string') return raw;
+  if (Array.isArray(raw)) return raw.map((r) => r?.note || r).join('\n\n');
+  return String(raw);
+}
+
+ipcMain.handle('check_for_update', async () => {
+  const currentVersion = app.getVersion();
+  const empty = {
+    available: false,
+    current_version: currentVersion,
+    new_version: null,
+    notes: null,
+    date: null,
+  };
+  // Dev mode: electron-updater refuses to talk to GitHub without the app
+  // being properly packaged (no latest.yml next to the binary). Return the
+  // "no update available" shape so the renderer's silent-check doesn't
+  // spam the console.
+  if (!app.isPackaged) return empty;
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    if (!result || !result.updateInfo) return empty;
+    const info = result.updateInfo;
+    // Nothing to offer if the feed's latest version == what we're on.
+    if (info.version === currentVersion) return empty;
+    return {
+      available: true,
+      current_version: currentVersion,
+      new_version: info.version,
+      notes: extractReleaseNotes(info.releaseNotes),
+      date: info.releaseDate || null,
+    };
+  } catch (e) {
+    throw new Error(`Update check failed: ${e.message || e}`);
+  }
+});
+
 ipcMain.handle('install_update', async () => {
-  throw new Error('Auto-updater not yet wired (phase 7)');
+  if (!app.isPackaged) throw new Error('Auto-update is unavailable in dev mode');
+  // Check again to arm the downloader's internal state — calling
+  // downloadUpdate without a prior check is undefined behavior per
+  // electron-updater. The check is cheap; the result is cached.
+  await autoUpdater.checkForUpdates();
+  await autoUpdater.downloadUpdate();
+  // quitAndInstall restarts the app with the new version. Doesn't
+  // resolve — the event loop tears down first.
+  autoUpdater.quitAndInstall();
 });
 
 // ── App lifecycle ──────────────────────────────────────────────────

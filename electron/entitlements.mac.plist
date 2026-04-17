@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTD/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- JIT is required for the Chromium JS engine. Without this, the app
+         crashes on launch inside the hardened runtime. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <!-- The lens Python sidecar is an unsigned standalone CPython binary we
+         download at first-run. Hardened runtime would block it from loading
+         its own dylibs without this. Limits the footprint to just the spawn
+         point; the sidecar still runs in a sandboxed child process. -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <!-- Standalone Python runs user Python code that may call into libc in
+         ways Apple's stricter runtime blocks. -->
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+    <!-- Network access for AI provider API calls + sync relay + updater. -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <!-- Lens server listens on 127.0.0.1:8322 for the knowledge-base feature. -->
+    <key>com.apple.security.network.server</key>
+    <true/>
+    <!-- User selects files via dialog.showOpenDialog + drag/drop. -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+    <!-- Downloads directory access for auto-update staging. -->
+    <key>com.apple.security.files.downloads.read-write</key>
+    <true/>
+</dict>
+</plist>
