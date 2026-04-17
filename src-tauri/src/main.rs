@@ -241,6 +241,46 @@ struct DocumentInfo {
     chunks: u32,
 }
 
+/// Scrub any `Bearer <token>` substrings from a string, so an HTTP error
+/// body that echoes our Authorization header (misbehaving proxy, debug
+/// middleware) doesn't leak the API key up to the UI or logs.
+fn redact_bearer(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(idx) = rest.find("Bearer ") {
+        out.push_str(&rest[..idx]);
+        out.push_str("Bearer [REDACTED]");
+        rest = &rest[idx + "Bearer ".len()..];
+        // Skip the token itself — everything up to the next whitespace or
+        // string/JSON terminator.
+        let token_end = rest
+            .find(|c: char| c.is_whitespace() || matches!(c, '"' | ',' | '}' | ']' | ';'))
+            .unwrap_or(rest.len());
+        rest = &rest[token_end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Percent-encode a path string per RFC 3986 pchar rules, keeping `/` so
+/// multi-segment FastAPI `:path` params still match. Encodes UTF-8 bytes
+/// individually, so any non-ASCII byte (including `+`, `?`, `#`, `%`, CR,
+/// LF, and the full UTF-8 range) becomes %XX. Replaces an earlier
+/// hand-rolled version that only special-cased four characters.
+fn percent_encode_path(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        // unreserved (RFC 3986 §2.3) + '/' for path segments
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~' | b'/') {
+            out.push(b as char);
+        } else {
+            out.push('%');
+            out.push_str(&format!("{:02X}", b));
+        }
+    }
+    out
+}
+
 /// Try to talk to the running lens HTTP server first — that bypasses the
 /// qdrant POSIX flock that a CLI subprocess would fight over. Falls back
 /// to the CLI when the server isn't up (typically right after setup, before
@@ -264,7 +304,9 @@ async fn lens_http_get(path: &str) -> Result<serde_json::Value, String> {
         .await
         .map_err(|e| format!("HTTP request: {}", e))?;
     if !resp.status().is_success() {
-        return Err(format!("HTTP {}: {}", resp.status(), resp.text().await.unwrap_or_default()));
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("HTTP {}: {}", status, redact_bearer(&body)));
     }
     resp.json().await.map_err(|e| format!("JSON decode: {}", e))
 }
@@ -287,7 +329,9 @@ async fn lens_http_delete(path: &str) -> Result<serde_json::Value, String> {
         .await
         .map_err(|e| format!("HTTP request: {}", e))?;
     if !resp.status().is_success() {
-        return Err(format!("HTTP {}: {}", resp.status(), resp.text().await.unwrap_or_default()));
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("HTTP {}: {}", status, redact_bearer(&body)));
     }
     resp.json().await.map_err(|e| format!("JSON decode: {}", e))
 }
@@ -390,17 +434,7 @@ async fn delete_document(
         .map(|s| s["running"].as_bool().unwrap_or(false))
         .unwrap_or(false);
     if server_running {
-        // Minimal URL-path encoding — keep / so FastAPI's `:path` matcher
-        // sees the whole relative source path. Encode characters that would
-        // otherwise terminate the path or break the request line.
-        let encoded: String = source.chars().map(|c| match c {
-            ' ' => "%20".to_string(),
-            '?' => "%3F".to_string(),
-            '#' => "%23".to_string(),
-            '%' => "%25".to_string(),
-            _ => c.to_string(),
-        }).collect();
-        let path = format!("/sources/{}", encoded);
+        let path = format!("/sources/{}", percent_encode_path(&source));
         match lens_http_delete(&path).await {
             Ok(v) => return Ok(v["deleted_chunks"].as_u64().unwrap_or(0) as u32),
             Err(e) => log::warn!("HTTP delete failed, falling back to CLI: {}", e),
@@ -460,6 +494,15 @@ async fn run_setup(setup: tauri::State<'_, SetupManager>) -> Result<(), String> 
 #[tauri::command]
 fn reset_setup(setup: tauri::State<'_, SetupManager>) -> Result<(), String> {
     setup.reset()
+}
+
+/// Cancel the currently running setup — flips a flag that download/install
+/// loops check at yield points, and SIGKILLs the currently running child
+/// subprocess if one is tracked. The UI button wiring lives in
+/// js/knowledge-base.js.
+#[tauri::command]
+fn cancel_setup(setup: tauri::State<'_, SetupManager>) {
+    setup.cancel();
 }
 
 // ── Auto-updater commands ──────────────────────────────────────────
@@ -547,6 +590,7 @@ async fn main() {
             get_setup_status,
             run_setup,
             reset_setup,
+            cancel_setup,
             // Knowledge base
             get_lens_config,
             ingest_documents,

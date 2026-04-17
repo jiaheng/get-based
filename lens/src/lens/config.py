@@ -53,8 +53,11 @@ class LensConfig:
     # Collection
     collection: str = "knowledge"
 
-    # Embeddings
-    embedding_model: str = "all-MiniLM-L6-v2"  # ~90MB, 384d, fast on CPU
+    # Embeddings. Fully-qualified HF repo id so sentence-transformers always
+    # resolves to the same model regardless of where the lens runs (local
+    # shell vs Tauri-spawned). The bare "all-MiniLM-L6-v2" short name is
+    # also accepted by ST but routes through a different lookup path.
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"  # ~90MB, 384d, fast on CPU
     similarity_floor: float = 0.55
 
     # Qdrant backend
@@ -94,7 +97,9 @@ class LensConfig:
             data_dir=data_dir,
             api_key_file=Path(os.environ.get("LENS_API_KEY_FILE", str(data_dir / "api_key"))),
             collection=os.environ.get("LENS_COLLECTION", "knowledge"),
-            embedding_model=os.environ.get("LENS_EMBEDDING_MODEL", "all-MiniLM-L6-v2"),
+            embedding_model=os.environ.get(
+                "LENS_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
+            ),
             similarity_floor=float(os.environ.get("LENS_SIMILARITY_FLOOR", "0.55")),
             qdrant_mode=os.environ.get("LENS_QDRANT_MODE", "local"),
             qdrant_cloud_url=os.environ.get("LENS_QDRANT_CLOUD_URL", ""),

@@ -121,16 +121,33 @@ class Store:
     def clear(self) -> int:
         """Drop every chunk from the collection. Returns the pre-clear count.
 
-        The collection itself is deleted; ensure_collection() will recreate it
-        on the next ingest. This is cheaper than scrolling + deleting by ID
-        for corpora with thousands of chunks.
+        Recreates the collection with the same vector config immediately after
+        deletion so the next query doesn't 404 on a missing collection. Without
+        this, a "Remove all" followed by a chat query would throw 500 until the
+        user re-ingested something to trigger ensure_collection().
         """
         self._ensure_client()
+        from qdrant_client.models import Distance, VectorParams
+
         count = self.count()
+        dim = None
+        try:
+            info = self._client.get_collection(self._config.collection)
+            dim = int(info.config.params.vectors.size)
+        except Exception as e:
+            log.debug("get_collection before clear failed (likely empty): %s", e)
         try:
             self._client.delete_collection(self._config.collection)
         except Exception as e:  # noqa: BLE001
             log.warning("delete_collection failed, collection may not exist: %s", e)
+        if dim is not None:
+            try:
+                self._client.create_collection(
+                    collection_name=self._config.collection,
+                    vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
+                )
+            except Exception as e:  # noqa: BLE001
+                log.warning("recreate empty collection failed: %s", e)
         return count
 
     def list_sources(self) -> list[dict]:

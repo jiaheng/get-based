@@ -37,8 +37,20 @@ let _state = {
   docFilter: '',                 // search box text — case-insensitive substring
   docSort: 'name-asc',            // 'name-asc' | 'name-desc' | 'chunks-desc' | 'chunks-asc'
   docListThreshold: 8,            // hide search/sort UI below this many docs
+  lastSkipped: [],                // filenames skipped in the most recent ingest (unsupported / empty)
+  bannerFetchStarted: false,      // guard so renderKbDashboardBanner only kicks off one fetch
 };
 let _setupPollTimer = null;
+
+// Ordered list of phases so the setup UI can render "Step N of 5". Kept in
+// the same order as SetupPhase progression in src-tauri/src/setup.rs.
+const SETUP_PHASE_ORDER = [
+  'detecting_gpu',
+  'downloading_python',
+  'installing_lens',
+  'downloading_onnx_runtime',
+  'downloading_model',
+];
 
 // ─── HTML escape ─────────────────────────────────────────────────
 function _esc(s) {
@@ -240,7 +252,7 @@ function _refreshDocListInPlace() {
 function _renderIngestProgress() {
   const p = _state.ingestProgress;
   if (!p || !p.total) {
-    return `<span class="kb-spinner" aria-hidden="true"></span> Starting indexer…`;
+    return `<span class="kb-spinner" aria-hidden="true"></span> <span role="status" aria-live="polite">Starting indexer…</span>`;
   }
   const pct = Math.min(100, Math.round((p.current / p.total) * 100));
   const elapsed = p.started_at_ms ? (Date.now() - p.started_at_ms) / 1000 : 0;
@@ -256,12 +268,17 @@ function _renderIngestProgress() {
   // (most informative part) rather than the directory prefix.
   const fname = p.source ? p.source.split('/').slice(-2).join('/') : '';
   return `
-    <div style="display:flex;align-items:center;gap:8px;font-weight:500">
+    <div role="status" aria-live="polite" style="display:flex;align-items:center;gap:8px;font-weight:500">
       <span class="kb-spinner" aria-hidden="true"></span>
       <span>Indexing ${p.current} of ${p.total}${eta}</span>
     </div>
     <div style="font-size:11px;color:var(--text-muted);margin-top:4px;font-family:ui-monospace,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%">${_esc(fname)}</div>
-    <div style="margin-top:8px;background:var(--bg-secondary);border-radius:4px;overflow:hidden;height:6px;width:100%">
+    <div role="progressbar"
+         aria-label="Ingest progress"
+         aria-valuenow="${pct}"
+         aria-valuemin="0"
+         aria-valuemax="100"
+         style="margin-top:8px;background:var(--bg-secondary);border-radius:4px;overflow:hidden;height:6px;width:100%">
       <div style="height:100%;width:${pct}%;background:var(--accent);transition:width 0.4s ease"></div>
     </div>
   `;
@@ -292,6 +309,14 @@ function _phaseProgress(phase) {
 // ─── Auto-configure Custom Knowledge Source ──────────────────────
 export async function autoConfigureCustomLens() {
   if (!isTauri()) return;
+  // Don't wire up an empty corpus — the chat AI would silently return zero
+  // excerpts forever and the user would think the feature is broken. Force
+  // the user to ingest at least one document first.
+  const chunkCount = _state.stats?.total_chunks || 0;
+  if (chunkCount === 0) {
+    showNotification('Add at least one document to your knowledge base before connecting it to chat', 'error');
+    return;
+  }
   try {
     const cfg = await invoke('get_lens_config');
     if (!cfg || !cfg.url || !cfg.api_key) {
@@ -404,17 +429,21 @@ async function runIngest(paths) {
   try {
     const result = await invoke('ingest_documents', { req: { paths } });
     if (!result) return;
-    const skipped = (result.skipped || []).length;
+    const skippedList = Array.isArray(result.skipped) ? result.skipped : [];
+    _state.lastSkipped = skippedList;
+    const skipped = skippedList.length;
     if (result.chunks_indexed === 0) {
       showNotification(
         skipped > 0
-          ? `Indexed 0 excerpts from ${result.files_seen} files (${skipped} skipped — unsupported or too short)`
+          ? `Indexed 0 excerpts from ${result.files_seen} files (${skipped} skipped — unsupported or too short). See list below.`
           : 'No content found in selected files (try larger documents)',
         'info'
       );
     } else {
       showNotification(
-        `Indexed ${result.chunks_indexed} excerpts from ${result.files_seen} file${result.files_seen !== 1 ? 's' : ''}`,
+        skipped > 0
+          ? `Indexed ${result.chunks_indexed} excerpts from ${result.files_seen} file${result.files_seen !== 1 ? 's' : ''} (${skipped} skipped — see list below)`
+          : `Indexed ${result.chunks_indexed} excerpts from ${result.files_seen} file${result.files_seen !== 1 ? 's' : ''}`,
         'success'
       );
     }
@@ -457,11 +486,29 @@ export async function handleClearAllDocuments() {
   try {
     const deleted = await invoke('clear_knowledge');
     showNotification(`Removed ${deleted} excerpts (all documents)`, 'success');
+    _state.lastSkipped = [];
     _state.stats = await fetchStats();
     _renderSection();
   } catch (e) {
     showNotification(`Clear failed: ${e}`, 'error');
   }
+}
+
+/// User hit "Cancel" during the initial setup download. Tauri side flips a
+/// flag + kills the currently running subprocess; the poll loop observes
+/// the resulting Failed phase and updates the UI accordingly.
+export async function handleCancelSetup() {
+  if (!isTauri() || !_state.setupRunning) return;
+  try {
+    await invoke('cancel_setup');
+  } catch (e) {
+    console.warn('[KB] cancel_setup failed:', e);
+  }
+}
+
+export function handleDismissSkipped() {
+  _state.lastSkipped = [];
+  _renderSection();
 }
 
 // ─── Drag & drop wiring ──────────────────────────────────────────
@@ -484,6 +531,15 @@ function _attachDropHandlers() {
     const paths = files.map(f => f.path).filter(Boolean);
     if (paths.length > 0) {
       await runIngest(paths);
+    }
+  });
+  // Keyboard activation — the drop zone is a <div> so it doesn't fire click
+  // on Enter/Space by default. Without this, screen-reader and keyboard-only
+  // users have no way to open the file picker.
+  zone.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      if (window.handleAddFiles) window.handleAddFiles();
     }
   });
 }
@@ -515,6 +571,32 @@ function _renderSection() {
   }
 }
 
+function _phaseStepIndex(phase) {
+  if (!phase) return -1;
+  const tag = phase.phase || phase;
+  return SETUP_PHASE_ORDER.indexOf(tag);
+}
+
+function _renderSkippedBlock() {
+  const skipped = _state.lastSkipped || [];
+  if (skipped.length === 0) return '';
+  const items = skipped
+    .slice(0, 200)
+    .map((s) => `<li style="padding:2px 0;font-family:ui-monospace,monospace;font-size:11px;color:var(--text-muted);word-break:break-all">${_esc(s)}</li>`)
+    .join('');
+  const overflow = skipped.length > 200
+    ? `<li style="padding:2px 0;font-size:11px;color:var(--text-muted)">…and ${skipped.length - 200} more</li>`
+    : '';
+  return `<details style="margin-top:14px;padding:10px 12px;border:1px solid var(--border);background:var(--bg-secondary);border-radius:6px">
+    <summary style="cursor:pointer;font-size:12px;color:var(--text-primary);user-select:none">
+      ${skipped.length} file${skipped.length !== 1 ? 's' : ''} skipped in last ingest
+      <button class="kb-doc-delete" onclick="event.preventDefault();handleDismissSkipped()" aria-label="Dismiss skipped list" title="Dismiss" style="float:right;margin-top:-2px">×</button>
+    </summary>
+    <div style="font-size:11px;color:var(--text-muted);margin:8px 0 6px;line-height:1.4">Usually means the file was empty, an unsupported extension, or failed to parse. Rename or convert the files and try again.</div>
+    <ul style="list-style:none;padding:0;margin:0">${items}${overflow}</ul>
+  </details>`;
+}
+
 function _innerHtml() {
   if (_state.loading) {
     return `<div class="ai-provider-panel"><div class="ai-provider-desc">Loading knowledge base…</div></div>`;
@@ -523,6 +605,13 @@ function _innerHtml() {
   // Setup currently running — show progress
   if (_state.setupRunning) {
     const pct = _phaseProgress(_state.setupPhase);
+    const pctInt = Math.round(pct * 100);
+    const stepIdx = _phaseStepIndex(_state.setupPhase);
+    // Step indicator: "Step N of 5". Only shown once we're into a real
+    // phase — detecting_gpu is step 1, downloading_model is step 5.
+    const stepLine = stepIdx >= 0
+      ? `<div style="margin-top:8px;font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Step ${stepIdx + 1} of ${SETUP_PHASE_ORDER.length}</div>`
+      : '';
     const gpuLine = _state.setupGpu
       ? `<div style="font-size:12px;color:var(--text-muted);margin-top:8px">Hardware: ${_esc(_state.setupGpu.name || 'detecting…')}${_state.setupGpu.recommended_provider ? ' · ' + _esc(_state.setupGpu.recommended_provider) : ''}</div>`
       : '';
@@ -530,16 +619,26 @@ function _innerHtml() {
     // — surfaced so the user can see activity during the long install phase
     // instead of a frozen 0% bar.
     const statusLine = _state.setupPhase && _state.setupPhase.status
-      ? `<div style="margin-top:4px;font-size:11px;color:var(--text-muted);font-family:ui-monospace,monospace;opacity:0.75;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(_state.setupPhase.status)}</div>`
+      ? `<div role="status" aria-live="polite" style="margin-top:4px;font-size:11px;color:var(--text-muted);font-family:ui-monospace,monospace;opacity:0.75;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(_state.setupPhase.status)}</div>`
       : '';
     return `<div class="ai-provider-panel">
       <div class="ai-provider-desc">Setting up local knowledge engine — this is a one-time download.</div>
-      <div style="margin-top:10px;font-size:13px;color:var(--text-muted)">${_esc(_phaseLabel(_state.setupPhase))}</div>
+      ${stepLine}
+      <div role="status" aria-live="polite" style="margin-top:6px;font-size:13px;color:var(--text-muted)">${_esc(_phaseLabel(_state.setupPhase))}</div>
       ${statusLine}
-      <div style="margin-top:8px;background:var(--bg-secondary);border-radius:6px;overflow:hidden;height:8px">
+      <div role="progressbar"
+           aria-label="Setup progress"
+           aria-valuenow="${pctInt}"
+           aria-valuemin="0"
+           aria-valuemax="100"
+           style="margin-top:8px;background:var(--bg-secondary);border-radius:6px;overflow:hidden;height:8px">
         <div style="height:100%;width:${Math.max(pct * 100, 5)}%;background:var(--accent);transition:width 0.5s ease;border-radius:6px"></div>
       </div>
       ${gpuLine}
+      <div style="margin-top:12px">
+        <button class="import-btn import-btn-secondary" onclick="handleCancelSetup()"
+                aria-label="Cancel setup">Cancel</button>
+      </div>
     </div>`;
   }
 
@@ -573,7 +672,7 @@ function _innerHtml() {
   const dropZoneState = _state.ingesting ? 'kb-drop-zone-busy' : '';
   const dropZoneContent = _state.ingesting
     ? _renderIngestProgress()
-    : `<div style="font-size:24px;line-height:1">📁</div>
+    : `<div style="font-size:24px;line-height:1" aria-hidden="true">📁</div>
        <div style="font-weight:500;margin-top:4px">Drop documents here or click to add</div>
        <div style="font-size:11px;color:var(--text-muted);margin-top:2px">PDF · Markdown · Text · Word · JSON · ZIP</div>`;
 
@@ -586,7 +685,12 @@ function _innerHtml() {
     </div>
     <div style="margin-top:10px;font-size:13px">${statsLine}</div>
 
-    <div id="kb-drop-zone" class="kb-drop-zone ${dropZoneState}" onclick="handleAddFiles()">
+    <div id="kb-drop-zone" class="kb-drop-zone ${dropZoneState}"
+         role="button"
+         tabindex="0"
+         aria-label="Add documents — drop files here or press Enter to open the file picker"
+         aria-busy="${_state.ingesting ? 'true' : 'false'}"
+         onclick="handleAddFiles()">
       ${dropZoneContent}
     </div>
 
@@ -595,6 +699,7 @@ function _innerHtml() {
       <button class="import-btn import-btn-secondary" onclick="handleAddFolder()" ${_state.ingesting ? 'disabled' : ''}>Add folder…</button>
     </div>
 
+    ${_renderSkippedBlock()}
     ${docList}
 
     <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border)">
@@ -603,7 +708,7 @@ function _innerHtml() {
       </button>
       <div style="font-size:11px;color:var(--text-muted);margin-top:6px">
         Connects the chat AI to this local engine in one click. After clicking,
-        the Custom Knowledge Source section above is filled in and enabled.
+        the Custom Knowledge Source section below is filled in and enabled.
       </div>
     </div>
   </div>`;
@@ -620,22 +725,41 @@ function _innerHtml() {
  * with no setup. Click takes the user straight to Settings → AI tab where
  * the KB section lives, with a small scroll nudge so they land on it.
  */
-export function renderKbDashboardBanner() {
-  if (!isTauri()) return '';
-  if (_state.setupComplete) return '';
-  // Don't trigger a fetch from the dashboard — renderKnowledgeBaseSection
-  // handles the fetch when the user opens Settings. We just check whatever
-  // _state happens to hold; on a cold dashboard load with no Settings visit
-  // yet, _state.setupComplete is false and we'll show the banner. If the
-  // user has already opened Settings once, the value is accurate.
+function _bannerInnerHtml() {
   return `<div class="kb-dashboard-banner" role="region" aria-label="Local Knowledge Base">
-    <div class="kb-dashboard-banner-icon">📚</div>
+    <div class="kb-dashboard-banner-icon" aria-hidden="true">📚</div>
     <div class="kb-dashboard-banner-text">
       <div class="kb-dashboard-banner-title">Add a local Knowledge Base</div>
       <div class="kb-dashboard-banner-desc">Index your own documents — research papers, clinical notes, anything — and let the AI ground its answers in them. Runs fully offline on your machine.</div>
     </div>
     <button class="kb-dashboard-banner-cta" onclick="event.preventDefault(); window.openSettingsModal &amp;&amp; window.openSettingsModal('ai'); setTimeout(() =&gt; { var el = document.getElementById('knowledge-base-section'); if (el) el.scrollIntoView({behavior:'smooth', block:'center'}); }, 250);">Set up &rarr;</button>
   </div>`;
+}
+
+export function renderKbDashboardBanner() {
+  if (!isTauri()) return '';
+  // First cold dashboard load: fetch setup status on demand and only render
+  // the banner after we've confirmed setup isn't already done. Without this
+  // the banner flashes on every cold launch (even when the user has setup
+  // finished from a previous session) because _state.setupComplete defaults
+  // to false until renderKnowledgeBaseSection runs.
+  if (!_state.bannerFetchStarted) {
+    _state.bannerFetchStarted = true;
+    fetchSetupStatus().then((status) => {
+      _state.setupComplete = !!status && !status.is_first_run;
+      const slot = document.getElementById('kb-dashboard-banner-slot');
+      if (!slot) return;
+      slot.innerHTML = _state.setupComplete ? '' : _bannerInnerHtml();
+    }).catch(() => {
+      // Leave the slot empty on fetch failure — showing a stale CTA is worse
+      // than nothing.
+    });
+    return `<div id="kb-dashboard-banner-slot" aria-hidden="true"></div>`;
+  }
+  if (_state.setupComplete) {
+    return `<div id="kb-dashboard-banner-slot" aria-hidden="true"></div>`;
+  }
+  return `<div id="kb-dashboard-banner-slot">${_bannerInnerHtml()}</div>`;
 }
 
 // ─── Window exports ──────────────────────────────────────────────
@@ -649,6 +773,8 @@ Object.assign(window, {
   handleClearAllDocuments,
   handleDocSearchInput,
   handleDocSortChange,
+  handleCancelSetup,
+  handleDismissSkipped,
   autoConfigureCustomLens,
   startKbSetup,
 });

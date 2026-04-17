@@ -395,8 +395,7 @@ impl Drop for LensManager {
 }
 
 /// Kill any orphan lens server process from a prior Tauri session whose
-/// command line points at our managed venv's lens binary. Returns the
-/// number of processes killed.
+/// executable is our managed venv's lens binary. Returns the number killed.
 ///
 /// Why this is needed: Tauri dev restarts (or crashes) leave spawned lens
 /// children reparented to PID 1. Drop on LensManager only fires when the
@@ -405,15 +404,12 @@ impl Drop for LensManager {
 /// subsequent ingest/delete/clear in the new Tauri session — they all hit
 /// "Storage folder already accessed by another instance".
 ///
-/// Match heuristic: any process whose argv contains the absolute path to
-/// our lens binary (lens_bin_path()). That's specific enough to never
-/// touch unrelated `lens` binaries on the user's system.
+/// Match rule: `process.exe()` must equal our lens binary path. This is the
+/// kernel-reported executable path (from /proc/PID/exe on Linux), not
+/// user-controlled argv, so a different process can't spoof it by putting
+/// our path in its command line.
 fn kill_orphan_lens_processes() -> usize {
     let our_bin = lens_bin_path();
-    let our_bin_str = match our_bin.to_str() {
-        Some(s) => s,
-        None => return 0,
-    };
     let our_pid = std::process::id();
 
     let mut sys = sysinfo::System::new();
@@ -425,19 +421,19 @@ fn kill_orphan_lens_processes() -> usize {
         if pid.as_u32() == our_pid {
             continue;
         }
-        // Look for our lens binary path in the cmdline (argv).
-        // process.cmd() returns &[OsString] — the argv of the process.
-        let matches = process
-            .cmd()
-            .iter()
-            .any(|arg| arg.to_str().is_some_and(|s| s.contains(our_bin_str)));
-        if !matches {
+        // Exact path match on the kernel-reported executable. Falls through
+        // to next process if exe() is None (permissions / race on /proc).
+        let exe_match = process
+            .exe()
+            .map(|p| p == our_bin.as_path())
+            .unwrap_or(false);
+        if !exe_match {
             continue;
         }
         log::warn!(
-            "Killing orphan lens process pid={} cmd={:?}",
+            "Killing orphan lens process pid={} exe={:?}",
             pid.as_u32(),
-            process.cmd().iter().take(2).collect::<Vec<_>>()
+            process.exe()
         );
         if process.kill() {
             killed += 1;

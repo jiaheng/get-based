@@ -74,6 +74,10 @@ pub struct SetupManager {
     phase: Mutex<SetupPhase>,
     gpu: Mutex<GpuInfo>,
     http: Client,
+    cancel_requested: Mutex<bool>,
+    // PID of the currently running subprocess inside run_and_stream, so
+    // cancel() can signal it. Cleared when the subprocess exits.
+    current_child_pid: Mutex<Option<u32>>,
 }
 
 impl SetupManager {
@@ -85,6 +89,48 @@ impl SetupManager {
                 .timeout(std::time::Duration::from_secs(600))
                 .build()
                 .expect("Failed to create HTTP client"),
+            cancel_requested: Mutex::new(false),
+            current_child_pid: Mutex::new(None),
+        }
+    }
+
+    /// True if the user hit Cancel mid-setup. Checked from download/install
+    /// loops so long operations abort at the next yield point instead of
+    /// running to completion.
+    fn is_cancelled(&self) -> bool {
+        *self.cancel_requested.lock().unwrap()
+    }
+
+    /// User hit Cancel. Sets the flag + SIGKILLs the currently running
+    /// child (pip, python, whatever). Both the download loop and the
+    /// child-subprocess path observe the flag and unwind with
+    /// `Err("Setup cancelled by user")`, which bubbles up to the Failed
+    /// phase via run_setup's error handler.
+    pub fn cancel(&self) {
+        *self.cancel_requested.lock().unwrap() = true;
+        let pid = *self.current_child_pid.lock().unwrap();
+        if let Some(pid) = pid {
+            use sysinfo::{Pid, ProcessesToUpdate, System};
+            let mut sys = System::new();
+            sys.refresh_processes(ProcessesToUpdate::All, true);
+            // Kill direct children first (pip → python etc.) before the
+            // parent, so pip can't ignore SIGTERM on the way down.
+            for (other_pid, proc) in sys.processes() {
+                if let Some(ppid) = proc.parent() {
+                    if ppid.as_u32() == pid {
+                        log::info!(
+                            "Cancel: killing child pid={} of {}",
+                            other_pid.as_u32(),
+                            pid
+                        );
+                        let _ = proc.kill();
+                    }
+                }
+            }
+            if let Some(proc) = sys.process(Pid::from_u32(pid)) {
+                log::info!("Cancel: killing setup subprocess pid={}", pid);
+                let _ = proc.kill();
+            }
         }
     }
 
@@ -142,6 +188,10 @@ impl SetupManager {
             self.set_phase(SetupPhase::Completed);
             return Ok(());
         }
+
+        // Reset cancel flag at the start of each run — a previous cancel
+        // must not poison a fresh retry.
+        *self.cancel_requested.lock().unwrap() = false;
 
         match self.run_setup_inner().await {
             Ok(()) => Ok(()),
@@ -302,6 +352,9 @@ impl SetupManager {
             .spawn()
             .map_err(|e| format!("{} failed to start: {}", label, e))?;
 
+        // Expose the PID so cancel() can kill us mid-install.
+        *self.current_child_pid.lock().unwrap() = Some(child.id());
+
         let stdout = child.stdout.take().ok_or("stdout not captured")?;
         let mut stderr = child.stderr.take().ok_or("stderr not captured")?;
 
@@ -323,6 +376,12 @@ impl SetupManager {
             .wait()
             .map_err(|e| format!("{} wait failed: {}", label, e))?;
 
+        // Clear the tracked PID — no child is running now.
+        *self.current_child_pid.lock().unwrap() = None;
+
+        if self.is_cancelled() {
+            return Err("Setup cancelled by user".into());
+        }
         if !status.success() {
             return Err(format!("{} failed:\n{}", label, stderr_content));
         }
@@ -591,6 +650,35 @@ impl SetupManager {
             },
         )?;
 
+        // Second pass: force-reinstall lens itself without touching deps.
+        // The first `--upgrade` pass is a no-op for the lens package when
+        // the bundled source edited but kept the same version string —
+        // pip sees "already at version X, nothing to do" and skips the
+        // reinstall, so fixes to lens source files never land. The fix is
+        // cheap (--no-deps skips the full dep resolve) and pairs with the
+        // first pass so we still pull new deps on genuine version bumps.
+        let source_path = source_dir
+            .to_str()
+            .ok_or("Lens source path is not valid UTF-8")?;
+        self.run_and_stream(
+            &pip,
+            &[
+                "install",
+                "--force-reinstall",
+                "--no-deps",
+                "--no-build-isolation",
+                source_path,
+            ],
+            "Reinstalling lens package (source refresh)",
+            |line| {
+                if line.starts_with("Installing collected packages")
+                    || line.starts_with("Successfully installed")
+                {
+                    self.set_install_status(line);
+                }
+            },
+        )?;
+
         Ok(())
     }
 
@@ -721,6 +809,9 @@ impl SetupManager {
         use futures_util::StreamExt;
 
         while let Some(chunk) = stream.next().await {
+            if self.is_cancelled() {
+                return Err("Setup cancelled by user".into());
+            }
             let chunk = chunk.map_err(|e| format!("Download chunk error: {}", e))?;
             data.extend_from_slice(&chunk);
             downloaded += chunk.len() as u64;

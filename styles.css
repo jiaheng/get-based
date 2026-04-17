@@ -2231,8 +2231,21 @@ details[open] > .cl-archived-header::before { content: '\25BE '; }
   user-select: none;
   list-style: none;
   padding: 2px 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .chat-lens-sources-summary::-webkit-details-marker { display: none; }
+.chat-lens-sources-summary::before {
+  content: "▸";
+  font-size: 10px;
+  color: var(--text-muted);
+  transition: transform 0.15s;
+  flex-shrink: 0;
+}
+.chat-lens-sources[open] > .chat-lens-sources-summary::before {
+  transform: rotate(90deg);
+}
 .chat-lens-sources-summary:hover {
   color: var(--text-primary);
 }

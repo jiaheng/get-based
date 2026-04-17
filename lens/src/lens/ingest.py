@@ -35,9 +35,14 @@ def _expand_zip_if_needed(source: Path):
         tmp_path = Path(tmp).resolve()
         with zipfile.ZipFile(source) as zf:
             for member in zf.namelist():
-                # zip-slip guard: refuse absolute or parent-walking entries
+                # zip-slip guard. Path.is_relative_to catches both absolute
+                # and parent-walking entries without the prefix-match off-by-one
+                # that str.startswith has (e.g. /tmp/lens-zip-abc would match
+                # /tmp/lens-zip-abc-evil/x under naive prefix matching).
                 target = (tmp_path / member).resolve()
-                if not str(target).startswith(str(tmp_path)):
+                try:
+                    target.relative_to(tmp_path)
+                except ValueError:
                     raise RuntimeError(f"Unsafe zip entry: {member}")
             zf.extractall(tmp_path)
         log.info("Extracted zip %s into %s", source.name, tmp_path)

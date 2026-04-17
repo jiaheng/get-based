@@ -9,14 +9,15 @@ from __future__ import annotations
 
 import os
 import secrets
-import stat
 from pathlib import Path
 
 
 def get_or_create_api_key(key_file: Path) -> str:
     """Read the API key from disk; generate + write one if missing.
 
-    Permissions are tightened to 0600 (owner read/write only) on POSIX.
+    Creates the file with O_EXCL + mode 0o600 in one syscall, so the key
+    is never briefly present with loose permissions (the race the old
+    write_text → chmod sequence had).
     """
     if key_file.exists():
         try:
@@ -28,13 +29,18 @@ def get_or_create_api_key(key_file: Path) -> str:
 
     key_file.parent.mkdir(parents=True, exist_ok=True)
     key = secrets.token_urlsafe(32)
-    key_file.write_text(key + "\n")
-    # POSIX-only: tighten to user-read/write
-    if hasattr(os, "chmod") and not os.name == "nt":
-        try:
-            os.chmod(key_file, stat.S_IRUSR | stat.S_IWUSR)
-        except OSError:
-            pass
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    try:
+        fd = os.open(str(key_file), flags, 0o600)
+    except FileExistsError:
+        # Another process beat us to it — trust whatever they wrote rather
+        # than clobbering it with a fresh key.
+        existing = key_file.read_text().strip()
+        if existing:
+            return existing
+        raise
+    with os.fdopen(fd, "w") as f:
+        f.write(key + "\n")
     return key
 
 

@@ -374,7 +374,7 @@ function renderSyncSection() {
     <div style="margin-bottom:16px;padding:10px 12px;border:1px solid #fbbf24;background:rgba(251,191,36,0.08);border-radius:6px;color:#fbbf24;font-size:12px;line-height:1.45">
       <strong>Sync unavailable in this build.</strong><br>
       ${escapeHTML(blocker)}<br>
-      <a href="https://app.getbased.health" target="_blank" rel="noopener" style="color:#fbbf24;text-decoration:underline">Open the web version</a> to sync across devices and copy AI keys back here manually.
+      <a href="https://app.getbased.health" target="_blank" rel="noopener" style="color:#fbbf24;text-decoration:underline">Open the web version</a> to sync across devices. Any AI provider API keys you set there (PPQ, OpenRouter, Venice, etc.) will need to be pasted back into Settings → AI on this desktop app.
     </div>` : '';
   return `
     ${blockerBanner}

@@ -5,6 +5,22 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.20.2', date: '2026-04-17', title: 'Desktop Lens: Audit Fixes',
+    items: [
+      'Engine setup now shows "Step N of 5" and a Cancel button — stops a stuck install without killing the app',
+      'After an ingest, the files that were skipped are listed under the drop zone so you know which ones to rename or convert',
+      'Drop zone is keyboard-accessible (Tab + Enter), progress bars expose ARIA roles, and the sync setup/restore modals respond to Escape + trap focus like the other dialogs',
+      'Auto-configure Custom Knowledge Source now refuses to run against an empty corpus — previously it silently wired up zero chunks and chat looked broken',
+      'Citations under chat messages have a visible ▸ caret so it\'s obvious they expand',
+      'Clear-all-documents now recreates the qdrant collection immediately, so the next chat query doesn\'t 500 on a missing collection',
+      'Python lens package reinstalls cleanly on upgrade — edits to bundled source files land even when the version string didn\'t bump',
+      'Security hardening: atomic O_EXCL API-key file creation, zip-slip prefix check now uses Path.is_relative_to, HTTP error bodies have any echoed Bearer tokens redacted, URL path encoding now handles UTF-8 and the full reserved-char set',
+      'Orphan lens-process reaper matches on the kernel-reported executable path — no longer spoofable via argv',
+      'Updater plugin disabled until real signing keys are generated (placeholder pubkey removed)',
+      'Internal: collapsed duplicate setup polling in js/setup.js — js/knowledge-base.js is now the single source of truth for engine setup UI',
+    ]
+  },
+  {
     version: '1.20.1', date: '2026-04-16', title: 'Bug Fixes',
     items: [
       'Custom API key now works after page reload — previously the encrypted blob was sent as the Bearer token, breaking requests until the key was re-entered (#124)',
