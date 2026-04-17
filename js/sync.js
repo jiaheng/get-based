@@ -105,17 +105,16 @@ export function checkRelayConnection(timeout = 4000) {
  * when it isn't. Used to fail-fast with a clear message instead of letting
  * Evolu's worker hang for 30s on a missing primitive.
  *
- * Observed Tauri-on-Linux gotcha: wry/webkit2gtk on some distros doesn't
- * expose navigator.storage at all (the entire StorageManager API), even
- * though webkit2gtk 2.42+ supports OPFS. Without StorageManager, Evolu's
- * worker boots but can't persist the owner record, so appOwner resolves
- * to undefined and sync silently no-ops.
+ * Historically this hit the Tauri desktop build on Linux (wry/webkit2gtk
+ * gated navigator.storage off regardless of distro, which is part of why
+ * we pivoted to Electron). Under Electron's Chromium these primitives
+ * are always present; the check stays for PWA users on old browsers.
  */
 export function getSyncBlocker() {
-  if (typeof SharedWorker === 'undefined') return 'SharedWorker not available in this webview';
-  if (!navigator.locks?.request) return 'navigator.locks not available — webview missing Web Locks API';
-  if (!navigator.storage) return 'navigator.storage not available — webview missing StorageManager API. On Linux, this is a known wry/webkit2gtk gating issue. Use the web version of getbased for cross-device sync.';
-  if (!navigator.storage.getDirectory) return 'OPFS (Origin Private File System) not available. Webkit2gtk 2.42+ supports it but your build is older. Use the web version of getbased for sync.';
+  if (typeof SharedWorker === 'undefined') return 'SharedWorker not available in this browser';
+  if (!navigator.locks?.request) return 'navigator.locks not available — browser missing Web Locks API';
+  if (!navigator.storage) return 'navigator.storage not available — browser missing StorageManager API. Upgrade to a current browser (Chrome 86+, Firefox 105+, Safari 15.2+) for cross-device sync.';
+  if (!navigator.storage.getDirectory) return 'OPFS (Origin Private File System) not available. Upgrade to a current browser for cross-device sync.';
   if (!crypto?.subtle) return 'crypto.subtle (WebCrypto) not available';
   return null;
 }

@@ -259,6 +259,14 @@ ipcMain.handle('ingest_documents', async (_event, args) => {
   if (!Array.isArray(rawPaths) || rawPaths.length === 0) {
     throw new Error('No paths provided');
   }
+  // Defense in depth — the renderer's _state.ingesting gate should
+  // already prevent a second call, but a compromised renderer script
+  // could call this directly. ingestProgress is a module-level singleton;
+  // overlapping calls would clobber the counters and double-write the
+  // qdrant collection.
+  if (ingestProgress !== null) {
+    throw new Error('An ingest is already in progress. Wait for it to finish before starting another.');
+  }
   // Validate every path up front. Turns silent fall-through (e.g. lens
   // receiving a relative or non-existent path and walking CWD) into a
   // clear, actionable error before we spawn any subprocess. realpath

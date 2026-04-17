@@ -114,9 +114,32 @@ if (typeof window !== 'undefined') {
   }
 }
 
+/// User-initiated check from Settings → Data → App Updates. Updates the
+/// inline status line while the request is in flight so users get feedback
+/// within a tick. checkForUpdate handles the toast/banner rendering; this
+/// wrapper just drives the button state.
+export async function handleManualUpdateCheck() {
+  const btn = document.getElementById('check-updates-btn');
+  const status = document.getElementById('update-check-status');
+  if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+  if (status) status.textContent = 'Checking…';
+  const info = await checkForUpdate({ silent: false });
+  if (btn) { btn.disabled = false; btn.textContent = 'Check for updates'; }
+  if (status) {
+    if (info?.available) {
+      status.textContent = `Update available: ${info.new_version}`;
+      status.style.color = 'var(--green)';
+    } else {
+      status.textContent = `Current version: ${window.APP_VERSION || '?'} — up to date`;
+      status.style.color = 'var(--text-muted)';
+    }
+  }
+}
+
 Object.assign(window, {
   checkForUpdate,
   installUpdateNow,
   dismissUpdateBanner,
   skipThisVersion,
+  handleManualUpdateCheck,
 });

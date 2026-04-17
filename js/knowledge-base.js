@@ -201,14 +201,7 @@ function _renderDocList(allDocs) {
       ${controls}
       ${matchInfo}
       <div class="kb-doc-list">
-        ${sorted.map(d => `
-          <div class="kb-doc-row">
-            <span class="kb-doc-icon">📄</span>
-            <span class="kb-doc-name">${_esc(d.source)}</span>
-            <span class="kb-doc-chunks">${d.chunks} excerpt${d.chunks !== 1 ? 's' : ''}</span>
-            <button class="kb-doc-delete" onclick="handleDeleteDocument('${_esc(d.source).replace(/'/g, "\\'")}')" aria-label="Remove ${_esc(d.source)}" title="Remove">×</button>
-          </div>
-        `).join('')}
+        ${sorted.map(_docRowHtml).join('')}
         ${emptyHint}
       </div>
     </div>`;
@@ -247,16 +240,22 @@ function _refreshDocListInPlace() {
       default:            return (a.source || '').localeCompare(b.source || '');
     }
   });
-  container.innerHTML = sorted.map(d => `
-    <div class="kb-doc-row">
-      <span class="kb-doc-icon">📄</span>
-      <span class="kb-doc-name">${_esc(d.source)}</span>
-      <span class="kb-doc-chunks">${d.chunks} excerpt${d.chunks !== 1 ? 's' : ''}</span>
-      <button class="kb-doc-delete" onclick="handleDeleteDocument('${_esc(d.source).replace(/'/g, "\\'")}')" aria-label="Remove ${_esc(d.source)}" title="Remove">×</button>
-    </div>
-  `).join('') + (filter && sorted.length === 0
+  container.innerHTML = sorted.map(_docRowHtml).join('') + (filter && sorted.length === 0
     ? `<div style="padding:12px;font-size:12px;color:var(--text-muted);text-align:center">No documents match "${_esc(filter)}"</div>`
     : '');
+}
+
+/// One row in the indexed-documents list. Shared between the full panel
+/// render and the surgical search-filter refresh so a copy change in one
+/// place can't drift the other.
+function _docRowHtml(d) {
+  const safeSource = _esc(d.source).replace(/'/g, "\\'");
+  return `<div class="kb-doc-row">
+    <span class="kb-doc-icon">📄</span>
+    <span class="kb-doc-name">${_esc(d.source)}</span>
+    <span class="kb-doc-chunks">${d.chunks} excerpt${d.chunks !== 1 ? 's' : ''}</span>
+    <button class="kb-doc-delete" onclick="handleDeleteDocument('${safeSource}')" aria-label="Remove ${_esc(d.source)}" title="Remove">×</button>
+  </div>`;
 }
 
 /**
