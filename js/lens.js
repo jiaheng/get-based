@@ -942,6 +942,16 @@ async function _libDelete(id) {
 /// libraries yet" so the select never stays on the placeholder forever.
 async function _loadLibraryPicker() {
   const sel = document.getElementById('lens-library-select');
+  const cfg = getLensConfig();
+  // On desktop, make sure we have the engine's API key before calling /libraries.
+  // Auto-coerce from in-browser → desktop-engine at render time doesn't fetch
+  // the key, and IPC handlers need it to auth against the Python server.
+  if (cfg.backend === 'desktop-engine' && !getLensKey() && typeof window !== 'undefined' && window.api?.invoke) {
+    try {
+      const lcfg = await window.api.invoke('get_lens_config');
+      if (lcfg?.api_key) await saveLensKey(lcfg.api_key);
+    } catch {}
+  }
   try {
     const { libraries, activeId } = await _libList();
     // Sync cfg.name with the active library so the status chip reads

@@ -207,6 +207,44 @@ try {
   });
   assert('preload allowlist rejects unknown channels', rejected);
 
+  // ── Library IPC — channels registered, fail gracefully sans engine ──
+  // The CI environment has no lens binary installed, so list_libraries
+  // should throw a specific error rather than silently returning bad
+  // data. We're asserting the handlers are wired up, not that the full
+  // library flow works (that needs the Python engine which only exists
+  // after first-run setup on a real user machine).
+  const libListResult = await appPage.evaluate(async () => {
+    try { await window.api.invoke('list_libraries'); return { ok: true }; }
+    catch (e) { return { ok: false, message: String(e?.message || e) }; }
+  });
+  // Either succeeds (engine installed locally) or throws a recognizable
+  // binary-not-found error. The test passes in both cases — what we're
+  // checking is that the channel exists in the allowlist.
+  assert('list_libraries channel is wired up',
+    libListResult.ok
+      || /lens binary not found|run setup|ECONNREFUSED|fetch failed|lens sidecar|lens is already running|did not become healthy/i.test(libListResult.message),
+    `unexpected: ${libListResult.message}`);
+
+  // create_library / rename_library / delete_library / activate_library
+  // are all in the allowlist — probe them with the same "binary missing"
+  // expectation in CI. This catches the "forgot to add to preload" regression
+  // we saw in test-electron-ipc-drift without needing a running engine.
+  const remainingChannels = ['create_library', 'activate_library', 'rename_library', 'delete_library'];
+  for (const ch of remainingChannels) {
+    const probe = await appPage.evaluate(async (channel) => {
+      try {
+        await window.api.invoke(channel, { id: 'nonexistent', name: 'probe' });
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, message: String(e?.message || e) };
+      }
+    }, ch);
+    assert(`${ch} channel is wired up`,
+      probe.ok
+        || /lens binary not found|run setup|ECONNREFUSED|fetch failed|no library id|name cannot be empty|HTTP \d+|lens sidecar|lens is already running|did not become healthy/i.test(probe.message),
+      `unexpected: ${probe.message}`);
+  }
+
   // check_for_update — packaged=false in this run, returns "not available"
   const updateInfo = await appPage.evaluate(() => window.api.invoke('check_for_update'));
   assert('check_for_update returns {available:false} in unpackaged dev',
