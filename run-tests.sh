@@ -39,5 +39,6 @@ trap cleanup EXIT
 node "$DIR/tests/test-electron-helpers.js" || exit 1
 node "$DIR/tests/test-lens-local-utils.js" || exit 1
 node "$DIR/tests/test-electron-ipc.js" || exit 1
+node "$DIR/tests/test-electron-ipc-drift.js" || exit 1
 PORT=$PORT node "$DIR/tests/test-dev-server-origin.js" || exit 1
 PORT=$PORT NODE_PATH="$NODE_PATH_EXTRA" node "$DIR/run-tests.js"
