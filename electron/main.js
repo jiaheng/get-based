@@ -277,25 +277,41 @@ ipcMain.handle('ingest_documents', async (_event, args) => {
   }
   console.log('[kb] ingest_documents paths:', paths);
   // Reset at the start so a previous run's tail state doesn't leak.
-  ingestProgress = { current: 0, total: 0, source: '', chunks_so_far: 0, started_at_ms: Date.now() };
+  // total spans the WHOLE batch, not just the current path's `lens ingest`
+  // invocation — otherwise dropping 5 files reports "1 of 1" five times
+  // in a row because each CLI call is one file.
+  ingestProgress = {
+    current: 0, total: paths.length, source: '', chunks_so_far: 0, started_at_ms: Date.now(),
+  };
+  let filesDone = 0;
 
   try {
     return await withLensPaused(async () => {
       const total = { files_seen: 0, chunks_indexed: 0, skipped: [] };
       for (const p of paths) {
         let finalLine = null;
+        // Per-path offset so inner events map to batch-wide totals.
+        // For a single-file path the CLI reports (index=1, total=1), which
+        // we rewrite to (filesDone + 1) of (paths.length). If the user
+        // dropped a directory the inner total may be > 1, and we bump the
+        // outer total to include those extras.
+        let innerTotalSeen = 1;
         await runLensCommandStreaming(['ingest', '--json', p], (line) => {
           let parsed;
           try { parsed = JSON.parse(line); } catch { return; }
           const event = parsed?.event;
           if (event === 'start') {
-            if (ingestProgress) {
-              ingestProgress.total = Number(parsed.total) || 0;
+            innerTotalSeen = Number(parsed.total) || 1;
+            // Outer total was seeded to paths.length (1 per entry). Each
+            // start event tells us the real inner count — subtract the
+            // 1 we preallocated and add the real figure.
+            if (ingestProgress && innerTotalSeen > 1) {
+              ingestProgress.total += (innerTotalSeen - 1);
             }
           } else if (event === 'file') {
             if (ingestProgress) {
-              ingestProgress.current = Number(parsed.index) || 0;
-              ingestProgress.total = Number(parsed.total) || ingestProgress.total;
+              const innerIdx = Number(parsed.index) || 1;
+              ingestProgress.current = filesDone + innerIdx;
               ingestProgress.source = String(parsed.source || '');
               const added = Number(parsed.chunks) || 0;
               ingestProgress.chunks_so_far += added;
@@ -305,6 +321,9 @@ ipcMain.handle('ingest_documents', async (_event, args) => {
             finalLine = line;
           }
         }).catch((e) => { throw new Error(`Ingest of ${p} failed: ${e.message}`); });
+        // Advance the baseline by however many files this invocation
+        // actually contained (1 for single files, N for directories).
+        filesDone += innerTotalSeen;
 
         if (!finalLine) throw new Error(`Ingest of ${p} produced no result line`);
         let parsed;

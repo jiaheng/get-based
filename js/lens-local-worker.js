@@ -76,16 +76,20 @@ self.addEventListener('message', async (e) => {
 // ── Init: load model + open OPFS ───────────────────────────────────
 
 async function handleInit() {
-  // Vendored transformers.js + ORT SIMD WASM live under /vendor/transformers/.
-  // No CDN dependency at runtime — the library is the same 4.1.0 build that
-  // produced the perf-spike numbers. Absolute URL so the worker resolves it
-  // against the app's origin regardless of where the worker script sits.
-  const baseUrl = new URL('/vendor/transformers/', self.location.href);
-  const { pipeline, env } = await import(`${baseUrl}transformers.min.js`);
-  // Point ORT at our vendored WASM instead of its default CDN. We ship the
-  // plain SIMD variant (no threads — needs cross-origin-isolation headers
-  // most deployments don't set, no JSEP — WebGPU path is separate).
-  env.backends.onnx.wasm.wasmPaths = baseUrl.href;
+  // Library loads from jsdelivr — the npm-dist bundle has bare module
+  // specifiers (`onnxruntime-web/webgpu` etc.) that browsers can't resolve
+  // without a bundler, and jsdelivr auto-rewrites them. Pin @4.1.0 for
+  // reproducibility. Browsers cache the bundle indefinitely after first
+  // load; SW can cache too.
+  const { pipeline, env } = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.1.0');
+  // ORT picks one of 4 WASM variants at runtime (plain / asyncify / jsep /
+  // jspi) based on what the browser supports — SharedArrayBuffer gates
+  // threaded, cross-origin isolation headers gate jsep, etc. Vendoring
+  // all four is ~75 MB; picking one is fragile because the "right" one
+  // varies per browser + per deployment (COOP/COEP headers matter). For
+  // now ORT fetches from its default (bundled CDN reference) which covers
+  // every variant. Full vendor requires a bundler pass, tracked as phase
+  // 2c — see project_browser_local_lens.md.
   // Running inside a Worker. ORT's default spawns a NESTED worker for
   // inference which is 10-15× slower than in-worker execution.
   // https://onnxruntime.ai/docs/tutorials/web/env-flags.html#envwasmproxy

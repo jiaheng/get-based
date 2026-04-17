@@ -341,6 +341,18 @@ subscribeLensStatus(updateLensIndicator);
 // ═══════════════════════════════════════════════
 export function renderCustomLensSection() {
   const cfg = getLensConfig();
+  // Schedule the local-backend init on the next animation frame. The
+  // caller (settings.js or _rerenderLensSection) sets innerHTML with the
+  // string we return, so the #lens-local-stats element doesn't exist yet
+  // at this point. rAF defers until after that assignment paints, at
+  // which point _loadLocalLensStats can populate stats + doc list +
+  // wire the drop handlers. Without this, the panel opened with
+  // backend=local-browser stayed stuck on "Loading corpus stats…".
+  if (cfg.backend === 'local-browser' && typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(() => {
+      try { _loadLocalLensStats(); } catch {}
+    });
+  }
   const keySet = !!getLensKey();
   const isLocal = cfg.backend === 'local-browser';
   // Connected: backend-dependent. Remote needs URL + key; local only
@@ -608,7 +620,14 @@ function _attachLocalLensDropHandlers() {
 }
 
 async function _handleLocalLensIngest(fileList) {
-  if (!fileList || fileList.length === 0) return;
+  // Snapshot IMMEDIATELY — FileList from an <input type=file>.files is a
+  // LIVE reference, and the picker's change handler clears input.value
+  // right after calling us. Awaiting the dynamic import below would give
+  // the clear a chance to empty the FileList mid-flight. Array.from copies
+  // the File handles off the live list; each File itself stays valid.
+  const incoming = fileList ? Array.from(fileList) : [];
+  if (incoming.length === 0) return;
+
   const wrap = document.getElementById('lens-local-progress-wrap');
   const bar = document.getElementById('lens-local-progress');
   const textEl = document.getElementById('lens-local-progress-text');
@@ -619,7 +638,7 @@ async function _handleLocalLensIngest(fileList) {
   // why: module worker can't cleanly import the UMD parser bundles).
   const { extractFromFile } = await import('./lens-local-parsers.js');
   const files = [];
-  for (const f of Array.from(fileList)) {
+  for (const f of incoming) {
     try {
       const extracted = await extractFromFile(f);
       for (const e of extracted) files.push(e);

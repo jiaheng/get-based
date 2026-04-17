@@ -21,13 +21,13 @@ export async function extractFromFile(file) {
   const name = String(file.name || '');
   const ext = extOf(name);
   if (SUPPORTED_TEXT_EXTS.has(ext)) {
-    const text = await file.text();
-    return [{ name, text }];
+    return [{ name, text: await file.text() }];
   }
   if (ext === 'pdf')  return [{ name, text: await extractPdf(file) }];
   if (ext === 'docx') return [{ name, text: await extractDocx(file) }];
   if (ext === 'zip')  return extractZip(file);
-  console.warn(`[lens-local] skipping unsupported file: ${name}`);
+  const type = file.type || '(no MIME type)';
+  console.warn(`[lens-local] skipping: name="${name}" ext="${ext}" type="${type}" size=${file.size}`);
   return [];
 }
 
