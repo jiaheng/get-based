@@ -82,6 +82,16 @@ function createWindow() {
     //   npm run electron:dev # in another
     win.loadURL('http://localhost:8000/app');
     win.webContents.openDevTools();
+    // Native menu is stripped on Linux/Windows, so F12 / Ctrl+Shift+I / Cmd+Alt+I
+    // no longer toggle DevTools for free. Wire them up manually in dev so the
+    // window can be reopened after a close without restarting the app.
+    win.webContents.on('before-input-event', (_e, input) => {
+      if (input.type !== 'keyDown') return;
+      const mod = process.platform === 'darwin' ? (input.meta && input.alt) : (input.control && input.shift);
+      if (input.key === 'F12' || (mod && (input.key === 'I' || input.key === 'i'))) {
+        win.webContents.toggleDevTools();
+      }
+    });
   } else {
     // Packaged / file-load mode: serve index.html from the app bundle.
     win.loadFile(path.join(projectRoot, 'index.html'));
