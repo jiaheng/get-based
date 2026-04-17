@@ -3,7 +3,7 @@
 // Responsibilities:
 //   1. Create the BrowserWindow + load the existing HTML frontend.
 //   2. Wire the context-isolated preload bridge so renderer → Node calls route
-//      through ipcMain.handle (window.api.invoke('cmd', args)).
+//      through ipcMain.handle (window.api.invoke('get_setup_status', args)).
 //   3. Register the full Lens IPC surface: setup pipeline, GPU detection,
 //      lens server control (phase 3, still stubbed), knowledge-base queries.
 //
@@ -507,7 +507,12 @@ app.whenReady().then(async () => {
         ...details.responseHeaders,
         'Content-Security-Policy': [
           "default-src 'self';"
-          + " script-src 'self' 'unsafe-inline' 'unsafe-eval';"
+          // cdn.jsdelivr.net allowed for the browser-local lens path —
+          // @huggingface/transformers loads from there (bare module
+          // specifiers in the npm bundle; jsdelivr auto-rewrites them).
+          // Bundler work to vendor the resolved ESM is tracked as phase
+          // 2c and would let us drop this allowance.
+          + " script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net;"
           + " style-src 'self' 'unsafe-inline';"
           + " img-src 'self' data: blob: https:;"
           + " font-src 'self' data:;"

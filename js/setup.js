@@ -41,6 +41,10 @@ async function maybeAutoStartLens() {
     // Check if user has Custom Knowledge Source enabled (might point at local lens)
     const cfg = (window.getLensConfig && window.getLensConfig()) || {};
     if (!cfg.enabled) return;
+    // Browser-local backend doesn't need the Python server — skip the spawn
+    // so it doesn't hold qdrant's flock or waste ~200 MB RAM for users
+    // whose lens runs entirely in-tab.
+    if (cfg.backend === 'local-browser') return;
     // Try to start; ignore "already running"
     try {
       await invoke('start_lens');

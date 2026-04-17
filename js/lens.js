@@ -73,12 +73,18 @@ export function hasLens() {
   const cfg = getLensConfig();
   if (!cfg.enabled) return false;
   if (cfg.backend === 'local-browser') {
-    // Local backend needs OPFS + Web Workers + dynamic import. Every
-    // evergreen browser has them; feature-detect defensively so we don't
-    // claim a working lens on a legacy UA that'll throw at first query.
-    return typeof navigator !== 'undefined'
-      && !!navigator.storage
-      && typeof Worker !== 'undefined';
+    // Local backend needs OPFS + Web Workers AND at least one indexed
+    // chunk. Without the count check, hasLens() would be true on a fresh
+    // install and every chat query would spin the worker pointlessly —
+    // the UI indicator would read "active" but `injectLensChunks`
+    // silently no-ops on an empty result. peekLocalCorpusSize reads a
+    // localStorage shadow written by lens-local.js after init / ingest
+    // / delete / clear.
+    if (typeof navigator === 'undefined' || !navigator.storage || typeof Worker === 'undefined') return false;
+    try {
+      const n = Number(localStorage.getItem('labcharts-lens-local-count')) || 0;
+      return n > 0;
+    } catch { return false; }
   }
   // Default: remote URL requires a bearer key.
   return !!(cfg.url && getLensKey());
@@ -392,7 +398,7 @@ export function renderCustomLensSection() {
         </label>
         <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
           <input type="radio" name="lens-backend" value="local-browser" ${isLocal ? 'checked' : ''} onchange="handleLensBackendChange('local-browser')">
-          Browser (local, no network)
+          Browser (local)
         </label>
       </div>
       <div style="font-size:11px;color:var(--text-muted);margin-top:6px">
@@ -438,9 +444,9 @@ export function renderCustomLensSection() {
            aria-label="Add documents — drop files here or press Enter to open the file picker"
            style="margin-top:10px;padding:18px;border:2px dashed var(--border);border-radius:8px;text-align:center;font-size:13px;color:var(--text-muted);cursor:pointer;transition:border-color 0.15s"
            onclick="document.getElementById('lens-local-filepick').click()">
-        <div style="font-size:20px" aria-hidden="true">📁</div>
-        <div style="margin-top:4px">Drop documents or click to add</div>
-        <div style="font-size:11px;margin-top:2px;opacity:0.7">PDF · Markdown · Text · Word · JSON · ZIP</div>
+        <div style="font-size:20px;pointer-events:none" aria-hidden="true">📁</div>
+        <div style="margin-top:4px;pointer-events:none">Drop documents or click to add</div>
+        <div style="font-size:11px;margin-top:2px;opacity:0.7;pointer-events:none">PDF · Markdown · Text · Word · JSON · ZIP</div>
       </div>
       <input type="file" id="lens-local-filepick" multiple style="display:none" accept=".txt,.md,.markdown,.rst,.json,.csv,.log,.pdf,.docx,.zip">
       <div id="lens-local-progress-wrap" style="display:none;margin-top:8px">
@@ -464,7 +470,7 @@ export function renderCustomLensSection() {
 
     <div class="api-key-notice" style="margin-top:12px">
       ${isLocal
-        ? 'Your documents and queries never leave this browser. The embedding model runs in a Web Worker; vectors persist in OPFS (origin-private storage).'
+        ? 'Your documents and queries never leave this device. The embedding model runs in a Web Worker; vectors persist in OPFS. First use downloads the model + library over HTTPS; after that the lens works offline.'
         : 'Your questions are sent directly to the server you configure. Only connect to servers you control or trust. Your key is encrypted at rest on this device.'}
     </div>
   </div>`;
@@ -481,7 +487,12 @@ function _updateLensStatusChip() {
   if (!chip) return;
   const cfg = getLensConfig();
   const keySet = !!getLensKey();
-  const connected = cfg.url && keySet;
+  // Same connectedness rule as the main render — local-browser counts
+  // as connected because no URL/key is required. Without this, toggling
+  // "Enable Knowledge Source" in local mode flipped the chip to "Not
+  // connected" even though the lens was live.
+  const isLocal = cfg.backend === 'local-browser';
+  const connected = isLocal || (cfg.url && keySet);
   const status = getLensStatus();
   const statusChip = !connected
     ? '<span style="color:var(--text-muted)">Not connected</span>'
@@ -575,7 +586,11 @@ async function _loadLocalLensStats() {
     if (s.total_chunks === 0) {
       stats.innerHTML = '<span style="color:var(--text-muted)">No documents indexed yet.</span>';
     } else {
-      stats.innerHTML = `<span style="color:var(--green)">&#9679;</span> ${s.total_chunks.toLocaleString()} excerpt${s.total_chunks !== 1 ? 's' : ''} from ${s.documents.length} document${s.documents.length !== 1 ? 's' : ''} · ${escapeHTML(s.model)}`;
+      // Human-readable model label rather than the raw HF repo id.
+      const modelLabel = /minilm/i.test(s.model)
+        ? `MiniLM · ${s.dim}-dim`
+        : /bge-m3/i.test(s.model) ? `BGE-M3 · ${s.dim}-dim` : `${s.model} · ${s.dim}-dim`;
+      stats.innerHTML = `<span style="color:var(--green)">&#9679;</span> ${s.total_chunks.toLocaleString()} excerpt${s.total_chunks !== 1 ? 's' : ''} from ${s.documents.length} document${s.documents.length !== 1 ? 's' : ''} · <span title="${escapeAttr(s.model)}">${escapeHTML(modelLabel)}</span>`;
     }
     if (list) list.innerHTML = _renderLocalDocList(s.documents);
     _attachLocalLensDropHandlers();
@@ -681,36 +696,38 @@ async function _handleLocalLensIngest(fileList) {
   }
 }
 
-export async function handleLocalLensDeleteDoc(source) {
+export function handleLocalLensDeleteDoc(source) {
   if (!source) return;
-  if (!confirm(`Delete "${source}" from your local knowledge base?`)) return;
-  if (!_localLens) {
-    const mod = await import('./lens-local.js');
-    _localLens = await mod.openLocalLens();
-  }
-  try {
-    const deleted = await _localLens.deleteDocument(source);
-    showNotification(`Removed ${deleted} excerpt${deleted !== 1 ? 's' : ''}.`, 'success');
-    await _loadLocalLensStats();
-  } catch (e) {
-    showNotification(`Delete failed: ${e.message}`, 'error');
-  }
+  showConfirmDialog(`Delete "${source}" from your local knowledge base?`, async () => {
+    if (!_localLens) {
+      const mod = await import('./lens-local.js');
+      _localLens = await mod.openLocalLens();
+    }
+    try {
+      const deleted = await _localLens.deleteDocument(source);
+      showNotification(`Removed ${deleted} excerpt${deleted !== 1 ? 's' : ''}.`, 'success');
+      await _loadLocalLensStats();
+    } catch (e) {
+      showNotification(`Delete failed: ${e.message}`, 'error');
+    }
+  });
 }
 
-export async function handleLocalLensClear() {
-  if (!confirm('Clear every document from your local knowledge base? This cannot be undone.')) return;
-  if (!_localLens) {
-    const mod = await import('./lens-local.js');
-    _localLens = await mod.openLocalLens();
-  }
-  try {
-    await _localLens.clear();
-    clearLensCache(); // stale query cache no longer points at anything real
-    showNotification('Local knowledge base cleared.', 'success');
-    await _loadLocalLensStats();
-  } catch (e) {
-    showNotification(`Clear failed: ${e.message}`, 'error');
-  }
+export function handleLocalLensClear() {
+  showConfirmDialog('Clear every document from your local knowledge base? This cannot be undone.', async () => {
+    if (!_localLens) {
+      const mod = await import('./lens-local.js');
+      _localLens = await mod.openLocalLens();
+    }
+    try {
+      await _localLens.clear();
+      clearLensCache(); // stale query cache no longer points at anything real
+      showNotification('Local knowledge base cleared.', 'success');
+      await _loadLocalLensStats();
+    } catch (e) {
+      showNotification(`Clear failed: ${e.message}`, 'error');
+    }
+  });
 }
 
 export function handleToggleLens(checked) {
@@ -727,10 +744,29 @@ export function handleClearLensCache() {
 }
 
 export function handleRemoveLens() {
-  showConfirmDialog('Remove Knowledge Source? Your server URL and API key will be deleted.', async () => {
+  const cfg = getLensConfig();
+  const isLocal = cfg.backend === 'local-browser';
+  // Branch the confirmation copy + cleanup per backend. Remote mode only
+  // holds a URL + encrypted key in localStorage. Local mode also owns an
+  // OPFS corpus with the user's indexed documents — leaving that behind
+  // after a "Remove" would surprise the user, so we offer to wipe it too.
+  const prompt = isLocal
+    ? 'Remove Knowledge Source? Your local config will be deleted AND every document you indexed will be wiped from OPFS. This cannot be undone.'
+    : 'Remove Knowledge Source? Your server URL and API key will be deleted.';
+  showConfirmDialog(prompt, async () => {
     await removeLens();
+    if (isLocal) {
+      // Lazy-import so remote-only users don't pay the cost.
+      try {
+        const mod = await import('./lens-local.js');
+        const lens = await mod.openLocalLens();
+        await lens.clear();
+      } catch (e) {
+        console.warn('[lens] local corpus clear failed:', e);
+      }
+    }
     _rerenderLensSection();
-    showNotification('Lens removed', 'info');
+    showNotification(isLocal ? 'Lens removed and local corpus cleared' : 'Lens removed', 'info');
   });
 }
 

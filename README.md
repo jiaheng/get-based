@@ -93,49 +93,54 @@ Open `http://localhost:8000`. You need an AI provider API key or local AI server
 
 ## Tech stack
 
-No build tools, no bundler, no package manager. Pure ES modules — 42 modules under `js/`.
+Web app: no build tools, no bundler, no package manager. Pure ES modules — 50 modules under `js/`. Desktop app: Electron shell around the same web codebase, packaged via electron-builder.
 
 - Chart.js for interactive charts
 - pdf.js for PDF text extraction
-- All dependencies vendored locally (`vendor/`) — no CDN calls
+- transformers.js + OPFS for the browser-local Lens (Custom Knowledge Source)
+- Evolu for optional CRDT sync (E2E encrypted)
+- Most runtime dependencies vendored in `vendor/`
 - Installable as a PWA (works offline for non-AI features)
 
 ## Repo structure
 
-Three components in one repo, each with its own build and release cycle:
+Three components in one repo, each with its own release cycle:
 
 ```
 get-based/
-├── js/ css/ index.html        # Web dashboard — static files, runs in any browser
-├── src-tauri/                  # Tauri desktop wrapper (Rust)
-│   ├── src/
-│   │   ├── main.rs             #   Entry point, 9 Tauri commands
-│   │   ├── gpu.rs              #   GPU detection (NVIDIA/AMD/Intel/Apple)
-│   │   ├── setup.rs            #   First-run: downloads Python + Lens + ONNX Runtime + model
-│   │   └── lens.rs             #   Lens sidecar lifecycle management
-│   ├── Cargo.toml
-│   └── tauri.conf.json         #   frontendDist: "../" → serves the web dashboard
-├── lens/                       # Lens — Python RAG knowledge server
+├── js/ styles.css index.html  # Web dashboard — static files, runs in any browser
+│   ├── js/lens.js              #   Custom Knowledge Source dispatcher (remote or browser-local)
+│   ├── js/lens-local*.js       #   Browser-local lens — MiniLM in-browser, OPFS vectors
+│   └── js/knowledge-base.js    #   Desktop Python-lens UI
+├── electron/                   # Desktop shell (Node.js main process)
+│   ├── main.js                 #   BrowserWindow + IPC + security hardening + updater
+│   ├── preload.cjs             #   Context-isolated bridge with channel allowlist
+│   ├── setup.js                #   First-run: downloads Python standalone + installs Lens
+│   ├── lens-manager.js         #   Lens sidecar lifecycle (spawn, health check, reap)
+│   ├── gpu.js paths.js archive.js  # Platform detection, data dirs, tar extraction
+│   └── entitlements.mac.plist  #   Hardened-runtime entitlements for notarization
+├── lens/                       # Lens — Python RAG knowledge server (optional)
 │   ├── src/lens/
 │   │   ├── embedder.py         #   ONNX Runtime + sentence-transformers backends
-│   │   ├── storage.py          #   Qdrant vector store
+│   │   ├── store.py            #   Qdrant vector store
 │   │   ├── server.py           #   FastAPI REST API
 │   │   ├── ingest.py           #   Document chunking pipeline
 │   │   └── cli.py              #   CLI (lens serve / lens ingest / lens status)
 │   └── pyproject.toml          #   pip install getbased-lens[full]
-├── tests/                      # 41 browser-based test files (Puppeteer)
+├── tests/                      # 45 test files (browser + node-side)
+├── .github/workflows/          # CI release pipeline for all three platforms
 └── docs/                       # User-facing documentation
 ```
 
-**For the web app**, nothing changes — `index.html` + `js/` + `css/` is the product. Open it in a browser, it works. The `src-tauri/` and `lens/` folders are invisible to web users.
+**For the web app**, nothing changes — `index.html` + `js/` + `styles.css` is the product. Open it in a browser, it works. The `electron/` and `lens/` folders are invisible to web users.
 
-**For the desktop app**, Tauri wraps the web dashboard (`frontendDist: "../"`) and adds native capabilities: GPU detection, first-run setup that downloads everything locally, sidecar process management. One-click install, no terminal needed.
+**For the desktop app**, Electron wraps the web dashboard (same `index.html`) and adds native capabilities: GPU detection, first-run setup that downloads Python + the Lens engine without needing a system install, sidecar process management, auto-update via GitHub Releases. One-click install, no terminal needed.
 
-**For Lens**, it's a standalone Python package (`pip install getbased-lens`). The Tauri app automates the install, but you can also run it independently on any server. [getbased-mcp](https://github.com/elkimek/getbased-mcp) exposes the same Lens API to AI agents via the Model Context Protocol.
+**For Lens**, it's a standalone Python package (`pip install getbased-lens`). The Electron app automates the install, but you can also run it independently on any server. [getbased-mcp](https://github.com/elkimek/getbased-mcp) exposes the same Lens API to AI agents via the Model Context Protocol.
 
 ## Testing
 
-41 browser-based test files run headlessly:
+45 test files — node-side helpers plus Puppeteer-driven browser assertions — run headlessly:
 
 ```bash
 ./run-tests.sh

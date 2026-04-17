@@ -63,23 +63,64 @@ function send(msg) {
   return _queue;
 }
 
+// localStorage shadow of the current corpus chunk count. hasLens() in
+// lens.js is synchronous and can't await a worker round-trip, so we keep
+// a cache here, written on ready / ingest / delete / clear, read by
+// peekLocalCorpusSize(). Survives reloads — if the tab closes before
+// a write, the worker's OPFS-backed manifest is still canonical and the
+// next init will overwrite.
+const CORPUS_COUNT_KEY = 'labcharts-lens-local-count';
+
+function writeCachedCount(n) {
+  try { localStorage.setItem(CORPUS_COUNT_KEY, String(Number(n) || 0)); } catch {}
+}
+
+/// Synchronous peek at the last known corpus size. Returns 0 if unknown.
+/// Used by lens.js's hasLens() so an empty local corpus doesn't pretend
+/// the lens is "active" — every chat query would otherwise spin the
+/// worker, get back [], and silently no-op on injection.
+export function peekLocalCorpusSize() {
+  try { return Number(localStorage.getItem(CORPUS_COUNT_KEY)) || 0; }
+  catch { return 0; }
+}
+
 export async function openLocalLens() {
   if (_ready) return _ready;
   _ready = (async () => {
     const ready = await send({ type: 'init' });
+    writeCachedCount(ready.numChunks);
     return {
       numChunks: ready.numChunks,
       numDocs: ready.numDocs,
-      ingest: (files) => send({ type: 'ingest', files }).then((r) => r.stats),
+      ingest: async (files) => {
+        const r = await send({ type: 'ingest', files });
+        // Re-fetch stats rather than trusting r.stats.chunks_indexed —
+        // delete + ingest combos could skew an incremental count.
+        const s = await send({ type: 'stats' });
+        writeCachedCount(s.total_chunks);
+        return r.stats;
+      },
       query: (text, topK = 10) => send({ type: 'query', text, topK }).then((r) => r.chunks),
-      getStats: () => send({ type: 'stats' }).then((r) => ({
-        total_chunks: r.total_chunks,
-        documents: r.documents,
-        dim: r.dim,
-        model: r.model,
-      })),
-      deleteDocument: (source) => send({ type: 'delete', source }).then((r) => r.deleted_chunks),
-      clear: () => send({ type: 'clear' }),
+      getStats: async () => {
+        const r = await send({ type: 'stats' });
+        writeCachedCount(r.total_chunks);
+        return {
+          total_chunks: r.total_chunks,
+          documents: r.documents,
+          dim: r.dim,
+          model: r.model,
+        };
+      },
+      deleteDocument: async (source) => {
+        const deleted = await send({ type: 'delete', source }).then((r) => r.deleted_chunks);
+        const s = await send({ type: 'stats' });
+        writeCachedCount(s.total_chunks);
+        return deleted;
+      },
+      clear: async () => {
+        await send({ type: 'clear' });
+        writeCachedCount(0);
+      },
     };
   })();
   return _ready;

@@ -32,7 +32,7 @@ export function isKnowledgeBaseAvailable() {
 let _state = {
   setupComplete: false,
   setupRunning: false,
-  setupPhase: null,    // SetupPhase from Tauri (object with phase tag)
+  setupPhase: null,    // SetupPhase from electron/setup.js (object with phase tag)
   setupGpu: null,
   stats: { total_chunks: 0, documents: [] },
   ingesting: false,
@@ -44,9 +44,10 @@ let _state = {
   bannerFetchStarted: false,      // guard so renderKbDashboardBanner only kicks off one fetch
 };
 let _setupPollTimer = null;
+let _setupPushUnsub = null;
 
 // Ordered list of phases so the setup UI can render "Step N of 5". Kept in
-// the same order as SetupPhase progression in src-tauri/src/setup.rs.
+// the same order as phase progression in electron/setup.js.
 const SETUP_PHASE_ORDER = [
   'detecting_gpu',
   'downloading_python',
@@ -100,6 +101,17 @@ export async function startKbSetup() {
   _setupPollTimer = setInterval(_pollSetupProgress, 1000);
   _pollSetupProgress();
 
+  // Also subscribe to the push channel — the main process emits phase
+  // updates as they happen, so progress bars move smoothly instead of
+  // snapping in 1s ticks. Poll stays as a fallback for phase transitions
+  // that need a full status fetch (setup-complete, GPU info).
+  if (!_setupPushUnsub && window.api && window.api.on) {
+    _setupPushUnsub = window.api.on('setup:progress', (phase) => {
+      _state.setupPhase = phase;
+      _renderSection();
+    });
+  }
+
   invoke('run_setup').catch((e) => {
     // SetupManager.run_setup already records SetupPhase::Failed on error
     // before returning Err, so the poll will surface the failure and
@@ -121,12 +133,14 @@ async function _pollSetupProgress() {
       _state.setupComplete = true;
       clearInterval(_setupPollTimer);
       _setupPollTimer = null;
+      if (_setupPushUnsub) { try { _setupPushUnsub(); } catch {} _setupPushUnsub = null; }
       _state.stats = await fetchStats();
       showNotification('Local knowledge engine ready', 'success');
     } else if (phaseTag === 'failed') {
       _state.setupRunning = false;
       clearInterval(_setupPollTimer);
       _setupPollTimer = null;
+      if (_setupPushUnsub) { try { _setupPushUnsub(); } catch {} _setupPushUnsub = null; }
       const err = (status.phase && status.phase.error) || 'unknown';
       showNotification(`Setup failed: ${err}`, 'error');
     }

@@ -8,7 +8,7 @@ const CHANGELOG = [
     version: '1.21.0', date: '2026-04-17', title: 'Desktop App + Browser-Local Lens',
     items: [
       'Native desktop app: Linux AppImage/deb, macOS DMG, Windows NSIS installer. Same web codebase under an Electron shell — GitHub Releases seeds auto-update, and a managed first-run installer downloads Python + the Lens engine so you don\'t need a system Python',
-      'Browser-local Lens: Custom Knowledge Source now has a Browser (local, no network) backend. Documents stay on your device, embeddings run in-process via MiniLM (transformers.js), vectors persist in OPFS. Works offline, nothing uploaded',
+      'Browser-local Lens: Custom Knowledge Source now has a Browser (local) backend. Your documents and queries never leave this device — embeddings compute in-process via MiniLM (transformers.js), vectors persist in OPFS. First use downloads the model + library over HTTPS; after that it works offline',
       'Settings → Custom Knowledge Source has a backend toggle. Remote keeps the URL + Bearer flow. Local shows inline stats + drop-zone + doc list with per-file delete + clear-all',
       'Retrieval quality: MMR reranker (λ=0.5, 3× oversample) diversifies top-K across documents, fixing queries like "vitamin D and circadian and cold" that previously concentrated on one topic',
       'Document parsers for browser-local: PDF (pdf.js), DOCX (mammoth), ZIP recursion (JSZip). ZIPs expand inline and each inner doc becomes its own source',

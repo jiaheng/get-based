@@ -41,9 +41,9 @@ export async function checkForUpdate({ silent = false } = {}) {
 export async function installUpdateNow() {
   if (!isDesktop()) return;
   const banner = document.getElementById('getbased-update-banner');
-  if (banner) {
-    banner.querySelector('.update-banner-actions').innerHTML =
-      '<span style="color:var(--text-muted);font-size:13px">Downloading…</span>';
+  const actions = banner?.querySelector('.update-banner-actions');
+  if (actions) {
+    actions.innerHTML = '<span style="color:var(--text-muted);font-size:13px">Downloading…</span>';
   }
   try {
     await invoke('install_update');
@@ -51,8 +51,9 @@ export async function installUpdateNow() {
   } catch (e) {
     showNotification(`Install failed: ${e}`, 'error');
     console.error('[Updater]', e);
-    if (banner) {
-      banner.querySelector('.update-banner-actions').innerHTML = `
+    const actionsAgain = banner?.querySelector('.update-banner-actions');
+    if (actionsAgain) {
+      actionsAgain.innerHTML = `
         <button class="import-btn import-btn-primary" onclick="installUpdateNow()">Retry</button>
         <button class="import-btn import-btn-secondary" onclick="dismissUpdateBanner()">Dismiss</button>`;
     }

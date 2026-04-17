@@ -60,19 +60,22 @@ function selectedEmbeddingModel() {
 /// because the CLI's `stats`/`delete`/`clear` paths would otherwise see
 /// a different similarity floor than live queries.
 function lensEnv(extra = {}) {
+  const model = selectedEmbeddingModel();
   return {
     ...process.env,
     LENS_DATA_DIR: lensDir(),
-    LENS_EMBEDDING_MODEL: selectedEmbeddingModel(),
-    // The lens default (0.55) is calibrated for BGE-M3, where cosine-sim
-    // scores concentrate higher. MiniLM on jargon-heavy corpora tends to
-    // score related-but-tangential chunks in the 0.40-0.55 band, so the
-    // default quietly culls most good matches — a user with 12k+ excerpts
-    // saw ≤2 chunks returned for "vitamin D deficiency". 0.40 is
-    // permissive enough for MiniLM without letting in pure noise
-    // (anything below 0.35 is usually unrelated). Make it user-tunable
-    // via a slider in a follow-up.
-    LENS_SIMILARITY_FLOOR: process.env.LENS_SIMILARITY_FLOOR || '0.4',
+    LENS_EMBEDDING_MODEL: model,
+    // Similarity floor is model-dependent. BGE-M3 (1024-dim multilingual,
+    // MTEB ~59) scores related content in the 0.55-0.75 band, so the lens
+    // Python default of 0.55 is well-calibrated. MiniLM (384-dim English,
+    // MTEB ~41) scores the same content in 0.40-0.60, so 0.55 culls most
+    // good matches — a real user with 12k+ MiniLM excerpts saw ≤2 chunks
+    // returned for "vitamin D deficiency" at the default. 0.40 restores
+    // recall for MiniLM without letting in pure noise (anything under
+    // 0.35 is usually unrelated). Env var override still wins over the
+    // model-derived default.
+    LENS_SIMILARITY_FLOOR: process.env.LENS_SIMILARITY_FLOOR
+      || (/minilm/i.test(model) ? '0.4' : '0.55'),
     ...extra,
   };
 }
@@ -306,7 +309,7 @@ export class LensManager {
       env: lensEnv({
         LENS_HOST: String(host),
         LENS_PORT: String(port),
-        LENS_RERANKER: '0',
+        LENS_RERANKER: this._config.reranker ? '1' : '0',
         LENS_ONNX_PROVIDER: gpuProvider,
       }),
       stdio: ['ignore', 'pipe', 'pipe'],
