@@ -3,9 +3,11 @@
 // Probes a running dev server. Issue #119.
 // Run: node tests/test-dev-server-origin.js (server must be on :$PORT, default 8000)
 
-const http = require('http');
-const fs = require('fs');
-const path = require('path');
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const PORT = process.env.PORT || 8000;
 const HOST = '127.0.0.1';

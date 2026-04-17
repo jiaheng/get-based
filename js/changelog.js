@@ -5,6 +5,19 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.21.0', date: '2026-04-17', title: 'Desktop App + Browser-Local Lens',
+    items: [
+      'Native desktop app: Linux AppImage/deb, macOS DMG, Windows NSIS installer. Same web codebase under an Electron shell — GitHub Releases seeds auto-update, and a managed first-run installer downloads Python + the Lens engine so you don\'t need a system Python',
+      'Browser-local Lens: Custom Knowledge Source now has a Browser (local, no network) backend. Documents stay on your device, embeddings run in-process via MiniLM (transformers.js), vectors persist in OPFS. Works offline, nothing uploaded',
+      'Settings → Custom Knowledge Source has a backend toggle. Remote keeps the URL + Bearer flow. Local shows inline stats + drop-zone + doc list with per-file delete + clear-all',
+      'Retrieval quality: MMR reranker (λ=0.5, 3× oversample) diversifies top-K across documents, fixing queries like "vitamin D and circadian and cold" that previously concentrated on one topic',
+      'Document parsers for browser-local: PDF (pdf.js), DOCX (mammoth), ZIP recursion (JSZip). ZIPs expand inline and each inner doc becomes its own source',
+      'Security hardening throughout the Electron shell: IPC channel allowlist in preload, URL-scheme validation on shell.openExternal, will-navigate lock, Content-Security-Policy injection on every response, 2s quit timeout, install_update no longer re-checks the feed and can\'t be thrown by a transient 503',
+      'Cross-platform polish: Windows uses taskkill /F /T for cancel tree-kill, macOS uses ps -axo for child-process traversal, Linux walks /proc recursively. Drag-drop uses webUtils.getPathForFile (Electron 32 deprecated File.path)',
+      'CI workflow builds all three platforms on tag push or manual dispatch. Signing is optional — missing certs skip the sign step and produce unsigned artifacts that still work for testing',
+    ]
+  },
+  {
     version: '1.20.2', date: '2026-04-17', title: 'Desktop Lens: Audit Fixes',
     items: [
       'Engine setup now shows "Step N of 5" and a Cancel button — stops a stuck install without killing the app',

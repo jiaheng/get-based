@@ -58,7 +58,7 @@ return (async function() {
     !/['"]vitamin D deficiency supplementation['"][\s\S]{0,100}_doQuery/.test(lensSrc),
     'the probe should be read from config, not passed literally to _doQuery');
   assert('renderCustomLensSection includes lens-test-probe-input field', lensSrc.includes('lens-test-probe-input'));
-  assert('handleSaveLensConfig persists testProbe', lensSrc.includes('saveLensConfig({ name, url, enabled, topK, testProbe })'));
+  assert('handleSaveLensConfig persists testProbe', lensSrc.includes('saveLensConfig({ name, url, enabled, topK, testProbe, backend })'));
   assert('Connected toast distinguishes zero-result case',
     lensSrc.includes("the test query didn't find any close matches") && lensSrc.includes('your endpoint works'),
     'user with non-matching probe should see the endpoint worked, not "connection failed"');

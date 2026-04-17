@@ -33,6 +33,8 @@
 // Not the strongest embedder but the only one that runs acceptably in
 // pure WASM. Browser caches it after first load.
 
+import { chunkText, mmrSelect } from './lens-local-utils.js';
+
 const MODEL_ID = 'Xenova/all-MiniLM-L6-v2';
 const DIM = 384;
 // Chunk target: 800 chars, overlap 50, min 50 — matches lens/src/lens/store.py
@@ -74,10 +76,16 @@ self.addEventListener('message', async (e) => {
 // ── Init: load model + open OPFS ───────────────────────────────────
 
 async function handleInit() {
-  // Dynamic import of transformers.js. Using the CDN path during the spike;
-  // phase 2b vendors the library into vendor/transformers/. Pinned to 4.1.0
-  // to match the perf-spike numbers.
-  const { pipeline, env } = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.1.0');
+  // Vendored transformers.js + ORT SIMD WASM live under /vendor/transformers/.
+  // No CDN dependency at runtime — the library is the same 4.1.0 build that
+  // produced the perf-spike numbers. Absolute URL so the worker resolves it
+  // against the app's origin regardless of where the worker script sits.
+  const baseUrl = new URL('/vendor/transformers/', self.location.href);
+  const { pipeline, env } = await import(`${baseUrl}transformers.min.js`);
+  // Point ORT at our vendored WASM instead of its default CDN. We ship the
+  // plain SIMD variant (no threads — needs cross-origin-isolation headers
+  // most deployments don't set, no JSEP — WebGPU path is separate).
+  env.backends.onnx.wasm.wasmPaths = baseUrl.href;
   // Running inside a Worker. ORT's default spawns a NESTED worker for
   // inference which is 10-15× slower than in-worker execution.
   // https://onnxruntime.ai/docs/tutorials/web/env-flags.html#envwasmproxy
@@ -287,44 +295,16 @@ async function handleQuery(text, topK) {
     }
   }
   const candidates = candHeap.reverse(); // descending by score
-  const chosen = mmrSelect(candidates, topK, 0.5);
+  // getVec returns a live subarray view into the packed store — no copy
+  // per MMR iteration, hot path stays cheap.
+  const chosen = mmrSelect(candidates, topK, 0.5,
+    (i) => _vectors.subarray(i * DIM, (i + 1) * DIM));
   const result = chosen.map((r) => ({
     text: _chunks[r.i].text,
     source: _chunks[r.i].source,
     score: r.score,
   }));
   self.postMessage({ type: 'query_result', chunks: result });
-}
-
-/// Maximal Marginal Relevance selection. Starting from the top-scored
-/// candidate, each subsequent pick maximizes
-///   mmr = λ * query_similarity - (1 - λ) * max_sim_to_already_chosen
-/// λ=0.5 balances relevance and diversity. Pairwise similarity between
-/// chosen + candidate is a dot product on unit-normalized vectors.
-function mmrSelect(candidates, topK, lambda) {
-  if (candidates.length <= topK) return candidates;
-  const chosen = [candidates[0]];
-  const remaining = candidates.slice(1);
-  while (chosen.length < topK && remaining.length > 0) {
-    let bestIdx = 0;
-    let bestScore = -Infinity;
-    for (let r = 0; r < remaining.length; r++) {
-      const cand = remaining[r];
-      let maxSimToChosen = 0;
-      const candBase = cand.i * DIM;
-      for (const c of chosen) {
-        const cBase = c.i * DIM;
-        let s = 0;
-        for (let j = 0; j < DIM; j++) s += _vectors[candBase + j] * _vectors[cBase + j];
-        if (s > maxSimToChosen) maxSimToChosen = s;
-      }
-      const mmr = lambda * cand.score - (1 - lambda) * maxSimToChosen;
-      if (mmr > bestScore) { bestScore = mmr; bestIdx = r; }
-    }
-    chosen.push(remaining[bestIdx]);
-    remaining.splice(bestIdx, 1);
-  }
-  return chosen;
 }
 
 // ── Stats / Delete / Clear ─────────────────────────────────────────
@@ -386,30 +366,6 @@ async function handleClear() {
   };
   await persistAll();
   self.postMessage({ type: 'clear_done' });
-}
-
-// ── Chunking (matches lens Python's chunk_text for cross-backend parity) ──
-
-function chunkText(text, maxSize, overlap, minSize) {
-  text = text.trim();
-  if (text.length <= maxSize) return text.length >= minSize ? [text] : [];
-  const out = [];
-  let pos = 0;
-  while (pos < text.length) {
-    let end = Math.min(pos + maxSize, text.length);
-    // Snap to a whitespace boundary if we're not at EOF.
-    if (end < text.length) {
-      for (const sep of ['\n\n', '\n', '. ', ' ']) {
-        const idx = text.lastIndexOf(sep, end);
-        if (idx > pos + minSize) { end = idx + sep.length; break; }
-      }
-    }
-    const chunk = text.slice(pos, end).trim();
-    if (chunk.length >= minSize) out.push(chunk);
-    if (end >= text.length) break;
-    pos = Math.max(end - overlap, pos + 1);
-  }
-  return out;
 }
 
 // ── OPFS I/O ──────────────────────────────────────────────────────

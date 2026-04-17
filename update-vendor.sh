@@ -4,13 +4,18 @@ set -euo pipefail
 # ── Pinned versions (bump these, then re-run) ─────────────────────────────
 CHARTJS_VERSION="4.4.7"
 PDFJS_VERSION="3.11.174"
+TRANSFORMERS_VERSION="4.1.0"
+ONNXRUNTIME_VERSION="1.22.0"
+MAMMOTH_VERSION="1.8.0"
+JSZIP_VERSION="3.10.1"
 # Google Fonts: no version pin — re-run to fetch latest files
 # ───────────────────────────────────────────────────────────────────────────
 
 VENDOR_DIR="vendor"
 FONTS_DIR="$VENDOR_DIR/fonts"
+TRANSFORMERS_DIR="$VENDOR_DIR/transformers"
 
-mkdir -p "$FONTS_DIR"
+mkdir -p "$FONTS_DIR" "$TRANSFORMERS_DIR"
 
 echo "=== Downloading Chart.js $CHARTJS_VERSION ==="
 curl -fsSL "https://cdn.jsdelivr.net/npm/chart.js@${CHARTJS_VERSION}/dist/chart.umd.min.js" \
@@ -22,6 +27,29 @@ curl -fsSL "https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build/pdf.m
 
 curl -fsSL "https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.min.js" \
   -o "$VENDOR_DIR/pdf.worker.min.js"
+
+echo "=== Downloading mammoth $MAMMOTH_VERSION ==="
+curl -fsSL "https://cdn.jsdelivr.net/npm/mammoth@${MAMMOTH_VERSION}/mammoth.browser.min.js" \
+  -o "$VENDOR_DIR/mammoth.browser.min.js"
+
+echo "=== Downloading JSZip $JSZIP_VERSION ==="
+curl -fsSL "https://cdn.jsdelivr.net/npm/jszip@${JSZIP_VERSION}/dist/jszip.min.js" \
+  -o "$VENDOR_DIR/jszip.min.js"
+
+echo "=== Downloading @huggingface/transformers $TRANSFORMERS_VERSION ==="
+# Just the web bundle — browser-local lens doesn't use the Node build.
+curl -fsSL "https://cdn.jsdelivr.net/npm/@huggingface/transformers@${TRANSFORMERS_VERSION}/dist/transformers.web.min.js" \
+  -o "$TRANSFORMERS_DIR/transformers.min.js"
+
+echo "=== Downloading onnxruntime-web $ONNXRUNTIME_VERSION WASM ==="
+# Plain SIMD variant — 13 MB. No threads (needs cross-origin-isolation
+# headers most deployments don't set), no JSEP (WebGPU path is separate
+# and the browser-local lens falls back to WASM when WebGPU adapter is
+# unavailable).
+curl -fsSL "https://cdn.jsdelivr.net/npm/onnxruntime-web@${ONNXRUNTIME_VERSION}/dist/ort-wasm-simd-threaded.wasm" \
+  -o "$TRANSFORMERS_DIR/ort-wasm-simd-threaded.wasm"
+curl -fsSL "https://cdn.jsdelivr.net/npm/onnxruntime-web@${ONNXRUNTIME_VERSION}/dist/ort-wasm-simd-threaded.mjs" \
+  -o "$TRANSFORMERS_DIR/ort-wasm-simd-threaded.mjs"
 
 echo "=== Downloading Google Fonts ==="
 FONTS_CSS=$(curl -fsSL \

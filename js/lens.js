@@ -421,9 +421,21 @@ export function renderCustomLensSection() {
 
     <div id="lens-local-fields" style="${localFieldsStyle}">
       <div id="lens-local-stats" style="margin-top:10px;padding:10px 14px;background:var(--bg-secondary);border-radius:6px;font-size:13px;color:var(--text-muted)">Loading corpus stats…</div>
-      <div style="font-size:11px;color:var(--text-muted);margin-top:8px">
-        To add documents to your local corpus, open the <a href="/tests/spike-lens-local.html" target="_blank" rel="noopener" style="color:var(--accent)">lens manager</a> in a new tab. Drop files there, then return here — the chat will use the same OPFS-backed store.
+      <div id="lens-local-drop"
+           role="button" tabindex="0"
+           aria-label="Add documents — drop files here or press Enter to open the file picker"
+           style="margin-top:10px;padding:18px;border:2px dashed var(--border);border-radius:8px;text-align:center;font-size:13px;color:var(--text-muted);cursor:pointer;transition:border-color 0.15s"
+           onclick="document.getElementById('lens-local-filepick').click()">
+        <div style="font-size:20px" aria-hidden="true">📁</div>
+        <div style="margin-top:4px">Drop documents or click to add</div>
+        <div style="font-size:11px;margin-top:2px;opacity:0.7">PDF · Markdown · Text · Word · JSON · ZIP</div>
       </div>
+      <input type="file" id="lens-local-filepick" multiple style="display:none" accept=".txt,.md,.markdown,.rst,.json,.csv,.log,.pdf,.docx,.zip">
+      <div id="lens-local-progress-wrap" style="display:none;margin-top:8px">
+        <progress id="lens-local-progress" value="0" max="100" style="width:100%;height:8px"></progress>
+        <div id="lens-local-progress-text" style="font-size:11px;color:var(--text-muted);margin-top:4px"></div>
+      </div>
+      <div id="lens-local-doc-list" style="margin-top:10px"></div>
     </div>
 
     <div style="margin-top:10px">
@@ -534,22 +546,151 @@ export function handleLensBackendChange(backend) {
   updateLensIndicator();
 }
 
-/// Populate the local-corpus stats line. Lazy-imports lens-local.js so
-/// remote-only users don't pay the cost.
+/// Populate the local-corpus stats line + doc list + wire the drop handler.
+/// Lazy-imports lens-local.js so remote-only users don't pay the cost.
+/// Idempotent — called on panel render, backend toggle, and after ingest.
+let _localLens = null; // cached so drop / query / delete / clear share one handle
 async function _loadLocalLensStats() {
-  const el = document.getElementById('lens-local-stats');
-  if (!el) return;
+  const stats = document.getElementById('lens-local-stats');
+  const list = document.getElementById('lens-local-doc-list');
+  if (!stats) return;
   try {
-    const { openLocalLens } = await import('./lens-local.js');
-    const lens = await openLocalLens();
-    const stats = await lens.getStats();
-    if (stats.total_chunks === 0) {
-      el.innerHTML = '<span style="color:var(--text-muted)">No documents indexed yet. Open the lens manager (link below) to add files.</span>';
-    } else {
-      el.innerHTML = `<span style="color:var(--green)">&#9679;</span> ${stats.total_chunks.toLocaleString()} excerpt${stats.total_chunks !== 1 ? 's' : ''} from ${stats.documents.length} document${stats.documents.length !== 1 ? 's' : ''} · ${escapeHTML(stats.model)}`;
+    if (!_localLens) {
+      const mod = await import('./lens-local.js');
+      _localLens = await mod.openLocalLens();
     }
+    const s = await _localLens.getStats();
+    if (s.total_chunks === 0) {
+      stats.innerHTML = '<span style="color:var(--text-muted)">No documents indexed yet.</span>';
+    } else {
+      stats.innerHTML = `<span style="color:var(--green)">&#9679;</span> ${s.total_chunks.toLocaleString()} excerpt${s.total_chunks !== 1 ? 's' : ''} from ${s.documents.length} document${s.documents.length !== 1 ? 's' : ''} · ${escapeHTML(s.model)}`;
+    }
+    if (list) list.innerHTML = _renderLocalDocList(s.documents);
+    _attachLocalLensDropHandlers();
   } catch (e) {
-    el.innerHTML = `<span style="color:#fbbf24">Failed to load stats: ${escapeHTML(e?.message || String(e))}</span>`;
+    stats.innerHTML = `<span style="color:#fbbf24">Failed to load stats: ${escapeHTML(e?.message || String(e))}</span>`;
+  }
+}
+
+function _renderLocalDocList(docs) {
+  if (!docs || docs.length === 0) return '';
+  const rows = docs.map((d) => `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;border-bottom:1px solid var(--border);font-size:12px">
+      <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeAttr(d.source)}">${escapeHTML(d.source)}</span>
+      <span style="color:var(--text-muted);margin:0 10px;font-variant-numeric:tabular-nums">${d.chunks}</span>
+      <button class="kb-doc-delete" onclick="handleLocalLensDeleteDoc(${JSON.stringify(d.source).replace(/"/g, '&quot;')})" aria-label="Delete ${escapeAttr(d.source)}" title="Delete" style="background:transparent;border:0;color:var(--text-muted);cursor:pointer;font-size:16px;padding:2px 6px">×</button>
+    </div>
+  `).join('');
+  return `
+    <div style="margin-top:4px;max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:6px">${rows}</div>
+    <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+      <button class="import-btn import-btn-secondary" onclick="handleLocalLensClear()" style="font-size:12px;padding:4px 10px">Clear all</button>
+    </div>
+  `;
+}
+
+function _attachLocalLensDropHandlers() {
+  const drop = document.getElementById('lens-local-drop');
+  const picker = document.getElementById('lens-local-filepick');
+  if (!drop || !picker) return;
+  // Reset idempotent binding — removes listeners from a previous render so
+  // we don't stack them every time the section re-renders.
+  if (drop.dataset.wired === '1') return;
+  drop.dataset.wired = '1';
+  drop.addEventListener('dragenter', (e) => { e.preventDefault(); drop.style.borderColor = 'var(--accent)'; });
+  drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.style.borderColor = 'var(--accent)'; });
+  drop.addEventListener('dragleave', () => { drop.style.borderColor = 'var(--border)'; });
+  drop.addEventListener('drop', (e) => { e.preventDefault(); drop.style.borderColor = 'var(--border)'; _handleLocalLensIngest(e.dataTransfer?.files); });
+  drop.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); picker.click(); }
+  });
+  picker.addEventListener('change', (e) => { _handleLocalLensIngest(e.target.files); e.target.value = ''; });
+}
+
+async function _handleLocalLensIngest(fileList) {
+  if (!fileList || fileList.length === 0) return;
+  const wrap = document.getElementById('lens-local-progress-wrap');
+  const bar = document.getElementById('lens-local-progress');
+  const textEl = document.getElementById('lens-local-progress-text');
+  if (wrap) wrap.style.display = '';
+  if (textEl) textEl.textContent = 'Extracting text from files…';
+
+  // Parse main-thread, hand text to worker (see lens-local-parsers.js for
+  // why: module worker can't cleanly import the UMD parser bundles).
+  const { extractFromFile } = await import('./lens-local-parsers.js');
+  const files = [];
+  for (const f of Array.from(fileList)) {
+    try {
+      const extracted = await extractFromFile(f);
+      for (const e of extracted) files.push(e);
+    } catch (err) { console.warn('[lens-local] extract failed:', f.name, err); }
+  }
+  if (files.length === 0) {
+    if (textEl) textEl.textContent = 'No usable files.';
+    return;
+  }
+
+  if (!_localLens) {
+    const mod = await import('./lens-local.js');
+    _localLens = await mod.openLocalLens();
+  }
+  const { subscribeProgress } = await import('./lens-local.js');
+  const t0 = performance.now();
+  const unsub = subscribeProgress((p) => {
+    if (!bar || !textEl) return;
+    if (p.stage === 'start') {
+      bar.max = p.total;
+      textEl.textContent = `Starting: ${p.total} chunks across ${files.length} files`;
+    } else if (p.stage === 'embed') {
+      bar.value = p.index;
+      const rate = p.index / ((performance.now() - t0) / 1000);
+      textEl.textContent = `Embedding ${p.index}/${p.total} · ${rate.toFixed(1)}/s · ${p.source}`;
+    }
+  });
+  try {
+    const stats = await _localLens.ingest(files);
+    const dur = ((performance.now() - t0) / 1000).toFixed(1);
+    if (textEl) textEl.textContent = `Ingested ${stats.chunks_indexed} chunks from ${stats.files_seen} files in ${dur} s.`;
+    showNotification(`Indexed ${stats.chunks_indexed} excerpts from ${stats.files_seen} file${stats.files_seen !== 1 ? 's' : ''}.`, 'success');
+  } catch (e) {
+    if (textEl) textEl.textContent = `Ingest failed: ${e.message}`;
+    showNotification(`Ingest failed: ${e.message}`, 'error');
+  } finally {
+    unsub();
+    setTimeout(() => { if (wrap) wrap.style.display = 'none'; }, 3000);
+    await _loadLocalLensStats();
+  }
+}
+
+export async function handleLocalLensDeleteDoc(source) {
+  if (!source) return;
+  if (!confirm(`Delete "${source}" from your local knowledge base?`)) return;
+  if (!_localLens) {
+    const mod = await import('./lens-local.js');
+    _localLens = await mod.openLocalLens();
+  }
+  try {
+    const deleted = await _localLens.deleteDocument(source);
+    showNotification(`Removed ${deleted} excerpt${deleted !== 1 ? 's' : ''}.`, 'success');
+    await _loadLocalLensStats();
+  } catch (e) {
+    showNotification(`Delete failed: ${e.message}`, 'error');
+  }
+}
+
+export async function handleLocalLensClear() {
+  if (!confirm('Clear every document from your local knowledge base? This cannot be undone.')) return;
+  if (!_localLens) {
+    const mod = await import('./lens-local.js');
+    _localLens = await mod.openLocalLens();
+  }
+  try {
+    await _localLens.clear();
+    clearLensCache(); // stale query cache no longer points at anything real
+    showNotification('Local knowledge base cleared.', 'success');
+    await _loadLocalLensStats();
+  } catch (e) {
+    showNotification(`Clear failed: ${e.message}`, 'error');
   }
 }
 
@@ -581,4 +722,5 @@ Object.assign(window, {
   renderCustomLensSection, handleSaveLensConfig, handleToggleLens,
   handleClearLensCache, handleRemoveLens, updateLensIndicator,
   handleLensBackendChange,
+  handleLocalLensDeleteDoc, handleLocalLensClear,
 });

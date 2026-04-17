@@ -3,7 +3,7 @@
 // Usage: node run-tests.js (requires http server on :8000)
 // Or:    ./run-tests.sh (starts server automatically)
 
-const puppeteer = require('puppeteer');
+import puppeteer from 'puppeteer';
 
 const TEST_FILES = [
   'tests/test-crypto.js',
