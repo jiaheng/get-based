@@ -14,7 +14,18 @@ const SECRET_KEY = 'labcharts-lens-key';
 // docs, code docs, recipes…) can change it so the test result reflects their
 // actual content instead of always looking like "0 passages returned".
 const DEFAULT_TEST_PROBE = 'vitamin D deficiency supplementation';
-const DEFAULT_CONFIG = { name: '', url: '', enabled: false, topK: 5, testProbe: DEFAULT_TEST_PROBE };
+// backend: 'remote'         — POST to URL + Bearer key (today's behavior)
+//          'local-browser'  — in-process MiniLM via js/lens-local.js,
+//                             corpus in OPFS. No server, no network.
+//                             Works offline, slower on WASM but private.
+const DEFAULT_CONFIG = {
+  name: '',
+  url: '',
+  enabled: false,
+  topK: 5,
+  testProbe: DEFAULT_TEST_PROBE,
+  backend: 'remote',
+};
 const TIMEOUT_MS = 30000;
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const CACHE_MAX = 20;
@@ -60,7 +71,17 @@ export async function removeLens() {
 
 export function hasLens() {
   const cfg = getLensConfig();
-  return !!(cfg.enabled && cfg.url && getLensKey());
+  if (!cfg.enabled) return false;
+  if (cfg.backend === 'local-browser') {
+    // Local backend needs OPFS + Web Workers + dynamic import. Every
+    // evergreen browser has them; feature-detect defensively so we don't
+    // claim a working lens on a legacy UA that'll throw at first query.
+    return typeof navigator !== 'undefined'
+      && !!navigator.storage
+      && typeof Worker !== 'undefined';
+  }
+  // Default: remote URL requires a bearer key.
+  return !!(cfg.url && getLensKey());
 }
 
 // ─── URL validation ───────────────────────────────────────────
@@ -139,9 +160,53 @@ export function subscribeLensStatus(fn) {
 export async function queryLens(queryHint, opts = {}) {
   if (!hasLens()) return null;
   const cfg = getLensConfig();
-  const key = getLensKey();
   const topK = typeof opts.topK === 'number' ? opts.topK : cfg.topK;
-  return _doQuery(cfg.url, key, topK, cfg.name || 'Lens', queryHint, opts);
+  if (cfg.backend === 'local-browser') {
+    return _doLocalQuery(topK, cfg.name || 'Local Knowledge Base', queryHint, opts);
+  }
+  return _doQuery(cfg.url, getLensKey(), topK, cfg.name || 'Lens', queryHint, opts);
+}
+
+/// Local backend dispatch. Lazy-imports lens-local.js only when the user
+/// has opted into the browser backend — PWA users on the remote path
+/// don't pay the bundle cost.
+async function _doLocalQuery(topK, sourceName, queryHint, opts = {}) {
+  const profileId = state.currentProfile || 'default';
+  const hint = String(queryHint || '').trim();
+  if (!hint) return null;
+
+  // Local cache still helps — embedding the query itself is ~8 ms on
+  // WASM and the search is ~10 ms/10k chunks, so a cache hit saves
+  // 20-30 ms per repeat. Matches remote cache TTL + bucketing.
+  const ck = cacheKey('local-browser', topK, profileId, hint);
+  const cached = cacheGet(ck);
+  if (cached) {
+    if (isDebugMode()) console.log('[Lens] (local) cache hit');
+    updateLensStatus({ state: 'active', lastChunkCount: cached.chunks.length, lastError: null, sourceName });
+    return cached;
+  }
+
+  try {
+    const mod = await import('./lens-local.js');
+    const result = await mod.queryLensLocal(hint, { topK });
+    if (!result) {
+      updateLensStatus({ state: 'active', lastChunkCount: 0, lastError: null, sourceName });
+      return { chunks: [], sourceName };
+    }
+    // Conform to the same shape as remote results so chat.js doesn't care.
+    const normalized = {
+      chunks: result.chunks.map((c) => ({ text: c.text, source: c.source })),
+      sourceName,
+    };
+    cacheSet(ck, normalized);
+    updateLensStatus({ state: 'active', lastChunkCount: normalized.chunks.length, lastError: null, sourceName });
+    return normalized;
+  } catch (e) {
+    const msg = e?.message || 'unknown error';
+    if (isDebugMode()) console.warn('[Lens] (local) query failed:', msg);
+    updateLensStatus({ state: 'error', lastError: msg });
+    return null;
+  }
 }
 
 async function _doQuery(url, key, topK, sourceName, queryHint, opts = {}) {
@@ -277,7 +342,11 @@ subscribeLensStatus(updateLensIndicator);
 export function renderCustomLensSection() {
   const cfg = getLensConfig();
   const keySet = !!getLensKey();
-  const connected = cfg.url && keySet;
+  const isLocal = cfg.backend === 'local-browser';
+  // Connected: backend-dependent. Remote needs URL + key; local only
+  // needs the backend toggle set. Browsers without OPFS / Workers
+  // would hasLens() == false, but that path is already feature-detected.
+  const connected = isLocal || (cfg.url && keySet);
   const status = getLensStatus();
   const statusChip = !connected
     ? '<span style="color:var(--text-muted)">Not connected</span>'
@@ -292,44 +361,88 @@ export function renderCustomLensSection() {
       ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Last query: ${status.lastChunkCount} excerpt${status.lastChunkCount !== 1 ? 's' : ''}${status.sourceName ? ' from ' + escapeHTML(status.sourceName) : ''}</div>`
       : '';
 
+  // Remote-only fields, hidden when Browser backend is selected. The
+  // radio handler swaps the `display:none` so we don't have to re-render
+  // the whole panel on toggle — preserves scroll position + focus.
+  const remoteFieldsStyle = isLocal ? 'display:none' : '';
+  const localFieldsStyle = isLocal ? '' : 'display:none';
+
   return `<div class="ai-provider-panel">
     <div class="ai-provider-desc">Connect a knowledge base to ground the AI's analysis in real sources — research papers, clinical guides, or any documents you choose. When enabled, the AI looks up the most relevant excerpts from your library before answering. <a href="/docs/guide/interpretive-lens#custom-knowledge-source-rag" target="_blank" rel="noopener" style="color:var(--accent)">Setup guide &rarr;</a></div>
     <div class="api-key-status" id="lens-status-chip">${statusChip}${lastInfo}</div>
-    <div style="margin-top:8px;display:flex;align-items:center;gap:10px">
+
+    <div style="margin-top:10px">
+      <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">Backend</label>
+      <div style="display:flex;gap:14px;flex-wrap:wrap">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+          <input type="radio" name="lens-backend" value="remote" ${!isLocal ? 'checked' : ''} onchange="handleLensBackendChange('remote')">
+          Remote server
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+          <input type="radio" name="lens-backend" value="local-browser" ${isLocal ? 'checked' : ''} onchange="handleLensBackendChange('local-browser')">
+          Browser (local, no network)
+        </label>
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:6px">
+        ${isLocal
+          ? 'Your documents stay on this device. First-time indexing is slower but queries are instant and work offline.'
+          : 'Connect to a lens server you run (or one run by someone you trust). Fastest for large corpora.'}
+      </div>
+    </div>
+
+    <div style="margin-top:10px;display:flex;align-items:center;gap:10px">
       <label class="toggle-switch" for="lens-enabled-toggle">
         <input type="checkbox" id="lens-enabled-toggle" ${cfg.enabled ? 'checked' : ''} onchange="handleToggleLens(this.checked)">
         <span class="toggle-slider"></span>
       </label>
       <label for="lens-enabled-toggle" style="font-size:13px;cursor:pointer">Enable Knowledge Source</label>
     </div>
+
     <div style="margin-top:10px">
       <label style="font-size:12px;color:var(--text-muted)" for="lens-name-input">Display name</label>
-      <input type="text" class="api-key-input" id="lens-name-input" value="${escapeAttr(cfg.name)}" placeholder="e.g. Functional Medicine Library" style="margin-top:4px">
+      <input type="text" class="api-key-input" id="lens-name-input" value="${escapeAttr(cfg.name)}" placeholder="${isLocal ? 'e.g. My Research Library' : 'e.g. Functional Medicine Library'}" style="margin-top:4px">
     </div>
-    <div style="margin-top:8px">
-      <label style="font-size:12px;color:var(--text-muted)" for="lens-url-input">Endpoint URL</label>
-      <input type="text" class="api-key-input" id="lens-url-input" value="${escapeAttr(cfg.url)}" placeholder="https://your-server.example.com/query" style="margin-top:4px">
+
+    <div id="lens-remote-fields" style="${remoteFieldsStyle}">
+      <div style="margin-top:8px">
+        <label style="font-size:12px;color:var(--text-muted)" for="lens-url-input">Endpoint URL</label>
+        <input type="text" class="api-key-input" id="lens-url-input" value="${escapeAttr(cfg.url)}" placeholder="https://your-server.example.com/query" style="margin-top:4px">
+      </div>
+      <div style="margin-top:8px">
+        <label style="font-size:12px;color:var(--text-muted)" for="lens-key-input">API key</label>
+        <input type="password" class="api-key-input" id="lens-key-input" value="${escapeAttr(keySet ? '••••••••' : '')}" placeholder="Your access key" style="margin-top:4px">
+      </div>
+      <div style="margin-top:8px">
+        <label style="font-size:12px;color:var(--text-muted)" for="lens-test-probe-input">Test query</label>
+        <input type="text" class="api-key-input" id="lens-test-probe-input" value="${escapeAttr(cfg.testProbe || DEFAULT_TEST_PROBE)}" placeholder="${escapeAttr(DEFAULT_TEST_PROBE)}" style="margin-top:4px">
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Sent to your endpoint on Save &amp; Test to verify the connection. Pick a query your corpus is likely to have good matches for.</div>
+      </div>
     </div>
-    <div style="margin-top:8px">
-      <label style="font-size:12px;color:var(--text-muted)" for="lens-key-input">API key</label>
-      <input type="password" class="api-key-input" id="lens-key-input" value="${escapeAttr(keySet ? '••••••••' : '')}" placeholder="Your access key" style="margin-top:4px">
+
+    <div id="lens-local-fields" style="${localFieldsStyle}">
+      <div id="lens-local-stats" style="margin-top:10px;padding:10px 14px;background:var(--bg-secondary);border-radius:6px;font-size:13px;color:var(--text-muted)">Loading corpus stats…</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:8px">
+        To add documents to your local corpus, open the <a href="/tests/spike-lens-local.html" target="_blank" rel="noopener" style="color:var(--accent)">lens manager</a> in a new tab. Drop files there, then return here — the chat will use the same OPFS-backed store.
+      </div>
     </div>
-    <div style="margin-top:8px">
+
+    <div style="margin-top:10px">
       <label style="font-size:12px;color:var(--text-muted)" for="lens-topk-input">Excerpts per question</label>
       <input type="number" class="api-key-input" id="lens-topk-input" value="${cfg.topK || 5}" min="1" max="10" style="margin-top:4px;width:100px">
-      <div style="font-size:11px;color:var(--text-muted);margin-top:4px">How many of the most relevant excerpts the AI sees with each chat question. The server may return fewer if the question doesn't match much.</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:4px">How many of the most relevant excerpts the AI sees with each chat question.</div>
     </div>
-    <div style="margin-top:8px">
-      <label style="font-size:12px;color:var(--text-muted)" for="lens-test-probe-input">Test query</label>
-      <input type="text" class="api-key-input" id="lens-test-probe-input" value="${escapeAttr(cfg.testProbe || DEFAULT_TEST_PROBE)}" placeholder="${escapeAttr(DEFAULT_TEST_PROBE)}" style="margin-top:4px">
-      <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Sent to your endpoint on Save &amp; Test to verify the connection. Pick a query your corpus is likely to have good matches for — health, legal, code, whatever fits.</div>
-    </div>
+
     <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
-      <button class="import-btn import-btn-primary" onclick="handleSaveLensConfig()">Save &amp; Test</button>
+      <button class="import-btn import-btn-primary" onclick="handleSaveLensConfig()">${isLocal ? 'Save' : 'Save &amp; Test'}</button>
       ${connected ? '<button class="import-btn import-btn-secondary" onclick="handleClearLensCache()">Clear cache</button>' : ''}
       ${connected ? '<button class="import-btn import-btn-secondary" onclick="handleRemoveLens()">Remove</button>' : ''}
     </div>
-    <div class="api-key-notice" style="margin-top:12px">Your questions are sent directly to the server you configure. Only connect to servers you control or trust. Your key is encrypted at rest on this device.</div>
+
+    <div class="api-key-notice" style="margin-top:12px">
+      ${isLocal
+        ? 'Your documents and queries never leave this browser. The embedding model runs in a Web Worker; vectors persist in OPFS (origin-private storage).'
+        : 'Your questions are sent directly to the server you configure. Only connect to servers you control or trust. Your key is encrypted at rest on this device.'}
+    </div>
   </div>`;
 }
 
@@ -363,11 +476,24 @@ function _updateLensStatusChip() {
 
 export async function handleSaveLensConfig() {
   const name = (document.getElementById('lens-name-input')?.value || '').trim();
+  const topK = Math.max(1, Math.min(10, parseInt(document.getElementById('lens-topk-input')?.value, 10) || 5));
+  const enabled = !!document.getElementById('lens-enabled-toggle')?.checked;
+  const backend = document.querySelector('input[name="lens-backend"]:checked')?.value
+    || getLensConfig().backend || 'remote';
+
+  if (backend === 'local-browser') {
+    // Browser backend has no URL + no key. Still persists all shared
+    // fields (name, topK, enabled) so switching backends preserves them.
+    saveLensConfig({ name, enabled, topK, backend });
+    _rerenderLensSection();
+    _loadLocalLensStats();
+    showNotification('Saved. Using browser-local corpus.', 'success');
+    return;
+  }
+
   const url = (document.getElementById('lens-url-input')?.value || '').trim().replace(/\/+$/, '');
   const keyRaw = document.getElementById('lens-key-input')?.value || '';
-  const topK = Math.max(1, Math.min(10, parseInt(document.getElementById('lens-topk-input')?.value, 10) || 5));
   const testProbe = (document.getElementById('lens-test-probe-input')?.value || '').trim() || DEFAULT_TEST_PROBE;
-  const enabled = !!document.getElementById('lens-enabled-toggle')?.checked;
 
   if (!url) { showNotification('Please enter an endpoint URL', 'error'); return; }
   if (!isValidLensUrl(url)) { showNotification('URL must be https:// (or http:// to localhost / LAN / .local)', 'error'); return; }
@@ -375,7 +501,7 @@ export async function handleSaveLensConfig() {
   const key = (keyRaw === '••••••••') ? getLensKey() : keyRaw.trim();
   if (!key) { showNotification('Please enter an API key', 'error'); return; }
 
-  saveLensConfig({ name, url, enabled, topK, testProbe });
+  saveLensConfig({ name, url, enabled, topK, testProbe, backend });
   if (keyRaw !== '••••••••') await saveLensKey(key);
 
   const result = await testLensConnection();
@@ -391,6 +517,39 @@ export async function handleSaveLensConfig() {
     showNotification(msg, 'success');
   } else {
     showNotification(`Connection failed: ${result.error}`, 'error');
+  }
+}
+
+/// Backend radio handler — saves the choice immediately (so a reload
+/// keeps the selection) and swaps field visibility without re-rendering,
+/// so unsaved edits in the name/topK inputs aren't lost.
+export function handleLensBackendChange(backend) {
+  saveLensConfig({ backend });
+  const remote = document.getElementById('lens-remote-fields');
+  const local = document.getElementById('lens-local-fields');
+  if (remote) remote.style.display = backend === 'local-browser' ? 'none' : '';
+  if (local) local.style.display = backend === 'local-browser' ? '' : 'none';
+  if (backend === 'local-browser') _loadLocalLensStats();
+  _updateLensStatusChip();
+  updateLensIndicator();
+}
+
+/// Populate the local-corpus stats line. Lazy-imports lens-local.js so
+/// remote-only users don't pay the cost.
+async function _loadLocalLensStats() {
+  const el = document.getElementById('lens-local-stats');
+  if (!el) return;
+  try {
+    const { openLocalLens } = await import('./lens-local.js');
+    const lens = await openLocalLens();
+    const stats = await lens.getStats();
+    if (stats.total_chunks === 0) {
+      el.innerHTML = '<span style="color:var(--text-muted)">No documents indexed yet. Open the lens manager (link below) to add files.</span>';
+    } else {
+      el.innerHTML = `<span style="color:var(--green)">&#9679;</span> ${stats.total_chunks.toLocaleString()} excerpt${stats.total_chunks !== 1 ? 's' : ''} from ${stats.documents.length} document${stats.documents.length !== 1 ? 's' : ''} · ${escapeHTML(stats.model)}`;
+    }
+  } catch (e) {
+    el.innerHTML = `<span style="color:#fbbf24">Failed to load stats: ${escapeHTML(e?.message || String(e))}</span>`;
   }
 }
 
@@ -421,4 +580,5 @@ Object.assign(window, {
   subscribeLensStatus, getLensStatus, isValidLensUrl,
   renderCustomLensSection, handleSaveLensConfig, handleToggleLens,
   handleClearLensCache, handleRemoveLens, updateLensIndicator,
+  handleLensBackendChange,
 });
