@@ -1,0 +1,80 @@
+# CI test workflow. Runs on every PR + push to main.
+#
+# Runs the full ./run-tests.sh battery:
+#   - Node-side tests (electron helpers, lens-local-utils, IPC drift,
+#     updater wiring, dev-server origin guard)
+#   - Class-level integration tests (SetupManager, LensManager)
+#   - Full Electron E2E (spawns real Electron, attaches Puppeteer,
+#     exercises every IPC channel, verifies CSP + preload allowlist)
+#   - Puppeteer-driven web-app suite (45 test files, ~850 assertions)
+#
+# xvfb-run provides a virtual X server for the Electron E2E test,
+# which needs a display even in headless BrowserWindow mode.
+
+name: Tests
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Electron E2E display dependencies
+        # xvfb: virtual framebuffer so Electron can create a BrowserWindow
+        # without a physical display. Other deps match Electron's Linux
+        # requirements (libgtk, libnss3, etc.) — setup-node only installs
+        # Node, not Electron's system deps.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            xvfb \
+            libgtk-3-0 \
+            libnotify4 \
+            libnss3 \
+            libxss1 \
+            libxtst6 \
+            xdg-utils \
+            libatspi2.0-0 \
+            libdrm2 \
+            libgbm1 \
+            libxcb-dri3-0
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Cache Puppeteer Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/puppeteer
+          key: puppeteer-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Run test suite
+        # xvfb-run wraps the command in a virtual display. --auto-servernum
+        # avoids the :99 collision when multiple runners share state.
+        run: |
+          xvfb-run --auto-servernum --server-args='-screen 0 1280x1024x24' ./run-tests.sh
+
+      - name: Upload test logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs
+          path: |
+            /tmp/electron-dev.log
+            /tmp/appimage.log
+          if-no-files-found: ignore
+          retention-days: 7
