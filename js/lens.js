@@ -386,9 +386,9 @@ export function renderCustomLensSection() {
   // string we return, so the #lens-local-stats element doesn't exist yet
   // at this point. rAF defers until after that assignment paints, at
   // which point _loadLocalLensStats can populate stats + doc list +
-  // wire the drop handlers. Without this, the panel opened with
-  // backend=local-browser stayed stuck on "Loading corpus stats…".
-  if (cfg.backend === 'local-browser' && typeof requestAnimationFrame === 'function') {
+  // library dropdown + wire the drop handlers. Without this, the panel
+  // opened with backend=in-browser stayed stuck on "Loading…".
+  if (cfg.backend === 'in-browser' && typeof requestAnimationFrame === 'function') {
     requestAnimationFrame(() => {
       try { _loadLocalLensStats(); } catch {}
     });
