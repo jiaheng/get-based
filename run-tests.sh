@@ -53,11 +53,11 @@ node "$DIR/tests/test-lens-local-utils.js" || exit 1
 node "$DIR/tests/test-electron-ipc.js" || exit 1
 node "$DIR/tests/test-electron-ipc-drift.js" || exit 1
 node "$DIR/tests/test-updater-wiring.js" || exit 1
-# Full Electron E2E — graceful-skips if no display available.
-# Re-assert dev-server after E2E: Electron E2E has historically been the
-# suspect when dev-server disappears mid-suite on CI. If it died, bail
-# out with a clear message rather than cascading ECONNREFUSED failures.
-node "$DIR/tests/test-electron-e2e.js" || exit 1
-ensure_server
+# Everything that needs dev-server comes BEFORE the Electron E2E so a
+# possible side-effect of the E2E tearing dev-server down on GH Actions'
+# xvfb runners doesn't cascade. setsid on dev-server didn't fully
+# isolate it across that boundary, so we reorder instead.
 PORT=$PORT node "$DIR/tests/test-dev-server-origin.js" || exit 1
 PORT=$PORT NODE_PATH="$NODE_PATH_EXTRA" node "$DIR/run-tests.js"
+# Full Electron E2E last. Graceful-skips if no display available.
+node "$DIR/tests/test-electron-e2e.js" || exit 1
