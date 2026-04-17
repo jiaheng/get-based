@@ -1,4 +1,4 @@
-// setup.js — Lens auto-start on app launch for Tauri builds.
+// setup.js — Lens auto-start on app launch for desktop builds.
 //
 // The interactive setup UI + progress polling + phase rendering all live in
 // `js/knowledge-base.js` now (Settings → AI → Local Knowledge Base). This
@@ -6,22 +6,22 @@
 // the KB state and left both views out of sync. Only the auto-start hook
 // survived the consolidation.
 
-// ─── Tauri API detection ────────────────────────────────────────
-function isTauri() {
-  return !!(window.__TAURI_INTERNALS__);
+// ─── Desktop API detection ──────────────────────────────────────
+function isDesktop() {
+  return !!(window.api && window.api.isDesktop);
 }
 
 async function invoke(cmd, args = {}) {
-  if (!isTauri()) return null;
-  return window.__TAURI_INTERNALS__.invoke(cmd, args);
+  if (!isDesktop()) return null;
+  return window.api.invoke(cmd, args);
 }
 
 export function isSetupAvailable() {
-  return isTauri();
+  return isDesktop();
 }
 
 export async function fetchSetupStatus() {
-  if (!isTauri()) return null;
+  if (!isDesktop()) return null;
   try {
     return await invoke('get_setup_status');
   } catch (e) {
@@ -34,7 +34,7 @@ export async function fetchSetupStatus() {
 // Knowledge Source enabled. Keeps the lens server warm when the user returns
 // to the app, without ever pulling them through setup against their will.
 async function maybeAutoStartLens() {
-  if (!isTauri()) return;
+  if (!isDesktop()) return;
   try {
     const status = await fetchSetupStatus();
     if (!status || status.is_first_run) return; // not set up yet

@@ -1,22 +1,22 @@
-// updater.js — Auto-update check + install banner for Tauri builds.
+// updater.js — Auto-update check + install banner for desktop builds.
 // Browser builds: all functions are no-ops.
 
 import { showNotification } from './utils.js';
 
-function isTauri() {
-  return !!(window.__TAURI_INTERNALS__);
+function isDesktop() {
+  return !!(window.api && window.api.isDesktop);
 }
 
 async function invoke(cmd, args = {}) {
-  if (!isTauri()) return null;
-  return window.__TAURI_INTERNALS__.invoke(cmd, args);
+  if (!isDesktop()) return null;
+  return window.api.invoke(cmd, args);
 }
 
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6h
 const SKIP_VERSION_KEY = 'getbased-update-skip-version';
 
 export async function checkForUpdate({ silent = false } = {}) {
-  if (!isTauri()) return null;
+  if (!isDesktop()) return null;
   try {
     const info = await invoke('check_for_update');
     if (info && info.available) {
@@ -39,7 +39,7 @@ export async function checkForUpdate({ silent = false } = {}) {
 }
 
 export async function installUpdateNow() {
-  if (!isTauri()) return;
+  if (!isDesktop()) return;
   const banner = document.getElementById('getbased-update-banner');
   if (banner) {
     banner.querySelector('.update-banner-actions').innerHTML =
@@ -99,7 +99,7 @@ function _esc(s) {
 
 // Background auto-check on launch + every 6h
 async function startAutoCheck() {
-  if (!isTauri()) return;
+  if (!isDesktop()) return;
   // Initial check after 30s (don't compete with first-run flow)
   setTimeout(() => checkForUpdate({ silent: true }), 30000);
   setInterval(() => checkForUpdate({ silent: true }), CHECK_INTERVAL_MS);

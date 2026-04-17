@@ -11,18 +11,21 @@
 
 import { showNotification } from './utils.js';
 
-// ─── Tauri detection ─────────────────────────────────────────────
-function isTauri() {
-  return !!(window.__TAURI_INTERNALS__);
+// ─── Desktop detection ───────────────────────────────────────────
+// `window.api` is exposed by electron/preload.cjs when running in the
+// Electron desktop shell. In the plain-browser PWA build it's undefined
+// and every function here early-returns so the whole section is hidden.
+function isDesktop() {
+  return !!(window.api && window.api.isDesktop);
 }
 
 async function invoke(cmd, args = {}) {
-  if (!isTauri()) return null;
-  return window.__TAURI_INTERNALS__.invoke(cmd, args);
+  if (!isDesktop()) return null;
+  return window.api.invoke(cmd, args);
 }
 
 export function isKnowledgeBaseAvailable() {
-  return isTauri();
+  return isDesktop();
 }
 
 // ─── State ───────────────────────────────────────────────────────
@@ -82,7 +85,7 @@ async function fetchStats() {
 
 // ─── Setup integration (start setup + poll progress within KB section) ──
 export async function startKbSetup() {
-  if (!isTauri()) return;
+  if (!isDesktop()) return;
   _state.setupRunning = true;
   _renderSection();
 
@@ -308,7 +311,7 @@ function _phaseProgress(phase) {
 
 // ─── Auto-configure Custom Knowledge Source ──────────────────────
 export async function autoConfigureCustomLens() {
-  if (!isTauri()) return;
+  if (!isDesktop()) return;
   // Don't wire up an empty corpus — the chat AI would silently return zero
   // excerpts forever and the user would think the feature is broken. Force
   // the user to ingest at least one document first.
@@ -349,12 +352,13 @@ export async function autoConfigureCustomLens() {
 }
 
 // ─── File ingest (drag & drop + click) ───────────────────────────
-// Uses the Tauri dialog plugin's IPC command directly instead of importing
-// @tauri-apps/plugin-dialog from unpkg. The plugin is a thin wrapper over
-// invoke('plugin:dialog|open', { options }); calling invoke directly avoids
-// a runtime CORS/CSP dependency on unpkg and keeps the dev-mock compatible.
+// Uses the legacy Tauri-style IPC command name for the dialog — Electron
+// main wraps `dialog.showOpenDialog` under the same channel so the call
+// site stays identical across the port. `invoke('plugin:dialog|open',
+// { options })` returns a string | string[] | null matching what Tauri's
+// plugin-dialog returned.
 async function pickFiles() {
-  if (!isTauri()) return [];
+  if (!isDesktop()) return [];
   try {
     const selected = await invoke('plugin:dialog|open', {
       options: {
@@ -381,7 +385,7 @@ async function pickFiles() {
 }
 
 async function pickFolder() {
-  if (!isTauri()) return null;
+  if (!isDesktop()) return null;
   try {
     const selected = await invoke('plugin:dialog|open', {
       options: { directory: true, multiple: false },
@@ -394,14 +398,14 @@ async function pickFolder() {
 }
 
 export async function handleAddFiles() {
-  if (!isTauri() || _state.ingesting) return;
+  if (!isDesktop() || _state.ingesting) return;
   const paths = await pickFiles();
   if (!paths || paths.length === 0) return;
   await runIngest(paths);
 }
 
 export async function handleAddFolder() {
-  if (!isTauri() || _state.ingesting) return;
+  if (!isDesktop() || _state.ingesting) return;
   const folder = await pickFolder();
   if (!folder) return;
   await runIngest([folder]);
@@ -460,7 +464,7 @@ async function runIngest(paths) {
 }
 
 export async function handleDeleteDocument(source) {
-  if (!isTauri()) return;
+  if (!isDesktop()) return;
   if (!confirm(`Delete "${source}" from your knowledge base? This removes all excerpts indexed from it.`)) {
     return;
   }
@@ -475,7 +479,7 @@ export async function handleDeleteDocument(source) {
 }
 
 export async function handleClearAllDocuments() {
-  if (!isTauri() || _state.ingesting) return;
+  if (!isDesktop() || _state.ingesting) return;
   const docCount = (_state.stats?.documents || []).length;
   const chunkCount = _state.stats?.total_chunks || 0;
   if (docCount === 0) return;
@@ -494,11 +498,11 @@ export async function handleClearAllDocuments() {
   }
 }
 
-/// User hit "Cancel" during the initial setup download. Tauri side flips a
+/// User hit "Cancel" during the initial setup download. Main side flips a
 /// flag + kills the currently running subprocess; the poll loop observes
 /// the resulting Failed phase and updates the UI accordingly.
 export async function handleCancelSetup() {
-  if (!isTauri() || !_state.setupRunning) return;
+  if (!isDesktop() || !_state.setupRunning) return;
   try {
     await invoke('cancel_setup');
   } catch (e) {
@@ -525,8 +529,9 @@ function _attachDropHandlers() {
   zone.addEventListener('drop', async (e) => {
     e.preventDefault();
     zone.classList.remove('kb-drop-zone-active');
-    if (!isTauri()) return;
-    // Tauri exposes file paths via dataTransfer.files (with .path on each File)
+    if (!isDesktop()) return;
+    // Electron (and Tauri) expose native file paths on dataTransfer.files
+    // via the non-standard `.path` field on each File object.
     const files = Array.from(e.dataTransfer?.files || []);
     const paths = files.map(f => f.path).filter(Boolean);
     if (paths.length > 0) {
@@ -546,7 +551,7 @@ function _attachDropHandlers() {
 
 // ─── UI rendering ────────────────────────────────────────────────
 export function renderKnowledgeBaseSection() {
-  if (!isTauri()) return '';
+  if (!isDesktop()) return '';
 
   // Trigger async data load + re-render once data lands
   if (!_state.loading && !_state.ingesting) {
@@ -715,8 +720,8 @@ function _innerHtml() {
 }
 
 /**
- * Dashboard discoverability banner — shown only when running in Tauri AND
- * the local Knowledge Base hasn't been set up yet. Browser users (PWA / web)
+ * Dashboard discoverability banner — shown only when running in the desktop
+ * shell AND the local Knowledge Base hasn't been set up yet. Browser users
  * see nothing because they can't run the local engine. Once setup completes,
  * the banner disappears forever (driven by _state.setupComplete which is
  * read from the marker file via get_setup_status).
@@ -737,7 +742,7 @@ function _bannerInnerHtml() {
 }
 
 export function renderKbDashboardBanner() {
-  if (!isTauri()) return '';
+  if (!isDesktop()) return '';
   // First cold dashboard load: fetch setup status on demand and only render
   // the banner after we've confirmed setup isn't already done. Without this
   // the banner flashes on every cold launch (even when the user has setup
