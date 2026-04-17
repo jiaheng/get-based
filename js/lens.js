@@ -394,10 +394,29 @@ export function renderCustomLensSection() {
     });
   }
   const keySet = !!getLensKey();
+  const canUseDesktop = typeof window !== 'undefined' && !!window.api?.isDesktop;
+
+  // Auto-coerce backend to the right on-device flavor for this environment.
+  // Desktop users shouldn't be stuck on the in-browser engine (slower, no
+  // server-class retrieval); PWA users can't run the desktop engine at all.
+  // Silent migration — runs once per render if the backend doesn't match.
+  if (canUseDesktop && cfg.backend === 'in-browser') {
+    saveLensConfig({ backend: 'desktop-engine' });
+    cfg.backend = 'desktop-engine';
+  } else if (!canUseDesktop && cfg.backend === 'desktop-engine') {
+    saveLensConfig({ backend: 'in-browser' });
+    cfg.backend = 'in-browser';
+  }
+
   const isBrowser = cfg.backend === 'in-browser';
   const isDesktop = cfg.backend === 'desktop-engine';
   const isExternal = cfg.backend === 'external-server';
-  const canUseDesktop = typeof window !== 'undefined' && !!window.api?.isDesktop;
+  const isOnDevice = isBrowser || isDesktop;
+  // On-device engine label + description vary by environment.
+  const onDeviceBackend = canUseDesktop ? 'desktop-engine' : 'in-browser';
+  const onDeviceDesc = canUseDesktop
+    ? 'Runs a native engine on this computer. Fastest option; handles large libraries. One-time ~3 GB setup.'
+    : 'Runs entirely in this browser. No install — first use downloads a small AI model (~100 MB); after that it works offline.';
 
   // Connected: backend-dependent.
   //   in-browser: always "ready" (feature-detected via hasLens elsewhere).
@@ -428,35 +447,19 @@ export function renderCustomLensSection() {
   const externalFieldsStyle = isExternal ? '' : 'display:none';
 
   return `<div class="ai-provider-panel">
-    <div class="ai-provider-desc">A Knowledge Base grounds the AI's analysis in real documents you provide — research papers, clinical guides, personal notes. Pick an engine below, add your documents, and the AI references them when answering your questions.</div>
+    <div class="ai-provider-desc">A Knowledge Base grounds the AI's analysis in real documents you provide — research papers, clinical guides, personal notes. Add your documents below and the AI references them when answering your questions.</div>
     <div class="api-key-status" id="lens-status-chip">${statusChip}${lastInfo}</div>
 
-    <fieldset style="margin-top:10px;border:0;padding:0;min-width:0">
-      <legend style="font-size:12px;color:var(--text-muted);margin-bottom:4px;padding:0">Engine</legend>
-      <div style="display:flex;gap:14px;flex-wrap:wrap">
-        ${canUseDesktop ? `
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
-          <input type="radio" name="lens-backend" value="desktop-engine" ${isDesktop ? 'checked' : ''} onchange="handleLensBackendChange('desktop-engine')">
-          Desktop (faster, one-time install)
-        </label>
-        ` : ''}
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
-          <input type="radio" name="lens-backend" value="in-browser" ${isBrowser ? 'checked' : ''} onchange="handleLensBackendChange('in-browser')">
-          In-browser (no install, works anywhere)
-        </label>
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
-          <input type="radio" name="lens-backend" value="external-server" ${isExternal ? 'checked' : ''} onchange="handleLensBackendChange('external-server')">
-          External server
-        </label>
+    <div style="margin-top:10px">
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Where to run it</div>
+      <div class="ctx-btn-group" role="radiogroup" aria-label="Knowledge Base engine">
+        <button type="button" class="ctx-btn-option ${isOnDevice ? 'active' : ''}" role="radio" aria-checked="${isOnDevice}" onclick="handleLensBackendChange('${onDeviceBackend}')">On this device</button>
+        <button type="button" class="ctx-btn-option ${isExternal ? 'active' : ''}" role="radio" aria-checked="${isExternal}" onclick="handleLensBackendChange('external-server')">External server</button>
       </div>
       <div style="font-size:11px;color:var(--text-muted);margin-top:6px">
-        ${isDesktop
-          ? 'Runs a native Python engine on this computer. Fastest option; handles large libraries. One-time ~3 GB setup.'
-          : isBrowser
-            ? 'Runs entirely in this browser. No install — first use downloads a small AI model (~100 MB); after that it works offline.'
-            : 'Connect to a knowledge server you run (or one run by someone you trust). For remote or shared setups.'}
+        ${isOnDevice ? onDeviceDesc : 'Connect to a knowledge server you run (or one run by someone you trust). For remote or shared setups.'}
       </div>
-    </fieldset>
+    </div>
 
     <div style="margin-top:10px;display:flex;align-items:center;gap:10px">
       <label class="toggle-switch" for="lens-enabled-toggle">
@@ -591,8 +594,9 @@ export async function handleSaveLensConfig() {
   const name = (document.getElementById('lens-name-input')?.value || '').trim();
   const topK = Math.max(1, Math.min(10, parseInt(document.getElementById('lens-topk-input')?.value, 10) || 5));
   const enabled = !!document.getElementById('lens-enabled-toggle')?.checked;
-  const backend = document.querySelector('input[name="lens-backend"]:checked')?.value
-    || getLensConfig().backend || 'in-browser';
+  // Backend is set by the pill buttons via handleLensBackendChange and
+  // persisted immediately — read it from config rather than DOM.
+  const backend = getLensConfig().backend || 'in-browser';
 
   if (backend === 'in-browser') {
     saveLensConfig({ name, enabled, topK, backend });
