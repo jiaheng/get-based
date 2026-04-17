@@ -4,22 +4,28 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Optional
 
 from .config import LensConfig
 
 log = logging.getLogger("lens.store")
 
 
-class Store:
-    """Thin wrapper over qdrant-client: local on-disk OR Qdrant Cloud."""
+class QdrantBackend:
+    """Shared Qdrant client — one per process.
+
+    Local path-mode qdrant locks the storage directory, so multiple clients
+    fighting over the same path will deadlock. Centralizing the client lets
+    every per-library Store instance share the one lock.
+    """
 
     def __init__(self, config: LensConfig):
         self._config = config
         self._client = None
 
-    def _ensure_client(self):
+    def client(self):
         if self._client is not None:
-            return
+            return self._client
         from qdrant_client import QdrantClient
 
         if self._config.is_cloud:
@@ -35,29 +41,58 @@ class Store:
             path.mkdir(parents=True, exist_ok=True)
             self._client = QdrantClient(path=str(path))
             log.info("Local Qdrant store at %s", path)
+        return self._client
+
+    def list_collection_names(self) -> list[str]:
+        try:
+            resp = self.client().get_collections()
+            return [c.name for c in (resp.collections or [])]
+        except Exception as e:
+            log.warning("list_collections failed: %s", e)
+            return []
+
+
+class Store:
+    """Thin wrapper over qdrant-client for one collection."""
+
+    def __init__(
+        self,
+        config: LensConfig,
+        collection: Optional[str] = None,
+        backend: Optional[QdrantBackend] = None,
+    ):
+        self._config = config
+        self._collection = collection or config.collection
+        self._backend = backend or QdrantBackend(config)
+
+    @property
+    def collection(self) -> str:
+        return self._collection
+
+    def _client(self):
+        return self._backend.client()
 
     def ensure_collection(self, dim: int) -> None:
         """Create the collection if it doesn't exist."""
-        self._ensure_client()
         from qdrant_client.models import Distance, VectorParams
 
         try:
-            existing = self._client.get_collection(self._config.collection)
+            existing = self._client().get_collection(self._collection)
             existing_dim = existing.config.params.vectors.size
             if existing_dim != dim:
                 raise RuntimeError(
-                    f"Collection {self._config.collection} has dim {existing_dim}, "
+                    f"Collection {self._collection} has dim {existing_dim}, "
                     f"but embedder produces {dim}. Delete and re-ingest."
                 )
             return
         except Exception:
             pass  # collection doesn't exist; create below
 
-        self._client.create_collection(
-            collection_name=self._config.collection,
+        self._client().create_collection(
+            collection_name=self._collection,
             vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
         )
-        log.info("Created collection %s (dim=%d)", self._config.collection, dim)
+        log.info("Created collection %s (dim=%d)", self._collection, dim)
 
     def search(self, vector: list[float], top_k: int, score_threshold: float) -> list[dict]:
         """Return list of {text, source, score} dicts.
@@ -65,11 +100,10 @@ class Store:
         Uses query_points (qdrant-client 1.10+); falls back to deprecated search()
         for older clients so we work across version bumps.
         """
-        self._ensure_client()
         try:
             # New API
-            resp = self._client.query_points(
-                collection_name=self._config.collection,
+            resp = self._client().query_points(
+                collection_name=self._collection,
                 query=vector,
                 limit=top_k,
                 score_threshold=score_threshold,
@@ -78,8 +112,8 @@ class Store:
             points = resp.points
         except AttributeError:
             # Older qdrant-client (<1.10) — use legacy search()
-            points = self._client.search(
-                collection_name=self._config.collection,
+            points = self._client().search(
+                collection_name=self._collection,
                 query_vector=vector,
                 limit=top_k,
                 score_threshold=score_threshold,
@@ -96,7 +130,6 @@ class Store:
 
     def upsert(self, points: list[dict]) -> None:
         """Insert points: list of {id, vector, text, source}."""
-        self._ensure_client()
         from qdrant_client.models import PointStruct
 
         structs = [
@@ -107,13 +140,12 @@ class Store:
             )
             for p in points
         ]
-        self._client.upsert(collection_name=self._config.collection, points=structs)
+        self._client().upsert(collection_name=self._collection, points=structs)
 
     def count(self) -> int:
         """Number of vectors in the collection."""
-        self._ensure_client()
         try:
-            info = self._client.get_collection(self._config.collection)
+            info = self._client().get_collection(self._collection)
             return int(info.points_count or 0)
         except Exception:
             return 0
@@ -126,29 +158,37 @@ class Store:
         this, a "Remove all" followed by a chat query would throw 500 until the
         user re-ingested something to trigger ensure_collection().
         """
-        self._ensure_client()
         from qdrant_client.models import Distance, VectorParams
 
         count = self.count()
         dim = None
         try:
-            info = self._client.get_collection(self._config.collection)
+            info = self._client().get_collection(self._collection)
             dim = int(info.config.params.vectors.size)
         except Exception as e:
             log.debug("get_collection before clear failed (likely empty): %s", e)
         try:
-            self._client.delete_collection(self._config.collection)
+            self._client().delete_collection(self._collection)
         except Exception as e:  # noqa: BLE001
             log.warning("delete_collection failed, collection may not exist: %s", e)
         if dim is not None:
             try:
-                self._client.create_collection(
-                    collection_name=self._config.collection,
+                self._client().create_collection(
+                    collection_name=self._collection,
                     vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
                 )
             except Exception as e:  # noqa: BLE001
                 log.warning("recreate empty collection failed: %s", e)
         return count
+
+    def drop(self) -> None:
+        """Delete the collection entirely, without recreating it. Used when a
+        library is being deleted — there's no reason to leave an empty
+        collection behind."""
+        try:
+            self._client().delete_collection(self._collection)
+        except Exception as e:  # noqa: BLE001
+            log.warning("drop collection %s failed: %s", self._collection, e)
 
     def list_sources(self) -> list[dict]:
         """Aggregate by source: returns [{source, chunks}, ...] sorted by source.
@@ -157,14 +197,13 @@ class Store:
         size (<10k chunks) this is plenty fast. For larger deployments add a payload
         index + use Qdrant's facet API.
         """
-        self._ensure_client()
         from collections import Counter
         counts: Counter = Counter()
         offset = None
         try:
             while True:
-                points, offset = self._client.scroll(
-                    collection_name=self._config.collection,
+                points, offset = self._client().scroll(
+                    collection_name=self._collection,
                     with_payload=["source"],
                     with_vectors=False,
                     limit=512,
@@ -186,7 +225,6 @@ class Store:
 
     def delete_by_source(self, source: str) -> int:
         """Delete all chunks where payload.source == source. Returns count deleted."""
-        self._ensure_client()
         from qdrant_client.models import (
             Filter,
             FieldCondition,
@@ -196,8 +234,8 @@ class Store:
 
         before = self.count()
         try:
-            self._client.delete(
-                collection_name=self._config.collection,
+            self._client().delete(
+                collection_name=self._collection,
                 points_selector=FilterSelector(
                     filter=Filter(
                         must=[FieldCondition(key="source", match=MatchValue(value=source))]

@@ -12,7 +12,8 @@ from uuid import uuid4
 
 from .config import LensConfig
 from .embedder import create_embedder
-from .store import Store, chunk_text
+from .registry import Registry
+from .store import QdrantBackend, Store, chunk_text
 
 log = logging.getLogger("lens.ingest")
 
@@ -114,7 +115,12 @@ def _ingest_walk(config: LensConfig, source: Path, emit_progress: bool = False) 
         print(_json.dumps(event), file=_sys.stderr, flush=True)
 
     embedder = create_embedder(config)
-    store = Store(config)
+    # Ingest always targets the ACTIVE library. Bootstrap a default library
+    # if none exists — mirrors the browser-local lens semantics.
+    registry = Registry(config)
+    registry.ensure_default()
+    backend = QdrantBackend(config)
+    store = Store(config, collection=registry.active_collection(), backend=backend)
     store.ensure_collection(embedder.dimension())
 
     # Pre-walk to get a total count for progress. Cheap — just scans filenames,

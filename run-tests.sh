@@ -64,6 +64,13 @@ trap cleanup EXIT
 # signal instead of cascading ECONNREFUSED in the HTTP tests.
 node "$DIR/tests/test-electron-helpers.js" || exit 1
 ensure_server
+# Python-side registry smoke test — only runs if python3 is on PATH.
+# The registry module has no external deps so we don't need the lens venv.
+if command -v python3 >/dev/null 2>&1; then
+  echo "▶ Running tests/test-lens-registry.py"
+  python3 "$DIR/tests/test-lens-registry.py" || exit 1
+  ensure_server
+fi
 node "$DIR/tests/test-lens-local-utils.js" || exit 1
 ensure_server
 node "$DIR/tests/test-electron-ipc.js" || exit 1

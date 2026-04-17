@@ -104,14 +104,31 @@ def ingest(
     console.print(table)
 
 
+def _active_store(config: LensConfig):
+    """CLI helper — resolve a Store bound to the active library.
+
+    Matches how the server's active_store() works: bootstrap a "Default"
+    library on first use so a fresh shell command doesn't 404 on the
+    registry being empty."""
+    from .registry import Registry
+    from .store import QdrantBackend, Store
+
+    registry = Registry(config)
+    registry.ensure_default()
+    return Store(
+        config,
+        collection=registry.active_collection(),
+        backend=QdrantBackend(config),
+    )
+
+
 @app.command()
 def stats(json_out: bool = typer.Option(False, "--json", help="Emit JSON")):
     """List knowledge base contents: per-source chunk counts."""
     import json as _json
-    from .store import Store
 
     config = LensConfig.from_env()
-    store = Store(config)
+    store = _active_store(config)
     try:
         docs = store.list_sources()
     except Exception as e:
@@ -143,10 +160,9 @@ def delete(
 ):
     """Delete all chunks belonging to a source from the knowledge base."""
     import json as _json
-    from .store import Store
 
     config = LensConfig.from_env()
-    store = Store(config)
+    store = _active_store(config)
     deleted = store.delete_by_source(source)
     if json_out:
         print(_json.dumps({"source": source, "deleted_chunks": deleted}))
@@ -161,10 +177,9 @@ def clear(
 ):
     """Delete ALL chunks from the knowledge base (drops the collection)."""
     import json as _json
-    from .store import Store
 
     config = LensConfig.from_env()
-    store = Store(config)
+    store = _active_store(config)
 
     if not yes and not json_out:
         console.print(f"[yellow]This will delete all chunks from[/] {config.qdrant_path}")
