@@ -5,10 +5,11 @@ test-data.json
 !icon-192.png
 !icon-512.png
 !dashboard.png
-!src-tauri/icons/*.png
-src-tauri/target/
-src-tauri/gen/
-src-tauri/dist/
+!electron/icons/*.png
+# Electron build artifacts
+dist/
+out/
+release/
 labcharts-*.json
 test-*.json
 node_modules/
