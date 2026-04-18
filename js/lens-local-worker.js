@@ -139,7 +139,11 @@ async function handleInit() {
   let device = 'wasm';
   if (typeof navigator !== 'undefined' && navigator.gpu) {
     try {
-      const adapter = await navigator.gpu.requestAdapter();
+      // Prefer the discrete GPU when one exists. Without this, Chromium
+      // defaults to the low-power (integrated) adapter, which is ~30%
+      // slower for MiniLM inference on laptops with both. 'high-performance'
+      // is a hint — browsers fall back to whatever's available.
+      const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
       if (adapter) device = 'webgpu';
     } catch {}
   }
