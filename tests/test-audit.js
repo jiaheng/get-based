@@ -195,6 +195,12 @@ return (async function() {
     /"Cross-Origin-Opener-Policy"\s*:\s*"same-origin"/.test(vercelSrc));
   assert('Vercel sends Cross-Origin-Embedder-Policy: credentialless',
     /"Cross-Origin-Embedder-Policy"\s*:\s*"credentialless"/.test(vercelSrc));
+  // Permissions-Policy that enumerates other features but omits webgpu
+  // gets interpreted as "webgpu restricted" in some Chromium versions
+  // (especially inside Workers). Without this, navigator.gpu.requestAdapter()
+  // returns null on prod → lens silently drops to WASM → 30% slower.
+  assert('Permissions-Policy explicitly allows webgpu for self',
+    /Permissions-Policy[^"]*webgpu=\(self\)/.test(vercelSrc));
   assert('CSP connect-src allows https: (decentralized nodes)', vercelSrc.includes("connect-src 'self' https:"));
   assert('CSP allows localhost for Local AI', vercelSrc.includes('localhost:*'));
   assert('X-Frame-Options DENY', vercelSrc.includes('DENY'));
