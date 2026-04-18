@@ -455,6 +455,12 @@ export function maybeShowEncryptionNudge() {
 }
 
 export function maybeShowBackupNudge() {
+  // Don't compete with the guided tour. First-time users see the welcome
+  // tour right after their first demo import; firing the backup nudge
+  // behind it (or stealing focus) is an unwelcome interruption. The nudge
+  // will re-evaluate on next app load anyway.
+  if (document.getElementById('tour-overlay')) return;
+
   // Skip if no profiles or no actual data to back up
   const profiles = localStorage.getItem('labcharts-profiles');
   if (!profiles) return;

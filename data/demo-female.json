@@ -72,6 +72,276 @@
         "differential.neutrophilsPct": 0.574,
         "differential.lymphocytesPct": 0.319,
         "differential.monocytesPct": 0.07
+      },
+      "markerSources": {
+        "biochemistry.glucose": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "biochemistry.urea": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "biochemistry.creatinine": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "biochemistry.egfr": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "biochemistry.uricAcid": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "biochemistry.bilirubinTotal": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "biochemistry.ast": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "biochemistry.alt": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "biochemistry.alp": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "biochemistry.ggt": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "biochemistry.ldh": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "biochemistry.creatineKinase": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "hormones.testosterone": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "hormones.shbg": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "hormones.dheaS": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "hormones.estradiol": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "hormones.progesterone": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "hormones.insulin": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "hormones.lh": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "hormones.fsh": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "hormones.prolactin": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "electrolytes.sodium": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "electrolytes.potassium": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "electrolytes.chloride": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "electrolytes.calciumTotal": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "electrolytes.phosphorus": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "electrolytes.magnesium": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "lipids.cholesterol": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "lipids.triglycerides": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "lipids.hdl": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "lipids.ldl": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "lipids.nonHdl": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "lipids.cholHdlRatio": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "iron.iron": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "iron.ferritin": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "iron.transferrin": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "iron.tibc": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "iron.transferrinSat": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "proteins.hsCRP": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "proteins.totalProtein": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "proteins.albumin": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "thyroid.tsh": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "thyroid.ft4": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "thyroid.ft3": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "vitamins.vitaminD": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "diabetes.hba1c": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "diabetes.insulin_d": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "diabetes.homaIR": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "coagulation.homocysteine": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "hematology.wbc": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "hematology.rbc": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "hematology.hemoglobin": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "hematology.hematocrit": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "hematology.mcv": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "hematology.mch": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "hematology.mchc": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "hematology.rdwcv": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "hematology.platelets": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "hematology.mpv": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "differential.neutrophils": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "differential.lymphocytes": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "differential.monocytes": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "differential.eosinophils": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "differential.basophils": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "differential.neutrophilsPct": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "differential.lymphocytesPct": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        },
+        "differential.monocytesPct": {
+          "file": "Spring 2025 Complete Panel.pdf",
+          "at": 1744286400000
+        }
       }
     },
     {
@@ -153,6 +423,312 @@
         "differential.neutrophilsPct": 0.567,
         "differential.lymphocytesPct": 0.323,
         "differential.monocytesPct": 0.067
+      },
+      "markerSources": {
+        "biochemistry.glucose": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "biochemistry.urea": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "biochemistry.creatinine": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "biochemistry.egfr": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "biochemistry.uricAcid": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "biochemistry.bilirubinTotal": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "biochemistry.ast": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "biochemistry.alt": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "biochemistry.alp": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "biochemistry.ggt": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "biochemistry.ldh": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "biochemistry.creatineKinase": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "hormones.testosterone": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "hormones.shbg": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "hormones.dheaS": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "hormones.estradiol": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "hormones.progesterone": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "hormones.insulin": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "hormones.lh": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "hormones.fsh": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "hormones.prolactin": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "hormones.calcitonin": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "electrolytes.sodium": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "electrolytes.potassium": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "electrolytes.chloride": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "electrolytes.calciumTotal": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "electrolytes.phosphorus": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "electrolytes.magnesium": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "electrolytes.copper": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "electrolytes.zinc": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "lipids.cholesterol": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "lipids.triglycerides": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "lipids.hdl": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "lipids.ldl": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "lipids.nonHdl": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "lipids.cholHdlRatio": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "lipids.apoAI": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "lipids.apoB": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "iron.iron": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "iron.ferritin": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "iron.transferrin": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "iron.tibc": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "iron.transferrinSat": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "proteins.hsCRP": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "proteins.totalProtein": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "proteins.albumin": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "proteins.ceruloplasmin": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "thyroid.tsh": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "thyroid.ft4": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "thyroid.ft3": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "thyroid.t3total": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "vitamins.vitaminD": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "vitamins.vitaminA": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "diabetes.hba1c": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "diabetes.insulin_d": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "diabetes.homaIR": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "coagulation.homocysteine": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "hematology.wbc": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "hematology.rbc": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "hematology.hemoglobin": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "hematology.hematocrit": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "hematology.mcv": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "hematology.mch": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "hematology.mchc": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "hematology.rdwcv": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "hematology.platelets": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "hematology.mpv": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "hematology.pdw": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "differential.neutrophils": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "differential.lymphocytes": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "differential.monocytes": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "differential.eosinophils": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "differential.basophils": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "differential.neutrophilsPct": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "differential.lymphocytesPct": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        },
+        "differential.monocytesPct": {
+          "file": "Summer 2025 Panel.pdf",
+          "at": 1754395200000
+        }
       }
     },
     {
@@ -237,6 +813,324 @@
         "differential.lymphocytesPct": 0.321,
         "differential.monocytesPct": 0.068,
         "boneMetabolism.osteocalcin": 25.0
+      },
+      "markerSources": {
+        "biochemistry.glucose": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "biochemistry.urea": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "biochemistry.creatinine": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "biochemistry.egfr": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "biochemistry.uricAcid": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "biochemistry.bilirubinTotal": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "biochemistry.ast": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "biochemistry.alt": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "biochemistry.alp": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "biochemistry.ggt": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "biochemistry.ldh": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "biochemistry.creatineKinase": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "biochemistry.cystatinC": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "hormones.testosterone": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "hormones.shbg": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "hormones.dheaS": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "hormones.estradiol": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "hormones.progesterone": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "hormones.insulin": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "hormones.lh": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "hormones.fsh": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "hormones.prolactin": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "hormones.igf1": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "electrolytes.sodium": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "electrolytes.potassium": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "electrolytes.chloride": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "electrolytes.calciumTotal": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "electrolytes.phosphorus": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "electrolytes.magnesium": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "electrolytes.magnesiumRBC": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "electrolytes.copper": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "electrolytes.zinc": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "lipids.cholesterol": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "lipids.triglycerides": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "lipids.hdl": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "lipids.ldl": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "lipids.nonHdl": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "lipids.cholHdlRatio": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "lipids.apoAI": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "lipids.apoB": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "iron.iron": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "iron.ferritin": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "iron.transferrin": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "iron.tibc": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "iron.transferrinSat": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "proteins.hsCRP": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "proteins.totalProtein": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "proteins.albumin": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "proteins.ceruloplasmin": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "thyroid.tsh": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "thyroid.ft4": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "thyroid.ft3": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "thyroid.t3total": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "vitamins.vitaminD": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "vitamins.vitaminD3": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "diabetes.hba1c": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "diabetes.insulin_d": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "diabetes.homaIR": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "coagulation.homocysteine": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "hematology.wbc": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "hematology.rbc": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "hematology.hemoglobin": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "hematology.hematocrit": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "hematology.mcv": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "hematology.mch": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "hematology.mchc": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "hematology.rdwcv": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "hematology.platelets": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "hematology.mpv": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "hematology.pdw": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "differential.neutrophils": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "differential.lymphocytes": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "differential.monocytes": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "differential.eosinophils": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "differential.basophils": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "differential.neutrophilsPct": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "differential.lymphocytesPct": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "differential.monocytesPct": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        },
+        "boneMetabolism.osteocalcin": {
+          "file": "Fall 2025 Panel.pdf",
+          "at": 1765800000000
+        }
       }
     },
     {
@@ -326,6 +1220,344 @@
         "differential.lymphocytesPct": 0.327,
         "differential.monocytesPct": 0.065,
         "boneMetabolism.osteocalcin": 26.5
+      },
+      "markerSources": {
+        "biochemistry.glucose": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "biochemistry.urea": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "biochemistry.creatinine": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "biochemistry.egfr": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "biochemistry.uricAcid": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "biochemistry.bilirubinTotal": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "biochemistry.ast": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "biochemistry.alt": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "biochemistry.alp": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "biochemistry.ggt": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "biochemistry.ldh": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "biochemistry.creatineKinase": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "biochemistry.cystatinC": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "biochemistry.gfrCystatin": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "hormones.testosterone": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "hormones.freeTestosterone": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "hormones.shbg": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "hormones.dheaS": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "hormones.estradiol": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "hormones.progesterone": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "hormones.insulin": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "hormones.lh": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "hormones.fsh": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "hormones.prolactin": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "hormones.igf1": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "hormones.dht": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "electrolytes.sodium": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "electrolytes.potassium": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "electrolytes.chloride": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "electrolytes.calciumTotal": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "electrolytes.phosphorus": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "electrolytes.magnesium": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "electrolytes.magnesiumRBC": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "electrolytes.copper": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "electrolytes.zinc": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "lipids.cholesterol": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "lipids.triglycerides": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "lipids.hdl": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "lipids.ldl": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "lipids.nonHdl": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "lipids.cholHdlRatio": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "lipids.apoAI": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "lipids.apoB": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "iron.iron": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "iron.ferritin": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "iron.transferrin": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "iron.tibc": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "iron.transferrinSat": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "proteins.hsCRP": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "proteins.totalProtein": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "proteins.albumin": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "proteins.ceruloplasmin": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "thyroid.tsh": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "thyroid.ft4": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "thyroid.ft3": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "thyroid.t4total": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "thyroid.t3total": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "vitamins.vitaminD": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "vitamins.vitaminD3": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "vitamins.vitaminA": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "diabetes.hba1c": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "diabetes.insulin_d": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "diabetes.homaIR": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "coagulation.homocysteine": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "hematology.wbc": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "hematology.rbc": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "hematology.hemoglobin": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "hematology.hematocrit": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "hematology.mcv": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "hematology.mch": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "hematology.mchc": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "hematology.rdwcv": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "hematology.platelets": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "hematology.mpv": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "hematology.pdw": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "differential.neutrophils": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "differential.lymphocytes": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "differential.monocytes": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "differential.eosinophils": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "differential.basophils": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "differential.neutrophilsPct": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "differential.lymphocytesPct": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "differential.monocytesPct": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        },
+        "boneMetabolism.osteocalcin": {
+          "file": "Winter 2025 Panel.pdf",
+          "at": 1769342400000
+        }
       }
     },
     {
@@ -346,6 +1578,68 @@
         "fattyAcids.omega6to3Ratio": 2.8,
         "fattyAcids.membraneFluidity": 5.2,
         "fattyAcids.mentalResilience": 0.72
+      },
+      "markerSources": {
+        "fattyAcids.palmiticC16": {
+          "file": "Early 2026 Panel.pdf",
+          "at": 1754395200000
+        },
+        "fattyAcids.stearicC18": {
+          "file": "Early 2026 Panel.pdf",
+          "at": 1754395200000
+        },
+        "fattyAcids.oleicC18_1": {
+          "file": "Early 2026 Panel.pdf",
+          "at": 1754395200000
+        },
+        "fattyAcids.linoleicC18_2": {
+          "file": "Early 2026 Panel.pdf",
+          "at": 1754395200000
+        },
+        "fattyAcids.glaC18_3": {
+          "file": "Early 2026 Panel.pdf",
+          "at": 1754395200000
+        },
+        "fattyAcids.arachidonicC20_4": {
+          "file": "Early 2026 Panel.pdf",
+          "at": 1754395200000
+        },
+        "fattyAcids.dglaC20_3": {
+          "file": "Early 2026 Panel.pdf",
+          "at": 1754395200000
+        },
+        "fattyAcids.alaC18_3": {
+          "file": "Early 2026 Panel.pdf",
+          "at": 1754395200000
+        },
+        "fattyAcids.epaC20_5": {
+          "file": "Early 2026 Panel.pdf",
+          "at": 1754395200000
+        },
+        "fattyAcids.dpaC22_5": {
+          "file": "Early 2026 Panel.pdf",
+          "at": 1754395200000
+        },
+        "fattyAcids.dhaC22_6": {
+          "file": "Early 2026 Panel.pdf",
+          "at": 1754395200000
+        },
+        "fattyAcids.omega3Index": {
+          "file": "Early 2026 Panel.pdf",
+          "at": 1754395200000
+        },
+        "fattyAcids.omega6to3Ratio": {
+          "file": "Early 2026 Panel.pdf",
+          "at": 1754395200000
+        },
+        "fattyAcids.membraneFluidity": {
+          "file": "Early 2026 Panel.pdf",
+          "at": 1754395200000
+        },
+        "fattyAcids.mentalResilience": {
+          "file": "Early 2026 Panel.pdf",
+          "at": 1754395200000
+        }
       }
     },
     {
@@ -366,6 +1660,68 @@
         "fattyAcids.omega6to3Ratio": 2.2,
         "fattyAcids.membraneFluidity": 4.5,
         "fattyAcids.mentalResilience": 0.8
+      },
+      "markerSources": {
+        "fattyAcids.palmiticC16": {
+          "file": "Spring 2026 Panel.pdf",
+          "at": 1769342400000
+        },
+        "fattyAcids.stearicC18": {
+          "file": "Spring 2026 Panel.pdf",
+          "at": 1769342400000
+        },
+        "fattyAcids.oleicC18_1": {
+          "file": "Spring 2026 Panel.pdf",
+          "at": 1769342400000
+        },
+        "fattyAcids.linoleicC18_2": {
+          "file": "Spring 2026 Panel.pdf",
+          "at": 1769342400000
+        },
+        "fattyAcids.glaC18_3": {
+          "file": "Spring 2026 Panel.pdf",
+          "at": 1769342400000
+        },
+        "fattyAcids.arachidonicC20_4": {
+          "file": "Spring 2026 Panel.pdf",
+          "at": 1769342400000
+        },
+        "fattyAcids.dglaC20_3": {
+          "file": "Spring 2026 Panel.pdf",
+          "at": 1769342400000
+        },
+        "fattyAcids.alaC18_3": {
+          "file": "Spring 2026 Panel.pdf",
+          "at": 1769342400000
+        },
+        "fattyAcids.epaC20_5": {
+          "file": "Spring 2026 Panel.pdf",
+          "at": 1769342400000
+        },
+        "fattyAcids.dpaC22_5": {
+          "file": "Spring 2026 Panel.pdf",
+          "at": 1769342400000
+        },
+        "fattyAcids.dhaC22_6": {
+          "file": "Spring 2026 Panel.pdf",
+          "at": 1769342400000
+        },
+        "fattyAcids.omega3Index": {
+          "file": "Spring 2026 Panel.pdf",
+          "at": 1769342400000
+        },
+        "fattyAcids.omega6to3Ratio": {
+          "file": "Spring 2026 Panel.pdf",
+          "at": 1769342400000
+        },
+        "fattyAcids.membraneFluidity": {
+          "file": "Spring 2026 Panel.pdf",
+          "at": 1769342400000
+        },
+        "fattyAcids.mentalResilience": {
+          "file": "Spring 2026 Panel.pdf",
+          "at": 1769342400000
+        }
       }
     }
   ],
