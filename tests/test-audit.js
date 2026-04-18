@@ -186,6 +186,15 @@ return (async function() {
   // "No available backend found".
   assert('CSP script-src includes blob: (required by ORT proxy worker)',
     /script-src[^;]*\bblob:/.test(vercelSrc));
+  // Cross-origin isolation: required so the in-browser lens worker can
+  // use SharedArrayBuffer + multi-threaded WASM. Without these headers
+  // ORT silently falls back to single-threaded WASM (~7× slower) and
+  // WebGPU adapter access can also fail. Must match dev-server.js so
+  // localhost behavior matches prod.
+  assert('Vercel sends Cross-Origin-Opener-Policy: same-origin',
+    /"Cross-Origin-Opener-Policy"\s*:\s*"same-origin"/.test(vercelSrc));
+  assert('Vercel sends Cross-Origin-Embedder-Policy: credentialless',
+    /"Cross-Origin-Embedder-Policy"\s*:\s*"credentialless"/.test(vercelSrc));
   assert('CSP connect-src allows https: (decentralized nodes)', vercelSrc.includes("connect-src 'self' https:"));
   assert('CSP allows localhost for Local AI', vercelSrc.includes('localhost:*'));
   assert('X-Frame-Options DENY', vercelSrc.includes('DENY'));
