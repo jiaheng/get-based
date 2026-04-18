@@ -5,14 +5,13 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
-    version: '1.21.0', date: '2026-04-18', title: 'PWA-only · Knowledge Base libraries',
+    version: '1.21.0', date: '2026-04-18', title: 'Knowledge Base libraries',
     items: [
-      'Browser Knowledge Base gets multi-library support: keep research papers, clinical guides, and personal notes in separate collections and switch between them from Settings. Chat grounds its answers in whichever library is active.',
-      'Embedder now uses WebGPU when available — 3-10× faster retrieval on Chrome, Edge, Arc, and other browsers with a modern GPU. Transparent fallback to WASM on older browsers or unsupported devices. The Knowledge Base stats line shows which engine is active.',
-      'Document parsers for in-browser indexing: PDF, Word, Markdown, plain text, and ZIP archives (which expand inline — each inner doc becomes its own source).',
-      'Better retrieval variety — results now span multiple documents instead of piling up on one. Fixes queries like "vitamin D and circadian rhythm and cold exposure" that used to return only vitamin-D chunks.',
-      'Inline drop-zone + document list under Settings → AI → Knowledge Base — add, preview, and remove files without leaving Settings.',
-      'Desktop app is retired. The native shell was prototyped but added release-cadence friction without covering a real user need the PWA did not already handle. If you want local hardware-accelerated RAG, run your own knowledge server (any endpoint speaking the External server protocol) and point Settings → Knowledge Base → External server at it.',
+      'Multi-library support — keep research papers, clinical guides, and personal notes in separate collections and switch between them from Settings.',
+      'WebGPU embedder — 3-10× faster retrieval on modern browsers. Transparent fallback to WASM when unavailable.',
+      'Document parsers: PDF, Word, Markdown, plain text, and ZIP archives (expanded inline).',
+      'Better retrieval variety — results span multiple documents instead of piling up on one.',
+      'Inline drop-zone under Settings → AI → Knowledge Base — add, preview, and remove files in one place.',
     ]
   },
   {
