@@ -173,7 +173,13 @@ return (async function() {
 
   const vercelSrc = await fetchWithRetry('/vercel.json');
   assert('CSP header in vercel.json', vercelSrc.includes('Content-Security-Policy'));
-  assert('CSP has no external CDN (vendor bundled)', !vercelSrc.includes('cdn.jsdelivr.net') && !vercelSrc.includes('fonts.googleapis.com'));
+  // cdn.jsdelivr.net is the only remote script source — transformers.js
+  // ESM bundle can't be vendored yet (bare-specifier rewrite requires a
+  // bundler pass, phase 2c). Google Fonts + vendor bundles are local.
+  assert('CSP has no external CDN beyond jsdelivr (for transformers.js)',
+    !vercelSrc.includes('fonts.googleapis.com') && !vercelSrc.includes('unpkg.com'));
+  assert('CSP allows cdn.jsdelivr.net in script-src (transformers.js)',
+    vercelSrc.includes('https://cdn.jsdelivr.net'));
   assert('CSP connect-src allows https: (decentralized nodes)', vercelSrc.includes("connect-src 'self' https:"));
   assert('CSP allows localhost for Local AI', vercelSrc.includes('localhost:*'));
   assert('X-Frame-Options DENY', vercelSrc.includes('DENY'));
