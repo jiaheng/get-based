@@ -131,6 +131,14 @@ async function handleInit() {
   // https://onnxruntime.ai/docs/tutorials/web/env-flags.html#envwasmproxy
   env.backends.onnx.wasm.proxy = false;
 
+  // Pin single-threaded WASM. With COOP+COEP enabled (for WebGPU), ORT
+  // detects SharedArrayBuffer and switches to the threaded WASM build,
+  // which spawns blob workers and contends with OPFS I/O on this same
+  // worker. For MiniLM's small batches, threading is net-slower: Vercel
+  // measured 16 → 11 t/s when the threaded path activated. Pin to 1 thread
+  // to restore the ST path regardless of isolation state.
+  env.backends.onnx.wasm.numThreads = 1;
+
   // Try WebGPU first. On a Polaris AMD box + Intel iGPU, WebGPU through
   // ANGLE typically runs 3-10× faster than WASM for transformer
   // inference. Falls back to WASM if the adapter isn't available or the
