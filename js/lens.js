@@ -662,6 +662,56 @@ function _attachLocalLensDropHandlers() {
   picker.addEventListener('change', (e) => { _handleLocalLensIngest(e.target.files); e.target.value = ''; });
 }
 
+// Fixed-position progress pill that lives outside any modal. Ingest can
+// take many minutes for large corpora; users need to close Settings and
+// keep working while embedding runs in the worker. This pill survives
+// modal open/close/re-render cycles and is the canonical progress UI.
+// The in-modal progress bar (if the modal is open) mirrors the same
+// events so existing markup keeps working — both are hydrated fresh on
+// every progress event so a mid-ingest modal reopen rebinds cleanly.
+function _ensureIngestPill() {
+  let pill = document.getElementById('lens-ingest-pill');
+  if (pill) return pill;
+  pill = document.createElement('div');
+  pill.id = 'lens-ingest-pill';
+  pill.setAttribute('role', 'status');
+  pill.setAttribute('aria-live', 'polite');
+  pill.style.cssText = [
+    'position:fixed',
+    'bottom:88px',
+    'right:20px',
+    'z-index:9999',
+    'min-width:260px',
+    'max-width:360px',
+    'padding:12px 14px',
+    'background:var(--bg-elev, #1e1e1e)',
+    'border:1px solid var(--border, #333)',
+    'border-radius:12px',
+    'box-shadow:var(--shadow-lg, 0 8px 32px rgba(0,0,0,0.4))',
+    'font-size:12px',
+    'color:var(--text-primary, #eee)',
+    'pointer-events:auto',
+  ].join(';');
+  pill.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;gap:8px">
+      <strong style="font-size:11px;letter-spacing:0.04em;text-transform:uppercase;color:var(--text-muted,#888)">Indexing knowledge base</strong>
+      <button id="lens-ingest-pill-dismiss" title="Hide (ingest keeps running)" style="background:none;border:none;color:var(--text-muted,#888);cursor:pointer;padding:0 4px;font-size:16px;line-height:1">&times;</button>
+    </div>
+    <div id="lens-ingest-pill-text" style="margin-bottom:8px;font-size:12px;color:var(--text-secondary,#bbb);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Preparing…</div>
+    <progress id="lens-ingest-pill-bar" value="0" max="1" style="width:100%;height:6px"></progress>
+  `;
+  document.body.appendChild(pill);
+  pill.querySelector('#lens-ingest-pill-dismiss').addEventListener('click', () => {
+    pill.style.display = 'none';
+  });
+  return pill;
+}
+
+function _removeIngestPill() {
+  const pill = document.getElementById('lens-ingest-pill');
+  if (pill) pill.remove();
+}
+
 async function _handleLocalLensIngest(fileList) {
   // Snapshot IMMEDIATELY — FileList from an <input type=file>.files is a
   // LIVE reference, and the picker's change handler clears input.value
@@ -671,11 +721,11 @@ async function _handleLocalLensIngest(fileList) {
   const incoming = fileList ? Array.from(fileList) : [];
   if (incoming.length === 0) return;
 
-  const wrap = document.getElementById('lens-local-progress-wrap');
-  const bar = document.getElementById('lens-local-progress');
-  const textEl = document.getElementById('lens-local-progress-text');
-  if (wrap) wrap.style.display = '';
-  if (textEl) textEl.textContent = 'Reading files…';
+  const pill = _ensureIngestPill();
+  pill.style.display = '';
+  const pillText = pill.querySelector('#lens-ingest-pill-text');
+  const pillBar = pill.querySelector('#lens-ingest-pill-bar');
+  pillText.textContent = 'Reading files…';
 
   // Parse main-thread, hand text to worker (see lens-local-parsers.js for
   // why: module worker can't cleanly import the UMD parser bundles).
@@ -688,7 +738,8 @@ async function _handleLocalLensIngest(fileList) {
     } catch (err) { console.warn('[lens-local] extract failed:', f.name, err); }
   }
   if (files.length === 0) {
-    if (textEl) textEl.textContent = 'No usable files.';
+    pillText.textContent = 'No usable files.';
+    setTimeout(() => _removeIngestPill(), 3000);
     return;
   }
 
@@ -696,32 +747,49 @@ async function _handleLocalLensIngest(fileList) {
   const { subscribeProgress } = await import('./lens-local.js');
   const t0 = performance.now();
   const unsub = subscribeProgress((p) => {
-    if (!bar || !textEl) return;
+    // Re-query the in-modal elements on every event so a mid-ingest
+    // Settings reopen (which rerenders innerHTML) rebinds cleanly to
+    // the new DOM nodes instead of updating detached ones.
+    const modalBar = document.getElementById('lens-local-progress');
+    const modalText = document.getElementById('lens-local-progress-text');
+    const modalWrap = document.getElementById('lens-local-progress-wrap');
+    if (modalWrap) modalWrap.style.display = '';
     if (p.stage === 'start') {
-      bar.max = p.total;
-      textEl.textContent = `Preparing ${p.total} excerpts across ${files.length} file${files.length !== 1 ? 's' : ''}…`;
+      pillBar.max = p.total; pillBar.value = 0;
+      pillText.textContent = `Preparing ${p.total} excerpts…`;
+      if (modalBar) modalBar.max = p.total;
+      if (modalText) modalText.textContent = `Preparing ${p.total} excerpts across ${files.length} file${files.length !== 1 ? 's' : ''}…`;
     } else if (p.stage === 'embed') {
-      bar.value = p.index;
       const rate = p.index / ((performance.now() - t0) / 1000);
-      textEl.textContent = `Indexing ${p.index}/${p.total} · ${rate.toFixed(1)}/s · ${p.source}`;
+      pillBar.value = p.index;
+      pillText.textContent = `${p.index}/${p.total} · ${rate.toFixed(1)}/s`;
+      if (modalBar) modalBar.value = p.index;
+      if (modalText) modalText.textContent = `Indexing ${p.index}/${p.total} · ${rate.toFixed(1)}/s · ${p.source}`;
     }
   });
-  // Flag drives the Settings backdrop/ESC nudge — while this is true,
-  // an accidental click-away won't dismiss the modal and strand the
-  // user's progress bar.
   window._lensIngestRunning = true;
   try {
     const stats = await lens.ingest(files);
     const dur = ((performance.now() - t0) / 1000).toFixed(1);
-    if (textEl) textEl.textContent = `Indexed ${stats.chunks_indexed} excerpts from ${stats.files_seen} file${stats.files_seen !== 1 ? 's' : ''} in ${dur}s.`;
+    const doneMsg = `Indexed ${stats.chunks_indexed} excerpts from ${stats.files_seen} file${stats.files_seen !== 1 ? 's' : ''} in ${dur}s.`;
+    pillText.textContent = doneMsg;
+    const modalText = document.getElementById('lens-local-progress-text');
+    if (modalText) modalText.textContent = doneMsg;
     showNotification(`Indexed ${stats.chunks_indexed} excerpts from ${stats.files_seen} file${stats.files_seen !== 1 ? 's' : ''}.`, 'success');
   } catch (e) {
-    if (textEl) textEl.textContent = `Couldn't index: ${e.message || e}`;
-    showNotification(`Couldn't index: ${e.message || e}`, 'error');
+    const errMsg = `Couldn't index: ${e.message || e}`;
+    pillText.textContent = errMsg;
+    const modalText = document.getElementById('lens-local-progress-text');
+    if (modalText) modalText.textContent = errMsg;
+    showNotification(errMsg, 'error');
   } finally {
     window._lensIngestRunning = false;
     unsub();
-    setTimeout(() => { if (wrap) wrap.style.display = 'none'; }, 3000);
+    setTimeout(() => {
+      _removeIngestPill();
+      const modalWrap = document.getElementById('lens-local-progress-wrap');
+      if (modalWrap) modalWrap.style.display = 'none';
+    }, 3000);
     await _loadLocalLensStats();
   }
 }
