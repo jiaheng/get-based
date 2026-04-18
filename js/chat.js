@@ -427,13 +427,14 @@ export function renameThread(threadId, newName) {
   }
 }
 
-export function renameThreadPrompt(threadId) {
+export async function renameThreadPrompt(threadId) {
   const thread = state.chatThreads.find(t => t.id === threadId);
   if (!thread) return;
-  const name = prompt('Rename conversation:', thread.name);
-  if (name !== null && name.trim()) {
-    renameThread(threadId, name);
-  }
+  const name = await window.showPromptDialog('Rename conversation:', {
+    defaultValue: thread.name,
+    okLabel: 'Rename',
+  });
+  if (name) renameThread(threadId, name);
 }
 
 export function autoNameThread(threadId, firstMessage) {
@@ -1644,6 +1645,36 @@ function _getNoDataPrompts() {
   ];
 }
 
+/**
+ * Render the collapsible "Sources" block under an assistant message.
+ * Shows the excerpts the lens returned for this question — filename, score,
+ * and the actual chunk text. Lets users verify what the AI was grounded on
+ * (or not, if its answer drifts from the cited sources). Collapsed by
+ * default so the chat stays scannable.
+ */
+function _renderLensSources(chunks, sourceName) {
+  if (!Array.isArray(chunks) || chunks.length === 0) return '';
+  const sourceLabel = sourceName ? escapeHTML(sourceName) : 'knowledge base';
+  const items = chunks.map((c, i) => {
+    const src = c.source || `excerpt ${i + 1}`;
+    const score = typeof c.score === 'number'
+      ? `<span class="chat-lens-source-score" title="Cosine similarity">${c.score.toFixed(2)}</span>`
+      : '';
+    const text = c.text ? escapeHTML(c.text).replace(/\n/g, '<br>') : '';
+    return `<details class="chat-lens-source" onclick="event.stopPropagation()">
+      <summary class="chat-lens-source-summary">
+        <span class="chat-lens-source-name">${escapeHTML(src)}</span>
+        ${score}
+      </summary>
+      <div class="chat-lens-source-text">${text}</div>
+    </details>`;
+  }).join('');
+  return `<details class="chat-lens-sources" onclick="event.stopPropagation()">
+    <summary class="chat-lens-sources-summary">📎 ${chunks.length} excerpt${chunks.length !== 1 ? 's' : ''} from ${sourceLabel}</summary>
+    <div class="chat-lens-sources-body">${items}</div>
+  </details>`;
+}
+
 export function renderChatMessages() {
   const container = document.getElementById('chat-messages');
   if (!container) return;
@@ -2014,6 +2045,13 @@ export function renderChatMessages() {
         html += `<div class="chat-cost-footnote">${escapeHTML(mName)} \u00b7 ${escapeHTML(formatCost(cost))} \u00b7 ${totalTokens.toLocaleString()} tokens${webTag}${e2eeTag}</div>`;
       }
       html += buildActionBar(i);
+      // Lens citations — show which excerpts the AI received with this question.
+      // Persisted on the message so re-rendering or switching threads keeps
+      // the sources visible. Collapsed by default to keep the chat scannable;
+      // user can expand any time to verify what grounded the response.
+      if (msg.lensSources?.length) {
+        html += _renderLensSources(msg.lensSources, msg.lensSourceName);
+      }
       // Rec slots (persisted on message, rendered from catalog)
       if (msg.recSlots?.length && window.isProductRecsEnabled?.() && window.renderRecommendationSectionSync && window._cachedCatalog?.slots) {
         const recSections = msg.recSlots.map(slot => {
@@ -2571,9 +2609,13 @@ export async function sendChatMessage() {
 
   try {
     let labContext = buildLabContext();
+    let _lensResultForMsg = null;
     if (hasLens()) {
       const lensResult = await queryLens(text, { signal: _chatAbortController ? _chatAbortController.signal : undefined });
-      if (lensResult) labContext = injectLensChunks(labContext, lensResult);
+      if (lensResult) {
+        labContext = injectLensChunks(labContext, lensResult);
+        _lensResultForMsg = lensResult;
+      }
     }
     const personality = getActivePersonality();
     let personalityPrompt = '';
@@ -2682,6 +2724,19 @@ export async function sendChatMessage() {
     const assistantMsg = { role: 'assistant', content: fullText, context: contextSnapshot, personalityName: personality.name, personalityIcon: personality.icon, modelId: _msgModelId, modelDisplay: _msgModelDisplay };
     if (webSearchEnabled) assistantMsg.webSearch = true;
     if (_msgE2EE) { assistantMsg.e2ee = true; assistantMsg.attestation = window._veniceAttestation || null; }
+    if (_lensResultForMsg && _lensResultForMsg.chunks?.length) {
+      // Persist the retrieved excerpts on the message itself so the UI can
+      // show a collapsible Sources block and the user can verify what the
+      // AI actually saw. Cap text length per chunk to keep the chat
+      // history record from ballooning if a future model returns very
+      // long excerpts.
+      assistantMsg.lensSources = _lensResultForMsg.chunks.slice(0, 10).map(c => ({
+        text: typeof c.text === 'string' ? c.text.slice(0, 1500) : '',
+        source: c.source || '',
+        score: typeof c.score === 'number' ? c.score : null,
+      }));
+      assistantMsg.lensSourceName = _lensResultForMsg.sourceName || '';
+    }
     if (usage && (usage.inputTokens || usage.outputTokens)) {
       assistantMsg.usage = { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens };
       trackUsage(_msgProvider, _msgModelId, usage.inputTokens, usage.outputTokens);
@@ -2916,9 +2971,13 @@ async function runDiscussionRound(personas, steerPrompt, opts = {}) {
       container.scrollTop = container.scrollHeight;
 
       let labContext = buildLabContext();
+      let _lensResultForMsg = null;
       if (hasLens()) {
         const lensResult = await queryLens(msgText, { signal: _chatAbortController.signal });
-        if (lensResult) labContext = injectLensChunks(labContext, lensResult);
+        if (lensResult) {
+          labContext = injectLensChunks(labContext, lensResult);
+          _lensResultForMsg = lensResult;
+        }
       }
       const personality = getActivePersonality();
       let personalityPrompt = '';
@@ -2996,6 +3055,14 @@ async function runDiscussionRound(personas, steerPrompt, opts = {}) {
       const assistantMsg = { role: 'assistant', content: fullText, personalityName: personality.name, personalityIcon: personality.icon, modelId: _dMsgModelId, modelDisplay: _dMsgModelDisplay };
       if (_dWebSearch) assistantMsg.webSearch = true;
       if (_dMsgE2EE) { assistantMsg.e2ee = true; assistantMsg.attestation = window._veniceAttestation || null; }
+      if (_lensResultForMsg && _lensResultForMsg.chunks?.length) {
+        assistantMsg.lensSources = _lensResultForMsg.chunks.slice(0, 10).map(c => ({
+          text: typeof c.text === 'string' ? c.text.slice(0, 1500) : '',
+          source: c.source || '',
+          score: typeof c.score === 'number' ? c.score : null,
+        }));
+        assistantMsg.lensSourceName = _lensResultForMsg.sourceName || '';
+      }
       if (usage && (usage.inputTokens || usage.outputTokens)) {
         assistantMsg.usage = { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens };
         trackUsage(_dMsgProvider, _dMsgModelId, usage.inputTokens, usage.outputTokens);

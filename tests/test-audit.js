@@ -34,7 +34,7 @@ return (async function() {
   assert('SW uses importScripts for version', swAuditSrc.includes("importScripts('/version.js')"));
   assert('SW CACHE_NAME uses semver', swAuditSrc.includes('`labcharts-v${self.APP_VERSION}`'));
   assert('Umami analytics script present (self-hosted)', indexSrc.includes('umami-iota-olive.vercel.app/script.js'));
-  assert('Umami blocked on file:// protocol', indexSrc.includes("location.protocol!=='file:'"));
+  assert('Umami blocked on file:// protocol', /location\.protocol\s*!==\s*['"]file:['"]/.test(indexSrc));
 
   // ═══════════════════════════════════════
   // 3. XSS: escapeHTML in views.js
@@ -173,7 +173,37 @@ return (async function() {
 
   const vercelSrc = await fetchWithRetry('/vercel.json');
   assert('CSP header in vercel.json', vercelSrc.includes('Content-Security-Policy'));
-  assert('CSP has no external CDN (vendor bundled)', !vercelSrc.includes('cdn.jsdelivr.net') && !vercelSrc.includes('fonts.googleapis.com'));
+  // cdn.jsdelivr.net is the only remote script source — transformers.js
+  // ESM bundle can't be vendored yet (bare-specifier rewrite requires a
+  // bundler pass, phase 2c). Google Fonts + vendor bundles are local.
+  assert('CSP has no external CDN beyond jsdelivr (for transformers.js)',
+    !vercelSrc.includes('fonts.googleapis.com') && !vercelSrc.includes('unpkg.com'));
+  assert('CSP allows cdn.jsdelivr.net in script-src (transformers.js)',
+    vercelSrc.includes('https://cdn.jsdelivr.net'));
+  // ONNX Runtime (used inside transformers.js) spawns its proxy worker
+  // from a blob: URL and dynamic-imports it as a script. script-src
+  // MUST include blob: or the lens silently fails to init in prod with
+  // "No available backend found".
+  assert('CSP script-src includes blob: (required by ORT proxy worker)',
+    /script-src[^;]*\bblob:/.test(vercelSrc));
+  // Cross-origin isolation: required so the in-browser lens worker can
+  // use SharedArrayBuffer + multi-threaded WASM. Without these headers
+  // ORT silently falls back to single-threaded WASM (~7× slower) and
+  // WebGPU adapter access can also fail. Must match dev-server.js so
+  // localhost behavior matches prod.
+  assert('Vercel sends Cross-Origin-Opener-Policy: same-origin',
+    /"Cross-Origin-Opener-Policy"\s*:\s*"same-origin"/.test(vercelSrc));
+  assert('Vercel sends Cross-Origin-Embedder-Policy: credentialless',
+    /"Cross-Origin-Embedder-Policy"\s*:\s*"credentialless"/.test(vercelSrc));
+  // No Permissions-Policy header — dev-server doesn't send one either,
+  // and an explicit Permissions-Policy header (even granting
+  // webgpu=(self) explicitly) was observed to suppress WebGPU adapter
+  // access in Workers on Vercel, dropping the lens to WASM-only. Our
+  // app doesn't use camera/mic/geolocation so the previous restrictive
+  // policy wasn't load-bearing — removing it matches dev-server and
+  // unblocks WebGPU on prod.
+  assert('No Permissions-Policy header (matches dev-server)',
+    !/"Permissions-Policy"/.test(vercelSrc));
   assert('CSP connect-src allows https: (decentralized nodes)', vercelSrc.includes("connect-src 'self' https:"));
   assert('CSP allows localhost for Local AI', vercelSrc.includes('localhost:*'));
   assert('X-Frame-Options DENY', vercelSrc.includes('DENY'));

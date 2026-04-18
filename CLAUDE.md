@@ -10,12 +10,12 @@ Uses AI APIs (PPQ, Routstr, OpenRouter, Venice, or Local AI) for AI-powered PDF 
 
 ## Architecture
 
-No build system, no bundler, no package manager. Native ES modules (`<script type="module">`).
+Web app (PWA) only: no build system, no bundler, no package manager — native ES modules (`<script type="module">`). The Electron shell was retired in v1.21.0; users who want hardware-accelerated RAG self-host any server that speaks the *External server* lens protocol (`POST /query` with bearer auth, see `docs/guide/interpretive-lens.md`).
 
 - **`BRAND.md`** — brand manual (name rules, colors, typography, voice). Brand name is always `getbased` — lowercase, no space
 - **`index.html`** — HTML structure only (header, sidebar, modals with `role="dialog"`, chat panel, script/CSS includes)
 - **`styles.css`** — all CSS (dark/light themes, responsive layout with 10 breakpoints, touch/hover media queries)
-- **`js/`** — 42 ES modules loaded via `js/main.js`:
+- **`js/`** — 50 ES modules loaded via `js/main.js`:
   - `schema.js` — `MARKER_SCHEMA`, `SPECIALTY_MARKER_DEFS` (re-exported from adapters.js), `UNIT_CONVERSIONS`, `OPTIMAL_RANGES`, `PHASE_RANGES`, `CHIP_COLORS`, `MODEL_PRICING`, `SBM_2015_THRESHOLDS`, `getEMFSeverity`, `trackUsage`, `getProfileUsage`, `getGlobalUsage`
   - `adapters.js` — parser adapter registry for specialty labs. `ADAPTER_MARKERS` (217 entries), `detectProduct`, `normalizeWithAdapter`, `getAdapterByTestType`. Adapters: fattyAcids (29 markers, product detection), metabolomix (FA routing), oat (165 markers), biostarks (23 markers — amino acids, serum FA, intracellular minerals, cortisol, T/C ratio, vitamin E)
   - `constants.js` — option arrays, `CHAT_PERSONALITIES`, `CHAT_SYSTEM_PROMPT`, fake data, `COUNTRY_LATITUDES`, `EMF_ROOM_PRESETS`, `EMF_SOURCES`, `EMF_MITIGATIONS`
@@ -49,7 +49,8 @@ No build system, no bundler, no package manager. Native ES modules (`<script typ
   - `sync.js` — Evolu CRDT sync layer, push/pull, mnemonic identity, AI settings sync, debounced `onDataSaved` hook, sync status indicator (header badge + popover)
   - `settings.js` — settings modal, privacy section, sync setup modal
   - `provider-panels.js` — AI provider panel rendering, model dropdowns, wallet UI (extracted from settings.js)
-  - `lens.js` — Custom Knowledge Source (knowledge base endpoint) that backs the Interpretive Lens. `queryLens` retrieves top-K passages from a user-configured endpoint; `injectLensChunks` folds them into the `[section:interpretiveLens]` block in lab context. LRU cache (20 entries, 5-min TTL, scoped per profile), 30s timeout, `credentials:'omit'`/`referrerPolicy:'no-referrer'`/`redirect:'error'` fetch options. Chat-header indicator + Settings panel + Evolu sync
+  - `lens.js` — Knowledge Base backing the Interpretive Lens. `queryLens` retrieves top-K, `injectLensChunks` folds into `[section:interpretiveLens]`. LRU cache (20/5min, profile-scoped), tight fetch options. Two backends — **`in-browser`** (OPFS + MiniLM via `lens-local*`) and **`external-server`** (user URL + Bearer key; any HTTP endpoint speaking the `POST /query` contract documented in `docs/guide/interpretive-lens.md`) — surfaced as two pill buttons in Settings → AI → Knowledge Base. The in-browser backend exposes a Library picker; `_libList`/`_libCreate`/`_libActivate`/`_libRename`/`_libDelete` dispatch to the worker. `cfg.name` is auto-synced with the active library name. `migrateLensConfig()` maps legacy `remote`/`local-browser`/`desktop-engine` values forward
+  - `lens-local.js` / `lens-local-worker.js` / `lens-local-utils.js` / `lens-local-parsers.js` — browser-local lens stack. Main thread API + module Worker running transformers.js WASM + OPFS persistence via `FileSystemSyncAccessHandle` + MMR reranker (λ=0.5, 3× oversample) + pdf.js/mammoth/JSZip extraction. **Multi-library**: per-library OPFS subdirs under `/lens-local/<id>/`, `_libraries.json` at top-level tracks registry + active. ingest/query/stats/delete/clear scope to active library; create_library/rename_library/activate_library/delete_library manage the registry. Auto-migration from legacy flat layout on first multi-library launch. Lazy-loaded only when user selects the local backend
   - `glossary.js` — marker glossary modal
   - `feedback.js` — feedback modal (bug reports, feature requests)
   - `tour.js` — guided tour (spotlight walkthrough, auto-triggers after first data import) + cycle tour
@@ -58,9 +59,9 @@ No build system, no bundler, no package manager. Native ES modules (`<script typ
   - `nav.js` — sidebar (with collapsible test-type groups), compact profile button, avatar colors
   - `views.js` — `navigate`, dashboard, category, compare, correlations, detail modal, manual entry, create custom marker, focus card, onboarding, emoji picker, category rename/icon editing, marker rename/revert, calculated marker input diagnostics
   - `main.js` — `DOMContentLoaded` init, OAuth callback, event listeners, refresh callback
-- **`vendor/`** — locally bundled Chart.js, chartjs-adapter-native (custom date adapter, zero deps), pdf.js (+worker), Google Fonts (woff2), noble-secp256k1 v1.7.1 (Venice E2EE), Evolu (CRDT sync engine + SQLite WASM + OPFS worker), cashu-ts v3.6.2 (Cashu eCash protocol), bip39-minimal (BIP-39 mnemonic generation). Run `./update-vendor.sh` to update
+- **`vendor/`** — locally bundled Chart.js, chartjs-adapter-native, pdf.js (+worker), Google Fonts (woff2), `venice-e2ee.js` (Venice E2EE — ECDH + HKDF + AES-GCM), Evolu (CRDT sync + SQLite WASM + OPFS worker), cashu-ts (Cashu eCash), bip39-minimal, qrcode-generator, mammoth (DOCX parser for browser-local lens), JSZip (ZIP extraction). `@huggingface/transformers` is NOT vendored — the npm-dist bundle has bare module specifiers that need a bundler to resolve; runtime loads it from jsdelivr. Tracked as phase 2c in memory/project_browser_local_lens.md. Run `./update-vendor.sh` to refresh vendored files
 - **`data/`** — `demo-female.json`, `demo-male.json`, `emf-assessment-template.html`, `snp-health.json` (42 autosomal SNPs), `haplogroups.json` (28 mtDNA haplogroups with Wallace coupling classification), `mito-compounds.json` (108 mitochondrial compound effects)
-- **`tests/`** — 41 browser-based test files (`test-*.js`) + `verify-modules.js`
+- **`tests/`** — test files (`test-*.js`). Most run in Puppeteer (browser asserts via IIFE + `assert(name, cond)` pattern); a few run node-side on dev-server / native-dialog guard / lens-local-utils. Plus `verify-modules.js` + `spike-*.html` perf / ingest spikes + `spike-fixtures/` sample markdown
 
 Functions called from inline HTML `onclick` handlers are exposed via `Object.assign(window, {...})` at the bottom of each module. Cross-module calls use `window.fn()` to avoid circular dependencies.
 
@@ -106,6 +107,10 @@ Slide-out panel with streaming. 2+custom personalities, stop/discuss buttons, co
 
 Six backends: PPQ, Routstr, OpenRouter, Venice, Local AI (Ollama/LM Studio/Jan), Custom. `callClaudeAPI(opts)` routes to active provider. `hasAIProvider()` gates all AI features. Venice E2EE: ECDH + AES-256-GCM, per-chunk streaming decryption, 30-min TTL. See `api.js`, `provider-panels.js`, `cashu-wallet.js`.
 
+### Desktop app
+
+**Retired in v1.21.0.** The getbased Electron shell was removed. Users who want local hardware-accelerated RAG self-host any server speaking the External server protocol and wire it into Settings → Knowledge Base → External server. See `memory/project_electron_retirement.md` for the full rationale.
+
 ### Dashboard Section Order
 
 **Has data**: Onboarding Banner → Interpretive Lens → Focus Card → Context Cards → Menstrual Cycle (female) → Supplements → Key Trends + charts → Trends & Alerts → Data & Notes + Export. Import FAB (floating button, bottom-right above chat FAB) replaces the compact drop zone.
@@ -129,11 +134,11 @@ Dev server mirrors production routing. Landing page repo (`../get-based-site`) s
 
 ### Tests
 
-41 browser-based test files run headlessly:
+All tests (node-side + Puppeteer) run headlessly:
 ```
 ./run-tests.sh
 ```
-Auto-starts server, runs all tests via Puppeteer, exits 0/1.
+Auto-starts server, runs node-side tests first (fast fail on helper regressions), then all browser tests via Puppeteer. Exits 0/1.
 
 ### Documentation Site
 

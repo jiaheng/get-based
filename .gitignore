@@ -5,6 +5,10 @@ test-data.json
 !icon-192.png
 !icon-512.png
 !dashboard.png
+# Build artifacts
+dist/
+out/
+release/
 labcharts-*.json
 test-*.json
 node_modules/

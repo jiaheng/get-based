@@ -100,6 +100,9 @@ export function showDashboard(data) {
   // ── 2. Onboarding Banner (Step 2) ──
   html += renderOnboardingBanner();
 
+  // (KB dashboard banner removed — Knowledge Base is now discoverable via
+  // the unified Settings → AI → Knowledge Base section.)
+
   // ── 3. Interpretive Lens ──
   html += renderInterpretiveLensSection();
 
@@ -673,13 +676,16 @@ export function showCategory(categoryKey, preData) {
   loadChartCardRecs();
 }
 
-export function renameCategory(categoryKey) {
+export async function renameCategory(categoryKey) {
   const data = getActiveData();
   const cat = data.categories[categoryKey];
   if (!cat) return;
   const currentLabel = cat.label;
-  const newLabel = prompt('Rename category:', currentLabel);
-  if (!newLabel || newLabel.trim() === '' || newLabel.trim() === currentLabel) return;
+  const newLabel = await window.showPromptDialog('Rename category:', {
+    defaultValue: currentLabel,
+    okLabel: 'Rename',
+  });
+  if (!newLabel || newLabel === currentLabel) return;
   const trimmed = newLabel.trim();
   // Store label override
   if (!state.importedData.categoryLabels) state.importedData.categoryLabels = {};
@@ -695,14 +701,17 @@ export function renameCategory(categoryKey) {
   showNotification(`Category renamed to "${trimmed}"`, 'info');
 }
 
-export function renameMarker(id) {
+export async function renameMarker(id) {
   const data = getActiveData();
   const idx = id.indexOf('_');
   const catKey = id.slice(0, idx), mKey = id.slice(idx + 1);
   const marker = data.categories[catKey]?.markers[mKey];
   if (!marker) return;
-  const newName = prompt('Rename marker:', marker.name);
-  if (!newName || newName.trim() === '' || newName.trim() === marker.name) return;
+  const newName = await window.showPromptDialog('Rename marker:', {
+    defaultValue: marker.name,
+    okLabel: 'Rename',
+  });
+  if (!newName || newName === marker.name) return;
   const trimmed = newName.trim();
   const dotKey = catKey + '.' + mKey;
   if (!state.importedData.markerLabels) state.importedData.markerLabels = {};

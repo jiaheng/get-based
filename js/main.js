@@ -246,6 +246,20 @@ document.addEventListener("keydown", e => {
     if (emfInterpOverlay && emfInterpOverlay.classList.contains("show")) { window.closeEMFInterpretation(); return; }
     const confirmOverlay = document.getElementById("confirm-dialog-overlay");
     if (confirmOverlay && confirmOverlay.classList.contains("show")) { confirmOverlay.classList.remove("show"); return; }
+    // Sync restore dialog — single-step "paste your 24 words" modal.
+    const syncRestoreOverlay = document.getElementById("sync-restore-overlay");
+    if (syncRestoreOverlay && syncRestoreOverlay.classList.contains("show")) {
+      if (window.closeRestoreMnemonicDialog) window.closeRestoreMnemonicDialog();
+      else syncRestoreOverlay.classList.remove("show");
+      return;
+    }
+    // Sync setup wizard — "New setup / Join existing" choice + generated seed.
+    const syncSetupOverlay = document.getElementById("sync-setup-overlay");
+    if (syncSetupOverlay && syncSetupOverlay.classList.contains("show")) {
+      if (window.closeSyncSetup) window.closeSyncSetup();
+      else syncSetupOverlay.classList.remove("show");
+      return;
+    }
     const chatPanel = document.getElementById("chat-panel");
     if (chatPanel && chatPanel.classList.contains("open")) { window.closeChatPanel(); return; }
     const importOverlay = document.getElementById("import-modal-overlay");
@@ -267,14 +281,16 @@ document.addEventListener("keydown", e => {
     if (modalOverlay && modalOverlay.classList.contains("show")) { window.closeModal(); return; }
     return;
   }
-  // Focus trap for open modals
+  // Focus trap for open modals. Sync overlays use `.confirm-overlay` not
+  // `.modal-overlay` — include them so Tab doesn't escape back to the page
+  // while the modal is visible.
   if (e.key === "Tab") {
-    const overlayIds = ["client-list-overlay","changelog-modal-overlay","settings-modal-overlay","import-modal-overlay","glossary-modal-overlay","feedback-modal-overlay","modal-overlay"];
+    const overlayIds = ["client-list-overlay","changelog-modal-overlay","settings-modal-overlay","import-modal-overlay","glossary-modal-overlay","feedback-modal-overlay","sync-restore-overlay","sync-setup-overlay","modal-overlay"];
     for (const oid of overlayIds) {
       const ov = document.getElementById(oid);
       if (ov && ov.classList.contains("show")) {
-        const modal = ov.querySelector('[role="dialog"]') || ov.querySelector('.modal') || ov;
-        const focusable = modal.querySelectorAll('button,input,select,textarea,a[href],[tabindex]:not([tabindex="-1"])');
+        const modal = ov.querySelector('[role="dialog"]') || ov.querySelector('.modal') || ov.querySelector('.confirm-dialog') || ov;
+        const focusable = modal.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),a[href],[tabindex]:not([tabindex="-1"])');
         if (focusable.length === 0) return;
         const first = focusable[0], last = focusable[focusable.length - 1];
         if (e.shiftKey) { if (document.activeElement === first) { e.preventDefault(); last.focus(); } }

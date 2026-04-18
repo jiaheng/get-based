@@ -44,6 +44,24 @@ return (async function() {
   // Encrypted key storage
   assert("saveLensKey uses encryptedSetItem", lensSrc.includes("encryptedSetItem('labcharts-lens-key'") || lensSrc.includes('encryptedSetItem(SECRET_KEY'));
   assert("getLensKey uses getCachedKey", lensSrc.includes('getCachedKey(SECRET_KEY)') || lensSrc.includes("getCachedKey('labcharts-lens-key')"));
+  // ─── testProbe (configurable test query, replaces hardcoded probe) ───
+  // The old hardcoded 'vitamin D deficiency supplementation' only made sense
+  // for health-focused RAGs. Custom Knowledge Source must work for any
+  // domain — legal, code docs, recipes — so the probe is now per-user and
+  // the "Save & Test" result separates connectivity (pass/fail) from
+  // passage count (informational).
+  assert('DEFAULT_TEST_PROBE constant defined', lensSrc.includes('DEFAULT_TEST_PROBE ='));
+  assert('testProbe included in DEFAULT_CONFIG', lensSrc.includes('testProbe:') && lensSrc.includes('DEFAULT_CONFIG'));
+  assert('testLensConnection reads cfg.testProbe', lensSrc.includes('cfg.testProbe'));
+  assert('testLensConnection falls back to DEFAULT_TEST_PROBE', lensSrc.includes('|| DEFAULT_TEST_PROBE'));
+  assert('testLensConnection no longer hardcodes the vitamin D probe inline',
+    !/['"]vitamin D deficiency supplementation['"][\s\S]{0,100}_doQuery/.test(lensSrc),
+    'the probe should be read from config, not passed literally to _doQuery');
+  assert('renderCustomLensSection includes lens-test-probe-input field', lensSrc.includes('lens-test-probe-input'));
+  assert('handleSaveLensConfig persists testProbe', lensSrc.includes('saveLensConfig({ name, url, enabled, topK, testProbe, backend })'));
+  assert('Connected toast distinguishes zero-result case',
+    lensSrc.includes("the test query didn't find any close matches") && lensSrc.includes('your endpoint works'),
+    'user with non-matching probe should see the endpoint worked, not "connection failed"');
 
   // ─── 2. Window function exports ───
   console.log('\n2. Window function exports');
@@ -118,7 +136,9 @@ return (async function() {
   localStorage.removeItem('labcharts-lens-key');
   window.updateKeyCache && window.updateKeyCache('labcharts-lens-key', '');
   assert('hasLens false with nothing', window.hasLens() === false);
-  window.saveLensConfig({ url: 'https://x.com', enabled: false, topK: 5 });
+  // external-server backend — URL + key gate. The default backend post-
+  // unification is in-browser, so we have to opt-in here.
+  window.saveLensConfig({ backend: 'external-server', url: 'https://x.com', enabled: false, topK: 5 });
   window.updateKeyCache && window.updateKeyCache('labcharts-lens-key', 'k');
   assert('hasLens false when disabled', window.hasLens() === false);
   window.saveLensConfig({ enabled: true });
@@ -271,13 +291,49 @@ return (async function() {
   console.log('\n20. testLensConnection disabled-toggle flow');
   assert('testLensConnection does not gate on hasLens()', !/function testLensConnection[\s\S]{0,100}if \(!hasLens/.test(lensSrc));
   assert('testLensConnection checks url + key directly', /cfg\.url[\s\S]{0,100}key/.test(lensSrc.split('function testLensConnection')[1] || ''));
-  assert('_doQuery helper exists (factored path)', lensSrc.includes('function _doQuery('));
+  assert('queryWithCache envelope exists (factored cache + status path)', lensSrc.includes('function queryWithCache('));
+  assert('remote backend fetcher extracted', lensSrc.includes('function _fetchRemoteChunks('));
 
   // ─── 21. BUG 3 regression: toggle does not re-render inputs ───
   console.log('\n21. Toggle does not re-render section');
   assert('handleToggleLens does NOT call _rerenderLensSection', !/function handleToggleLens[\s\S]{0,300}_rerenderLensSection/.test(lensSrc));
   assert('handleToggleLens calls _updateLensStatusChip', /function handleToggleLens[\s\S]{0,300}_updateLensStatusChip/.test(lensSrc));
   assert('_updateLensStatusChip exists', lensSrc.includes('function _updateLensStatusChip()'));
+
+  // ─── 21b. v1.20.x forward-compat: saved config without `backend` field ───
+  // Pre-v1.21.0 users only had the single external RAG endpoint. On upgrade
+  // their saved config (no `backend` key) must resolve to 'external-server'
+  // so their RAG keeps working — NOT silently switch to in-browser.
+  console.log('\n21b. v1.20.x forward-compat migration');
+  (function () {
+    const _prev = localStorage.getItem('labcharts-lens-config');
+    // Simulate a v1.20.1 config: has url + enabled, no backend field
+    localStorage.setItem('labcharts-lens-config', JSON.stringify({
+      name: 'My RAG', url: 'https://rag.example.com/query', enabled: true, topK: 5
+    }));
+    const cfg = window.getLensConfig();
+    assert('v1.20.x config with URL → backend=external-server',
+      cfg.backend === 'external-server',
+      `got ${cfg.backend}`);
+    assert('v1.20.x config with URL preserves the URL',
+      cfg.url === 'https://rag.example.com/query');
+    // Fresh user (no saved config at all) → in-browser default
+    localStorage.removeItem('labcharts-lens-config');
+    const fresh = window.getLensConfig();
+    assert('fresh user with no saved config → backend=in-browser',
+      fresh.backend === 'in-browser');
+    // Pre-v1.21 config with NO url (never configured KB) → in-browser
+    localStorage.setItem('labcharts-lens-config', JSON.stringify({
+      name: '', url: '', enabled: false, topK: 5
+    }));
+    const never = window.getLensConfig();
+    assert('v1.20.x config with empty URL → backend=in-browser',
+      never.backend === 'in-browser',
+      `got ${never.backend}`);
+    // Restore
+    if (_prev) localStorage.setItem('labcharts-lens-config', _prev);
+    else localStorage.removeItem('labcharts-lens-config');
+  })();
 
   // ─── 22. BUG 4 regression: cache only clears on URL/topK change ───
   console.log('\n22. Cache survives toggle-only save');
@@ -291,6 +347,26 @@ return (async function() {
   // ─── 24. Indicator clears stale classes ───
   console.log('\n24. Indicator clears stale classes');
   assert('updateLensIndicator removes both classes before branching', /classList\.remove\('active', 'error'\)/.test(lensSrc));
+
+  // ─── 24b. Worker feature-detects WebGPU with a WASM fallback ───
+  console.log('\n24b. Worker WebGPU detection + WASM fallback');
+  const workerSrc = await fetch('js/lens-local-worker.js').then(r => r.text());
+  assert('worker checks navigator.gpu before trying WebGPU',
+    /navigator\.gpu/.test(workerSrc) && /requestAdapter/.test(workerSrc),
+    'lens-local-worker must feature-detect navigator.gpu + adapter before picking WebGPU');
+  assert('worker falls back to WASM on WebGPU pipeline init failure',
+    /falling back to WASM/i.test(workerSrc) || /fallback/i.test(workerSrc),
+    'pipeline init is wrapped in try/catch that retries with WASM when WebGPU throws');
+  assert('worker tracks active backend for stats reporting',
+    /_embedderBackend/.test(workerSrc) && /backend:\s*_embedderBackend/.test(workerSrc),
+    'handleStats() must surface the backend (webgpu|wasm) so Settings can display it');
+  const localSrc = await fetch('js/lens-local.js').then(r => r.text());
+  assert('lens-local.js getStats forwards backend field',
+    /backend:\s*r\.backend/.test(localSrc),
+    'main-thread stats adapter must pass through the backend field from the worker');
+  assert('lens.js stats row renders WebGPU/WASM label',
+    lensSrc.includes("s.backend === 'webgpu' ? 'WebGPU' : 'WASM'"),
+    'users should see which engine is active — WebGPU is 3-10x faster than WASM');
 
   // ─── 25. Functional: cache preserved on enable toggle ───
   console.log('\n25. Functional: cache preserved on toggle');

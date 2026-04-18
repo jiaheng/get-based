@@ -474,7 +474,7 @@ export function renderGeneticsSection() {
 
   html += `<div class="genetics-actions">
     <label class="genetics-action-link" onclick="reimportDNA()">Re-import</label>
-    <label class="genetics-action-link genetics-action-delete" onclick="if(confirm('Delete genetic data? This cannot be undone.')){deleteGeneticsData(window._getState().importedData);window._saveAndRefresh();}">Delete</label>
+    <label class="genetics-action-link genetics-action-delete" onclick="window.confirmDeleteDNA()">Delete</label>
   </div>`;
   html += `</div></div>`;
 
@@ -962,6 +962,16 @@ export async function setManualHaplogroup(haplogroup) {
 
 export { HAPLOGROUP_LIST };
 
+/// Inline-onclick confirm replacement. The genetics card's Delete link
+/// used native window.confirm() which Electron strips; we dispatch to
+/// the custom dialog instead.
+function confirmDeleteDNA() {
+  window.showConfirmDialog('Delete genetic data? This cannot be undone.', () => {
+    deleteGeneticsData(window._getState().importedData);
+    window._saveAndRefresh();
+  });
+}
+
 // ═══════════════════════════════════════════════
 // WINDOW EXPORTS
 // ═══════════════════════════════════════════════
@@ -972,6 +982,7 @@ Object.assign(window, {
   handleDNAFile,
   closeDNAImportPreview,
   confirmDNAImport,
+  confirmDeleteDNA,
   deleteGeneticsData,
   toggleGeneticsCollapse,
   toggleGeneticsExpand,

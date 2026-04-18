@@ -1,13 +1,13 @@
 // settings.js — Settings modal (profile, display, AI provider, privacy)
 
 import { state } from './state.js';
-import { escapeHTML, escapeAttr, showNotification, showConfirmDialog, isDebugMode, setDebugMode, isPIIReviewEnabled, setPIIReviewEnabled } from './utils.js';
+import { escapeHTML, escapeAttr, showNotification, showConfirmDialog, isDebugMode, setDebugMode, isPIIReviewEnabled, setPIIReviewEnabled, isAnalyticsEnabled, setAnalyticsEnabled } from './utils.js';
 import { getTheme, setTheme, getTimeFormat, setTimeFormat } from './theme.js';
 import { formatCost, getProfileUsage, getGlobalUsage, resetProfileUsage } from './schema.js';
 import { getAIProvider, isAIPaused, getOllamaPIIUrl, getOllamaPIIModel } from './api.js';
 import { isOllamaPIIEnabled, setOllamaPIIEnabled, getOllamaConfig, checkOpenAICompatible } from './pii.js';
 import { renderEncryptionSection, renderBackupSection, loadBackupSnapshots, updateKeyCache } from './crypto.js';
-import { isSyncEnabled, enableSync, disableSync, getMnemonic, restoreFromMnemonic, getSyncRelay, setSyncRelay, checkRelayConnection, isMessengerEnabled, getMessengerToken, generateMessengerToken, revokeMessengerToken, pushContextToGateway } from './sync.js';
+import { isSyncEnabled, enableSync, disableSync, getMnemonic, getMnemonicResolutionError, getSyncBlocker, restoreFromMnemonic, getSyncRelay, setSyncRelay, checkRelayConnection, isMessengerEnabled, getMessengerToken, generateMessengerToken, revokeMessengerToken, pushContextToGateway } from './sync.js';
 import './provider-panels.js';
 
 
@@ -130,7 +130,7 @@ export function openSettingsModal(tab) {
         ${renderPrivacySection()}
       </div>
 
-      <div class="settings-group-title">Custom Knowledge Source</div>
+      <div class="settings-group-title">Knowledge Base</div>
 
       <div class="settings-section" id="custom-lens-section">
         ${window.renderCustomLensSection ? window.renderCustomLensSection() : ''}
@@ -246,6 +246,13 @@ export function renderPrivacySection() {
         <span class="toggle-slider"></span>
       </label>
     </div>
+    <div style="display:flex;align-items:start;justify-content:space-between;gap:12px;margin-top:8px">
+      <span style="font-size:13px">Send anonymous usage stats<br><span style="font-size:11px;color:var(--text-muted)">Cookieless Umami pageviews — no personal data, no tracking, no IP. Toggle takes effect on next launch.</span></span>
+      <label class="toggle-switch" style="margin-top:2px">
+        <input type="checkbox" id="analytics-toggle" ${isAnalyticsEnabled() ? 'checked' : ''} onchange="setAnalyticsEnabled(this.checked)">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
     <div class="privacy-configure-toggle" onclick="togglePrivacyConfigure()" style="margin-top:12px">
       <span class="privacy-configure-arrow" id="privacy-configure-arrow">&#9654;</span>
       Configure Local AI
@@ -350,14 +357,26 @@ export function closeSettingsModal() {
 function renderSyncSection() {
   const enabled = isSyncEnabled();
   const relay = getSyncRelay();
+  const blocker = getSyncBlocker();
+  // Banner appears in place of the toggle when the underlying webview can't
+  // run Evolu (typically Tauri-on-Linux missing navigator.storage / OPFS).
+  // Lets the user see "this is broken and here's why" instead of clicking a
+  // dead toggle and waiting 30s for a cryptic timeout toast.
+  const blockerBanner = blocker ? `
+    <div style="margin-bottom:16px;padding:10px 12px;border:1px solid #fbbf24;background:rgba(251,191,36,0.08);border-radius:6px;color:#fbbf24;font-size:12px;line-height:1.45">
+      <strong>Sync unavailable in this build.</strong><br>
+      ${escapeHTML(blocker)}<br>
+      <a href="https://app.getbased.health" target="_blank" rel="noopener" style="color:#fbbf24;text-decoration:underline">Open the web version</a> to sync across devices. Any AI provider API keys you set there (PPQ, OpenRouter, Venice, etc.) will need to be pasted back into Settings → AI on this desktop app.
+    </div>` : '';
   return `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${enabled ? '16' : '8'}px">
+    ${blockerBanner}
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${enabled ? '16' : '8'}px;${blocker ? 'opacity:0.5;pointer-events:none' : ''}">
       <div>
         <div style="font-size:13px;font-weight:600;color:var(--text-primary)">Cross-device sync</div>
         <div style="font-size:12px;color:var(--text-muted);margin-top:2px">E2E encrypted via Evolu CRDT</div>
       </div>
       <label class="chat-websearch-toggle-label" style="display:flex" aria-label="Toggle cross-device sync">
-        <input type="checkbox" ${enabled ? 'checked' : ''} onchange="toggleSync(this.checked)" style="display:none">
+        <input type="checkbox" ${enabled ? 'checked' : ''} onchange="toggleSync(this.checked)" style="display:none" ${blocker ? 'disabled' : ''}>
         <span class="chat-toggle-slider"></span>
       </label>
     </div>
@@ -380,14 +399,8 @@ function renderSyncSection() {
       </div>
 
       <div style="margin-bottom:16px">
-        <button class="import-btn import-btn-secondary" style="font-size:12px;padding:5px 14px;width:100%" onclick="showMnemonicRestore()">Restore from mnemonic</button>
-      </div>
-      <div id="sync-restore-form" style="display:none;margin-bottom:16px">
-        <textarea id="sync-restore-input" style="font-size:12px;width:100%;height:60px;resize:vertical;border-radius:8px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border);padding:8px 10px;font-family:var(--font-mono, monospace);box-sizing:border-box" placeholder="Paste your 24-word mnemonic here..."></textarea>
-        <div style="display:flex;gap:8px;margin-top:6px">
-          <button class="import-btn import-btn-primary" style="font-size:12px;padding:5px 14px;flex:1" onclick="doMnemonicRestore()">Restore</button>
-          <button class="import-btn import-btn-secondary" style="font-size:12px;padding:5px 14px" onclick="document.getElementById('sync-restore-form').style.display='none'">Cancel</button>
-        </div>
+        <button class="import-btn import-btn-secondary" style="font-size:12px;padding:5px 14px;width:100%" onclick="openRestoreMnemonicDialog()">Restore from a different mnemonic…</button>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px;line-height:1.4">Replace this device's identity with a 24-word seed from another device. Your current data is overwritten.</div>
       </div>
 
       <details style="margin-bottom:8px">
@@ -409,22 +422,49 @@ function renderSyncSection() {
 }
 
 let _syncToggling = false;
+let _syncToggleWatchdog = null;
+function _releaseSyncToggle() {
+  _syncToggling = false;
+  if (_syncToggleWatchdog) { clearTimeout(_syncToggleWatchdog); _syncToggleWatchdog = null; }
+}
 async function toggleSync(enabled) {
-  if (_syncToggling) return;
+  if (_syncToggling) {
+    // Don't silently swallow — tell the user their click registered but is
+    // already mid-flight. (If they're hitting this repeatedly, the watchdog
+    // below will release the lock so the next click works.)
+    showNotification('Sync change already in progress…', 'info');
+    return;
+  }
   _syncToggling = true;
+  // Watchdog: if the modal closes by some path that doesn't run our
+  // cleanup (e.g. ESC key, page nav, browser back, JS error), release
+  // the toggle lock after 60s so the next click isn't dead. 60s is
+  // generous — long enough to write down 24 words, short enough to
+  // recover from a wedge before the user gives up.
+  _syncToggleWatchdog = setTimeout(_releaseSyncToggle, 60000);
   if (enabled) {
     showSyncSetupModal();
-    // _syncToggling cleared by closeSyncSetup or syncSetupDone
+    // _syncToggling cleared by closeSyncSetup, syncSetupDone, or watchdog
   } else {
     try {
       _mnemonicCache = null;
       _mnemonicRetries = 0;
       clearTimeout(_mnemonicRetryTimer);
       await disableSync();
+      // disableSync triggers a page reload, but if we're still here render
+      // the disabled state immediately for visual feedback.
+      const el = document.getElementById('sync-section');
+      if (el) el.innerHTML = renderSyncSection();
+    } catch (e) {
+      console.error('[sync] disable failed:', e);
+      showNotification(`Disable failed: ${e?.message || e}`, 'error');
+      // Visually un-stick the toggle by re-rendering — the underlying
+      // localStorage flag is already false (set early in disableSync) so
+      // the toggle will show as off.
       const el = document.getElementById('sync-section');
       if (el) el.innerHTML = renderSyncSection();
     } finally {
-      _syncToggling = false;
+      _releaseSyncToggle();
     }
   }
 }
@@ -478,7 +518,7 @@ async function closeSyncSetup() {
   }
   const el = document.getElementById('sync-section');
   if (el) el.innerHTML = renderSyncSection();
-  _syncToggling = false;
+  _releaseSyncToggle();
 }
 
 let _syncSetupInProgress = false;
@@ -541,7 +581,7 @@ async function syncSetupNew() {
 function syncSetupDone() {
   const overlay = document.getElementById('sync-setup-overlay');
   if (overlay) overlay.classList.remove('show');
-  _syncToggling = false;
+  _releaseSyncToggle();
   const el = document.getElementById('sync-section');
   if (el) el.innerHTML = renderSyncSection();
   loadMnemonic();
@@ -564,11 +604,17 @@ function syncSetupBack() {
 async function syncSetupDoRestore() {
   if (_syncSetupInProgress) return;
   const input = document.getElementById('sync-setup-restore-input');
-  if (!input || !input.value.trim()) return;
-  const mnemonic = input.value.trim();
+  if (!input) return;
+  const raw = (input.value || '').trim();
+  if (!raw) {
+    showNotification('Paste your 24-word seed into the textarea first', 'error');
+    input.focus();
+    return;
+  }
+  const mnemonic = raw;
   const words = mnemonic.split(/\s+/);
   if (words.length !== 24) {
-    showNotification('Mnemonic must be exactly 24 words', 'error');
+    showNotification(`Seed must be exactly 24 words (got ${words.length})`, 'error');
     return;
   }
 
@@ -617,13 +663,26 @@ function loadMnemonic() {
     el.dataset.masked = 'true';
     el.textContent = MNEMONIC_MASK;
     el.style.userSelect = 'none';
+    el.style.color = '';
     _mnemonicRetries = 0;
-  } else if (_mnemonicRetries < 30) {
+    return;
+  }
+  // Stop polling immediately if Evolu surfaced an actual init error —
+  // no point waiting 30s for a promise that already rejected.
+  const initErr = getMnemonicResolutionError();
+  if (initErr) {
+    el.textContent = `Sync init failed: ${initErr}`;
+    el.style.color = '#fbbf24';
+    _mnemonicRetries = 0;
+    return;
+  }
+  if (_mnemonicRetries < 30) {
     _mnemonicRetries++;
-    el.textContent = 'Resolving...';
+    el.textContent = 'Resolving…';
     _mnemonicRetryTimer = setTimeout(loadMnemonic, 1000);
   } else {
-    el.textContent = 'Could not resolve mnemonic';
+    el.textContent = 'Could not resolve mnemonic — open the dev console and check for [sync] errors, or try a hard refresh';
+    el.style.color = '#fbbf24';
     _mnemonicRetries = 0;
   }
 }
@@ -660,30 +719,94 @@ function copyMnemonic() {
   });
 }
 
-function showMnemonicRestore() {
-  const form = document.getElementById('sync-restore-form');
-  if (form) {
-    form.style.display = 'block';
-    const input = document.getElementById('sync-restore-input');
-    if (input) input.focus();
+// Legacy two-step restore is gone — kept as no-op shims so any cached
+// onclick still resolves to a function instead of "is not defined".
+function showMnemonicRestore() { openRestoreMnemonicDialog(); }
+function doMnemonicRestore() { openRestoreMnemonicDialog(); }
+
+/**
+ * Single-step restore modal — replaces the old two-button flow that confused
+ * users into clicking the outer "Restore from mnemonic" button (which only
+ * revealed a textarea) and waiting for something to happen. Now the modal
+ * contains the seed input + a single Restore action button + Cancel, all
+ * in one place. Same pattern as the sync setup wizard so users don't have
+ * to learn two different shapes.
+ */
+function openRestoreMnemonicDialog() {
+  let overlay = document.getElementById('sync-restore-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'sync-restore-overlay';
+    overlay.className = 'confirm-overlay';
+    document.body.appendChild(overlay);
   }
+  overlay.innerHTML = `<div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="sync-restore-title" style="max-width:480px">
+    <h3 id="sync-restore-title" style="margin:0 0 6px;font-size:16px;color:var(--text-primary)">Restore from mnemonic</h3>
+    <p style="font-size:13px;color:var(--text-muted);margin:0 0 14px;line-height:1.5">Paste your 24-word seed from another device. This replaces your current sync identity — anything synced under the old identity will no longer reach this device.</p>
+    <textarea id="sync-restore-dialog-input" autofocus aria-label="24-word mnemonic" style="font-size:12px;width:100%;height:90px;resize:vertical;border-radius:8px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border);padding:10px 12px;font-family:var(--font-mono, monospace);box-sizing:border-box" placeholder="word word word word word word word word word word word word word word word word word word word word word word word word"></textarea>
+    <div id="sync-restore-dialog-msg" style="font-size:11px;color:var(--text-muted);margin-top:6px;min-height:14px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+      <button class="confirm-btn confirm-btn-cancel" onclick="closeRestoreMnemonicDialog()">Cancel</button>
+      <button id="sync-restore-dialog-go" class="import-btn import-btn-primary" style="padding:8px 16px;font-size:13px" onclick="confirmRestoreMnemonic()">Restore &amp; reload</button>
+    </div>
+  </div>`;
+  overlay.classList.add('show');
+  // Live word count + button enable so the user gets immediate feedback as
+  // they paste — much friendlier than only finding out on submit.
+  const input = document.getElementById('sync-restore-dialog-input');
+  const msg = document.getElementById('sync-restore-dialog-msg');
+  const btn = document.getElementById('sync-restore-dialog-go');
+  if (input) {
+    input.focus();
+    const update = () => {
+      const raw = (input.value || '').trim();
+      if (!raw) {
+        if (msg) { msg.textContent = ''; msg.style.color = 'var(--text-muted)'; }
+        if (btn) btn.disabled = true;
+        return;
+      }
+      const words = raw.split(/\s+/);
+      if (words.length === 24) {
+        if (msg) { msg.textContent = '✓ 24 words detected'; msg.style.color = 'var(--green, #22c55e)'; }
+        if (btn) btn.disabled = false;
+      } else {
+        if (msg) { msg.textContent = `${words.length} word${words.length === 1 ? '' : 's'} so far — need exactly 24`; msg.style.color = '#fbbf24'; }
+        if (btn) btn.disabled = true;
+      }
+    };
+    input.addEventListener('input', update);
+    update();
+  }
+  overlay.onclick = (e) => { if (e.target === overlay) closeRestoreMnemonicDialog(); };
 }
 
-function doMnemonicRestore() {
-  const input = document.getElementById('sync-restore-input');
-  if (!input || !input.value.trim()) return;
-  const mnemonic = input.value.trim();
-  const words = mnemonic.split(/\s+/);
+function closeRestoreMnemonicDialog() {
+  const overlay = document.getElementById('sync-restore-overlay');
+  if (overlay) overlay.classList.remove('show');
+}
+
+async function confirmRestoreMnemonic() {
+  const input = document.getElementById('sync-restore-dialog-input');
+  const btn = document.getElementById('sync-restore-dialog-go');
+  if (!input) return;
+  const raw = (input.value || '').trim();
+  const words = raw.split(/\s+/);
   if (words.length !== 24) {
-    showNotification('Mnemonic must be exactly 24 words', 'error');
+    showNotification(`Seed must be exactly 24 words (got ${words.length})`, 'error');
+    input.focus();
     return;
   }
-  showConfirmDialog('Restore from mnemonic? This will replace your sync identity and reload the page.', async () => {
-    const result = await restoreFromMnemonic(mnemonic);
-    if (!result) {
-      if (!isSyncEnabled()) showNotification('Sync not initialized — try disabling and re-enabling sync', 'error');
-    }
-  });
+  if (btn) { btn.disabled = true; btn.textContent = 'Restoring…'; }
+  // No second confirm dialog — the modal already explains what restore
+  // does, and the action button is explicit ("Restore & reload"). Adding
+  // a second confirm pile-up was the friction users complained about.
+  const result = await restoreFromMnemonic(raw);
+  if (!result) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Restore & reload'; }
+    if (!isSyncEnabled()) showNotification('Sync not initialized — enable sync first, then restore', 'error');
+  }
+  // On success: restoreFromMnemonic triggers reload (Evolu auto-reloads),
+  // so we don't need to close this modal — the page replaces itself.
 }
 
 function saveSyncRelay() {
@@ -800,7 +923,7 @@ function regenerateMessengerToken() {
   if (el) el.innerHTML = renderMessengerSection();
 }
 
-Object.assign(window, { toggleSync, toggleMnemonicVisibility, copyMnemonic, showMnemonicRestore, doMnemonicRestore, saveSyncRelay, closeSyncSetup, syncSetupNew, syncSetupRestore, syncSetupBack, syncSetupDoRestore, syncSetupDone, toggleMessenger, toggleMessengerToken, copyMessengerToken, regenerateMessengerToken });
+Object.assign(window, { toggleSync, toggleMnemonicVisibility, copyMnemonic, showMnemonicRestore, doMnemonicRestore, openRestoreMnemonicDialog, closeRestoreMnemonicDialog, confirmRestoreMnemonic, saveSyncRelay, closeSyncSetup, syncSetupNew, syncSetupRestore, syncSetupBack, syncSetupDoRestore, syncSetupDone, toggleMessenger, toggleMessengerToken, copyMessengerToken, regenerateMessengerToken });
 
 
 export function renderDataEntriesSection() {

@@ -6,13 +6,16 @@
 // Usage: node dev-server.js [port]
 //        SITE_DIR=/path/to/get-based-site node dev-server.js
 
-const http = require('http');
-const https = require('https');
-const fs = require('fs');
-const path = require('path');
+import http from 'node:http';
+import https from 'node:https';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { execFile } from 'node:child_process';
 
 const PORT = parseInt(process.argv[2], 10) || 8000;
-const ROOT = __dirname;
+const __filename = fileURLToPath(import.meta.url);
+const ROOT = path.dirname(__filename);
 const SITE_DIR = process.env.SITE_DIR || path.join(ROOT, '..', 'get-based-site');
 const SITE_INDEX = path.join(SITE_DIR, 'index.html');
 const hasSite = fs.existsSync(SITE_INDEX);
@@ -140,7 +143,6 @@ const server = http.createServer((req, res) => {
   if (pathname === '/api/fetch-page-rendered') {
     const target = url.searchParams.get('url');
     if (!target) { res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }); res.end('{"error":"missing url param"}'); return; }
-    const { execFile } = require('child_process');
     const scriptPath = path.join(ROOT, 'tools', 'fetch-rendered.mjs');
     execFile('node', [scriptPath, target], { timeout: 30000, maxBuffer: 1024 * 1024 }, (err, stdout) => {
       res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });

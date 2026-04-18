@@ -4,6 +4,15 @@ set -euo pipefail
 # ── Pinned versions (bump these, then re-run) ─────────────────────────────
 CHARTJS_VERSION="4.4.7"
 PDFJS_VERSION="3.11.174"
+MAMMOTH_VERSION="1.8.0"
+JSZIP_VERSION="3.10.1"
+# @huggingface/transformers is intentionally NOT vendored — its npm-dist
+# bundles have bare module specifiers (onnxruntime-web/webgpu etc.) that
+# browsers can't resolve without a bundler, and ORT picks one of four
+# WASM variants at runtime based on browser feature detection. The
+# browser-local lens loads both from jsdelivr. To truly vendor, run a
+# bundler pass that produces a single resolved ESM. Tracked as phase 2c
+# in memory/project_browser_local_lens.md.
 # Google Fonts: no version pin — re-run to fetch latest files
 # ───────────────────────────────────────────────────────────────────────────
 
@@ -22,6 +31,15 @@ curl -fsSL "https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build/pdf.m
 
 curl -fsSL "https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.min.js" \
   -o "$VENDOR_DIR/pdf.worker.min.js"
+
+echo "=== Downloading mammoth $MAMMOTH_VERSION ==="
+curl -fsSL "https://cdn.jsdelivr.net/npm/mammoth@${MAMMOTH_VERSION}/mammoth.browser.min.js" \
+  -o "$VENDOR_DIR/mammoth.browser.min.js"
+
+echo "=== Downloading JSZip $JSZIP_VERSION ==="
+curl -fsSL "https://cdn.jsdelivr.net/npm/jszip@${JSZIP_VERSION}/dist/jszip.min.js" \
+  -o "$VENDOR_DIR/jszip.min.js"
+
 
 echo "=== Downloading Google Fonts ==="
 FONTS_CSS=$(curl -fsSL \

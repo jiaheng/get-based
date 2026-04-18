@@ -86,6 +86,8 @@ getbased-mcp provides these tools:
 | `getbased_lab_context` | Full lab summary — values, ranges, trends, context cards, supplements, goals |
 | `getbased_section` | Query a specific section (hormones, biometrics, etc.) or list available sections |
 | `getbased_list_profiles` | List all profiles by name and ID |
+| `knowledge_search` | Semantic search over your knowledge base. Requires a Lens RAG server running locally (port 8321 by default, configurable via `LENS_URL`). Degrades gracefully — the lab-context tools keep working even if no RAG server is reachable. |
+| `getbased_lens_config` | Show the Custom Knowledge Source endpoint + key from getbased, so the agent can stay in sync with what the PWA is configured to query. |
 
 ## Security
 

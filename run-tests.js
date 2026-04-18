@@ -3,7 +3,7 @@
 // Usage: node run-tests.js (requires http server on :8000)
 // Or:    ./run-tests.sh (starts server automatically)
 
-const puppeteer = require('puppeteer');
+import puppeteer from 'puppeteer';
 
 const TEST_FILES = [
   'tests/test-crypto.js',
@@ -47,7 +47,9 @@ const TEST_FILES = [
   'tests/test-normalize-units.js',
   'tests/test-trend-alerts.js',
   'tests/test-data-pipeline.js',
-  'tests/test-calculated-markers.js'
+  'tests/test-calculated-markers.js',
+  'tests/test-lens-parsers.js',
+  'tests/test-lens-local-worker.js'
 ];
 
 const PORT = process.env.PORT || 8000;

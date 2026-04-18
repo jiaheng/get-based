@@ -93,16 +93,37 @@ Open `http://localhost:8000`. You need an AI provider API key or local AI server
 
 ## Tech stack
 
-No build tools, no bundler, no package manager. Pure ES modules — 42 modules under `js/`.
+Web app only — no build tools, no bundler, no package manager. Pure ES modules under `js/`.
 
 - Chart.js for interactive charts
 - pdf.js for PDF text extraction
-- All dependencies vendored locally (`vendor/`) — no CDN calls
+- transformers.js + OPFS for the browser-local Lens (Custom Knowledge Source)
+- Evolu for optional CRDT sync (E2E encrypted)
+- Most runtime dependencies vendored in `vendor/`
 - Installable as a PWA (works offline for non-AI features)
+
+## Repo structure
+
+```
+get-based/
+├── js/ styles.css index.html  # The product — static files, runs in any browser
+│   ├── js/lens.js              #   Custom Knowledge Source dispatcher
+│   └── js/lens-local*.js       #   Browser-local lens — MiniLM in-browser, OPFS vectors
+├── tests/                      # Node-side + Puppeteer browser assertions
+├── .github/workflows/          # Tests on every PR / push
+└── docs/                       # User-facing documentation
+```
+
+Open `index.html` (or start `node dev-server.js` for development) and the dashboard runs.
+
+### Related repos
+
+- [**getbased-relay**](https://github.com/elkimek/getbased-relay) — Evolu sync relay for opt-in cross-device sync.
+- [**getbased-mcp**](https://github.com/elkimek/getbased-mcp) — MCP server exposing your lab context to AI agents (Claude Desktop, Hermes, Cursor, etc.).
 
 ## Testing
 
-41 browser-based test files run headlessly:
+45 test files — node-side helpers plus Puppeteer-driven browser assertions — run headlessly:
 
 ```bash
 ./run-tests.sh

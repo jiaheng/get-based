@@ -1,0 +1,49 @@
+# CI test workflow. Runs on every PR + push to main.
+#
+# Runs the full ./run-tests.sh battery:
+#   - Node-side tests (native-dialog guard, lens-local-utils, dev-server
+#     origin guard)
+#   - Puppeteer-driven web-app suite
+
+name: Tests
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Cache Puppeteer Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/puppeteer
+          key: puppeteer-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Run test suite
+        run: ./run-tests.sh
+
+      - name: Upload test logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs
+          path: /tmp/dev-server.log
+          if-no-files-found: ignore
+          retention-days: 7
