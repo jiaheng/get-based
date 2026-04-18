@@ -761,9 +761,13 @@ async function _handleLocalLensIngest(fileList) {
       if (modalText) modalText.textContent = `Preparing ${p.total} excerpts across ${files.length} file${files.length !== 1 ? 's' : ''}…`;
     } else if (p.stage === 'embed') {
       const rate = p.index / ((performance.now() - t0) / 1000);
+      pillBar.max = p.total;
       pillBar.value = p.index;
       pillText.textContent = `${p.index}/${p.total} · ${rate.toFixed(1)}/s`;
-      if (modalBar) modalBar.value = p.index;
+      // Set max on every tick — when Settings is reopened mid-ingest the
+      // fresh <progress> markup starts at max=100, so without this the
+      // bar jumps to 100% even at small p.index values.
+      if (modalBar) { modalBar.max = p.total; modalBar.value = p.index; }
       if (modalText) modalText.textContent = `Indexing ${p.index}/${p.total} · ${rate.toFixed(1)}/s · ${p.source}`;
     }
   });
