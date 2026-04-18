@@ -79,6 +79,12 @@ return (async function() {
     Array.isArray(stats.documents) && stats.documents.length === 3);
   assert('stats exposes model + dim',
     typeof stats.model === 'string' && stats.dim === 384);
+  // The mock embedder doesn't touch transformers.js, so backend stays at
+  // its init default ('wasm'). Still check the field is exposed — the real
+  // value is set by the pipeline init branch in production.
+  assert('stats exposes backend field',
+    stats.backend === 'wasm' || stats.backend === 'webgpu',
+    `got ${JSON.stringify(stats.backend)}`);
 
   // ─── Phase 4: query shape + MMR ───
   console.log('%c[4] Query', 'font-weight:bold');

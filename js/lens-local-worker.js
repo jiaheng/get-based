@@ -44,6 +44,7 @@ const CHUNK_OVERLAP = 50;
 const CHUNK_MIN = 50;
 
 let _embedder = null;
+let _embedderBackend = 'wasm';  // 'webgpu' | 'wasm' — whichever transformers.js actually booted
 let _rootDir = null;            // OPFS FileSystemDirectoryHandle at /lens-local/
 let _libraries = [];            // [{id, name, createdAt}]
 let _activeId = null;           // Currently active library id
@@ -147,11 +148,13 @@ async function handleInit() {
       device,
       dtype: device === 'webgpu' ? 'fp32' : 'q8',
     });
+    _embedderBackend = device;
     console.log(`[lens-local] Embedder ready on ${device}`);
   } catch (e) {
     if (device !== 'wasm') {
       console.warn(`[lens-local] ${device} init failed, falling back to WASM:`, e?.message || e);
       _embedder = await pipeline('feature-extraction', MODEL_ID);
+      _embedderBackend = 'wasm';
       console.log('[lens-local] Embedder ready on wasm (fallback)');
     } else {
       throw e;
@@ -429,6 +432,7 @@ function handleStats() {
     documents: _manifest.docs.slice(),
     dim: DIM,
     model: MODEL_ID,
+    backend: _embedderBackend,
   });
 }
 

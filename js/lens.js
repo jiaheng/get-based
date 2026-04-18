@@ -603,7 +603,12 @@ async function _loadLocalLensStats() {
       const modelLabel = /minilm/i.test(s.model)
         ? `MiniLM · ${s.dim}-dim`
         : /bge-m3/i.test(s.model) ? `BGE-M3 · ${s.dim}-dim` : `${s.model} · ${s.dim}-dim`;
-      stats.innerHTML = `<span style="color:var(--green)">&#9679;</span> ${s.total_chunks.toLocaleString()} excerpt${s.total_chunks !== 1 ? 's' : ''} from ${s.documents.length} document${s.documents.length !== 1 ? 's' : ''} · <span title="${escapeAttr(s.model)}">${escapeHTML(modelLabel)}</span>`;
+      // Surface the active transformers.js backend. WebGPU is 3-10× faster
+      // than WASM for embedding inference; showing it makes the speed gap
+      // legible to users debugging "why is my query slow" and advertises
+      // the upgrade path (switch to a modern Chrome for WebGPU).
+      const backendLabel = s.backend === 'webgpu' ? 'WebGPU' : 'WASM';
+      stats.innerHTML = `<span style="color:var(--green)">&#9679;</span> ${s.total_chunks.toLocaleString()} excerpt${s.total_chunks !== 1 ? 's' : ''} from ${s.documents.length} document${s.documents.length !== 1 ? 's' : ''} · <span title="${escapeAttr(s.model)}">${escapeHTML(backendLabel)} · ${escapeHTML(modelLabel)}</span>`;
     }
     if (list) list.innerHTML = _renderLocalDocList(s.documents);
     _attachLocalLensDropHandlers();

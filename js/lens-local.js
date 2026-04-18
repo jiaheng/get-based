@@ -119,6 +119,7 @@ export async function openLocalLens() {
           documents: r.documents,
           dim: r.dim,
           model: r.model,
+          backend: r.backend || 'wasm',
         };
       },
       deleteDocument: async (source) => {

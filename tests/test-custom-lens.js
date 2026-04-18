@@ -313,6 +313,26 @@ return (async function() {
   console.log('\n24. Indicator clears stale classes');
   assert('updateLensIndicator removes both classes before branching', /classList\.remove\('active', 'error'\)/.test(lensSrc));
 
+  // ─── 24b. Worker feature-detects WebGPU with a WASM fallback ───
+  console.log('\n24b. Worker WebGPU detection + WASM fallback');
+  const workerSrc = await fetch('js/lens-local-worker.js').then(r => r.text());
+  assert('worker checks navigator.gpu before trying WebGPU',
+    /navigator\.gpu/.test(workerSrc) && /requestAdapter/.test(workerSrc),
+    'lens-local-worker must feature-detect navigator.gpu + adapter before picking WebGPU');
+  assert('worker falls back to WASM on WebGPU pipeline init failure',
+    /falling back to WASM/i.test(workerSrc) || /fallback/i.test(workerSrc),
+    'pipeline init is wrapped in try/catch that retries with WASM when WebGPU throws');
+  assert('worker tracks active backend for stats reporting',
+    /_embedderBackend/.test(workerSrc) && /backend:\s*_embedderBackend/.test(workerSrc),
+    'handleStats() must surface the backend (webgpu|wasm) so Settings can display it');
+  const localSrc = await fetch('js/lens-local.js').then(r => r.text());
+  assert('lens-local.js getStats forwards backend field',
+    /backend:\s*r\.backend/.test(localSrc),
+    'main-thread stats adapter must pass through the backend field from the worker');
+  assert('lens.js stats row renders WebGPU/WASM label',
+    lensSrc.includes("s.backend === 'webgpu' ? 'WebGPU' : 'WASM'"),
+    'users should see which engine is active — WebGPU is 3-10x faster than WASM');
+
   // ─── 25. Functional: cache preserved on enable toggle ───
   console.log('\n25. Functional: cache preserved on toggle');
   const _preCfg = localStorage.getItem('labcharts-lens-config');
