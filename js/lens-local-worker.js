@@ -131,15 +131,6 @@ async function handleInit() {
   // https://onnxruntime.ai/docs/tutorials/web/env-flags.html#envwasmproxy
   env.backends.onnx.wasm.proxy = false;
 
-  // Diagnostics for Vercel perf regression debugging.
-  console.log('[lens-local] diag', {
-    crossOriginIsolated: self.crossOriginIsolated,
-    hasSAB: typeof SharedArrayBuffer !== 'undefined',
-    hasNavGpu: typeof navigator !== 'undefined' && !!navigator.gpu,
-    hwConcurrency: navigator?.hardwareConcurrency,
-    userAgent: navigator?.userAgent?.slice(0, 80),
-  });
-
   // Try WebGPU first. On a Polaris AMD box + Intel iGPU, WebGPU through
   // ANGLE typically runs 3-10× faster than WASM for transformer
   // inference. Falls back to WASM if the adapter isn't available or the
@@ -149,11 +140,8 @@ async function handleInit() {
   if (typeof navigator !== 'undefined' && navigator.gpu) {
     try {
       const adapter = await navigator.gpu.requestAdapter();
-      console.log('[lens-local] webgpu adapter', adapter ? 'OK' : 'null');
       if (adapter) device = 'webgpu';
-    } catch (err) {
-      console.warn('[lens-local] requestAdapter threw', err);
-    }
+    } catch {}
   }
   try {
     _embedder = await pipeline('feature-extraction', MODEL_ID, { device });
