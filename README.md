@@ -118,8 +118,8 @@ Open `index.html` (or start `node dev-server.js` for development) and the dashbo
 
 ### Related repos
 
-- [**getbased-rag**](https://github.com/elkimek/getbased-rag) — optional Python RAG backend. Self-host it and point Settings → AI → Knowledge Base → External server at its URL for local hardware-accelerated retrieval on large corpora.
 - [**getbased-relay**](https://github.com/elkimek/getbased-relay) — Evolu sync relay for opt-in cross-device sync.
+- [**getbased-mcp**](https://github.com/elkimek/getbased-mcp) — MCP server exposing your lab context to AI agents (Claude Desktop, Hermes, Cursor, etc.).
 
 ## Testing
 

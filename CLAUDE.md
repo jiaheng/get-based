@@ -10,7 +10,7 @@ Uses AI APIs (PPQ, Routstr, OpenRouter, Venice, or Local AI) for AI-powered PDF 
 
 ## Architecture
 
-Web app (PWA) only: no build system, no bundler, no package manager — native ES modules (`<script type="module">`). The Electron shell was retired in v1.21.0; any user who wants hardware-accelerated RAG self-hosts the Python backend at [`elkimek/getbased-rag`](https://github.com/elkimek/getbased-rag) and points the *External server* lens backend at it.
+Web app (PWA) only: no build system, no bundler, no package manager — native ES modules (`<script type="module">`). The Electron shell was retired in v1.21.0; users who want hardware-accelerated RAG self-host any server that speaks the *External server* lens protocol (`POST /query` with bearer auth, see `docs/guide/interpretive-lens.md`).
 
 - **`BRAND.md`** — brand manual (name rules, colors, typography, voice). Brand name is always `getbased` — lowercase, no space
 - **`index.html`** — HTML structure only (header, sidebar, modals with `role="dialog"`, chat panel, script/CSS includes)
@@ -49,7 +49,7 @@ Web app (PWA) only: no build system, no bundler, no package manager — native E
   - `sync.js` — Evolu CRDT sync layer, push/pull, mnemonic identity, AI settings sync, debounced `onDataSaved` hook, sync status indicator (header badge + popover)
   - `settings.js` — settings modal, privacy section, sync setup modal
   - `provider-panels.js` — AI provider panel rendering, model dropdowns, wallet UI (extracted from settings.js)
-  - `lens.js` — Knowledge Base backing the Interpretive Lens. `queryLens` retrieves top-K, `injectLensChunks` folds into `[section:interpretiveLens]`. LRU cache (20/5min, profile-scoped), tight fetch options. Two backends — **`in-browser`** (OPFS + MiniLM via `lens-local*`) and **`external-server`** (user URL + Bearer key; pair with `elkimek/getbased-rag` for a self-hosted backend) — surfaced as two pill buttons in Settings → AI → Knowledge Base. The in-browser backend exposes a Library picker; `_libList`/`_libCreate`/`_libActivate`/`_libRename`/`_libDelete` dispatch to the worker. `cfg.name` is auto-synced with the active library name. `migrateLensConfig()` maps legacy `remote`/`local-browser`/`desktop-engine` values forward
+  - `lens.js` — Knowledge Base backing the Interpretive Lens. `queryLens` retrieves top-K, `injectLensChunks` folds into `[section:interpretiveLens]`. LRU cache (20/5min, profile-scoped), tight fetch options. Two backends — **`in-browser`** (OPFS + MiniLM via `lens-local*`) and **`external-server`** (user URL + Bearer key; any HTTP endpoint speaking the `POST /query` contract documented in `docs/guide/interpretive-lens.md`) — surfaced as two pill buttons in Settings → AI → Knowledge Base. The in-browser backend exposes a Library picker; `_libList`/`_libCreate`/`_libActivate`/`_libRename`/`_libDelete` dispatch to the worker. `cfg.name` is auto-synced with the active library name. `migrateLensConfig()` maps legacy `remote`/`local-browser`/`desktop-engine` values forward
   - `lens-local.js` / `lens-local-worker.js` / `lens-local-utils.js` / `lens-local-parsers.js` — browser-local lens stack. Main thread API + module Worker running transformers.js WASM + OPFS persistence via `FileSystemSyncAccessHandle` + MMR reranker (λ=0.5, 3× oversample) + pdf.js/mammoth/JSZip extraction. **Multi-library**: per-library OPFS subdirs under `/lens-local/<id>/`, `_libraries.json` at top-level tracks registry + active. ingest/query/stats/delete/clear scope to active library; create_library/rename_library/activate_library/delete_library manage the registry. Auto-migration from legacy flat layout on first multi-library launch. Lazy-loaded only when user selects the local backend
   - `glossary.js` — marker glossary modal
   - `feedback.js` — feedback modal (bug reports, feature requests)
@@ -109,7 +109,7 @@ Six backends: PPQ, Routstr, OpenRouter, Venice, Local AI (Ollama/LM Studio/Jan),
 
 ### Desktop app
 
-**Retired in v1.21.0.** The getbased Electron shell was removed; the Python RAG backend that used to ship inside it now lives at [`elkimek/getbased-rag`](https://github.com/elkimek/getbased-rag) (private). Users who want local hardware-accelerated RAG self-host that server and wire it into Settings → Knowledge Base → External server. See `memory/project_electron_retirement.md` for the full rationale.
+**Retired in v1.21.0.** The getbased Electron shell was removed. Users who want local hardware-accelerated RAG self-host any server speaking the External server protocol and wire it into Settings → Knowledge Base → External server. See `memory/project_electron_retirement.md` for the full rationale.
 
 ### Dashboard Section Order
 

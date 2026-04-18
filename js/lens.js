@@ -19,8 +19,8 @@ const DEFAULT_TEST_PROBE = 'vitamin D deficiency supplementation';
 //                       every browser. No install; first use downloads the
 //                       ~100 MB model.
 //   'external-server' — user-configured URL + Bearer key. For a server the
-//                       user runs themselves (see elkimek/getbased-rag) or
-//                       someone they trust.
+//                       user runs themselves (contract documented in
+//                       docs/guide/interpretive-lens.md) or someone they trust.
 //
 // Legacy names ('remote' → 'external-server', 'local-browser' → 'in-browser',
 // 'desktop-engine' → 'external-server' when url is the old 127.0.0.1:8322, else
@@ -62,9 +62,9 @@ export function getLensConfig() {
 
 /// Rename/rebucket legacy backend values. 'desktop-engine' (Electron-only,
 /// removed) migrates to 'external-server' iff the user already had the
-/// Python lens URL saved — they can keep pointing at it if they kept the
-/// engine running outside Electron (i.e. via pipx install getbased-rag).
-/// Otherwise fall back to the in-browser engine so chat still works.
+/// Python lens URL saved — they can keep pointing at it if they kept a
+/// compatible lens server running outside Electron. Otherwise fall back
+/// to the in-browser engine so chat still works.
 function migrateLensConfig(cfg) {
   if (cfg.backend === 'remote') {
     cfg.backend = 'external-server';
@@ -409,7 +409,7 @@ export function renderCustomLensSection() {
       <div style="font-size:11px;color:var(--text-muted);margin-top:6px">
         ${isBrowser
           ? 'Runs entirely in this browser. No install — first use downloads a small AI model (~100 MB); after that it works offline.'
-          : 'Connect to a knowledge server you run (e.g. <a href="https://github.com/elkimek/getbased-rag" target="_blank" rel="noopener" style="color:var(--accent)">getbased-rag</a>) or someone you trust.'}
+          : 'Connect to a knowledge server you run, or one run by someone you trust.'}
       </div>
     </div>
 

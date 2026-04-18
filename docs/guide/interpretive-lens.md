@@ -60,11 +60,7 @@ Good for: typical use — a few dozen to a few hundred documents. No install, no
 
 ### External server
 
-Connect to a knowledge server you run (or someone you trust). Useful for larger corpora, shared libraries, or when you want hardware-accelerated retrieval that your browser can't match.
-
-The easiest pre-built option is [**getbased-rag**](https://github.com/elkimek/getbased-rag) — a standalone Python server that implements the exact protocol below. `pipx install` it, point the external-server backend at `http://127.0.0.1:8322` with the generated API key, and you're done.
-
-You can also roll your own using the endpoint contract described below.
+Connect to a knowledge server you run (or one run by someone you trust). Useful for larger corpora, shared libraries, or when you want hardware-accelerated retrieval that your browser can't match. Roll your own using the endpoint contract described below — any server that accepts a `POST /query` with bearer auth and returns a `{chunks: […]}` payload works.
 
 ### Setup (external server)
 

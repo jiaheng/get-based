@@ -12,7 +12,7 @@ const CHANGELOG = [
       'Document parsers for in-browser indexing: PDF, Word, Markdown, plain text, and ZIP archives (which expand inline — each inner doc becomes its own source).',
       'Better retrieval variety — results now span multiple documents instead of piling up on one. Fixes queries like "vitamin D and circadian rhythm and cold exposure" that used to return only vitamin-D chunks.',
       'Inline drop-zone + document list under Settings → AI → Knowledge Base — add, preview, and remove files without leaving Settings.',
-      'Desktop app is retired. The native shell was prototyped but added release-cadence friction without covering a real user need the PWA did not already handle. If you want local hardware-accelerated RAG, self-host the Python backend from github.com/elkimek/getbased-rag and point Settings → Knowledge Base → External server at it.',
+      'Desktop app is retired. The native shell was prototyped but added release-cadence friction without covering a real user need the PWA did not already handle. If you want local hardware-accelerated RAG, run your own knowledge server (any endpoint speaking the External server protocol) and point Settings → Knowledge Base → External server at it.',
     ]
   },
   {
