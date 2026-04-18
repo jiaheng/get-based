@@ -15,14 +15,21 @@ const HOST = '127.0.0.1';
 function probe(method, pathStr, headers) {
   return new Promise((resolve, reject) => {
     const req = http.request({ host: HOST, port: PORT, path: pathStr, method, headers, timeout: 5000 }, (res) => {
-      res.on('data', () => {});
-      res.on('end', () => resolve(res.statusCode));
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
     });
     req.on('error', reject);
     req.on('timeout', () => { req.destroy(new Error('timeout')); });
     req.end();
   });
 }
+
+// The dev-server's origin guard emits `Forbidden` as a plain-text body.
+// Upstream fetches through /proxy that happen to return 403 (Cloudflare
+// WAF on example.com, etc.) return the upstream's HTML body. Use the
+// body to tell them apart so external flakiness doesn't fail the guard test.
+function isOurGuard403(r) { return r.status === 403 && /^Forbidden$/i.test((r.body || '').trim()); }
 
 (async () => {
   const results = [];
@@ -36,13 +43,13 @@ function probe(method, pathStr, headers) {
 
   // 1. No Origin/Referer → 403
   try {
-    const status = await probe('GET', '/api/check-url?url=https://example.com', {});
+    const { status } = await probe('GET', '/api/check-url?url=https://example.com', {});
     assert('no headers → 403', status === 403, `got ${status}`);
   } catch (e) { assert('no headers → 403', false, e.message); }
 
   // 2. Forged foreign Referer with substring → must be 403 (the bug)
   try {
-    const status = await probe('GET', '/api/check-url?url=https://example.com', {
+    const { status } = await probe('GET', '/api/check-url?url=https://example.com', {
       'Referer': `https://evil.example/?next=http://${HOST}:${PORT}/`,
     });
     assert('forged Referer substring → 403', status === 403, `got ${status} (substring bypass present)`);
@@ -50,7 +57,7 @@ function probe(method, pathStr, headers) {
 
   // 3. Forged foreign Origin with substring → must be 403
   try {
-    const status = await probe('GET', '/api/check-url?url=https://example.com', {
+    const { status } = await probe('GET', '/api/check-url?url=https://example.com', {
       'Origin': `https://evil.example.${HOST}:${PORT}.attacker.io`,
     });
     assert('forged Origin substring → 403', status === 403, `got ${status}`);
@@ -58,7 +65,7 @@ function probe(method, pathStr, headers) {
 
   // 4. Legitimate Origin → 200 (request reaches handler; upstream may fail but guard passed)
   try {
-    const status = await probe('GET', '/api/check-url?url=https://example.com', {
+    const { status } = await probe('GET', '/api/check-url?url=https://example.com', {
       'Origin': `http://${HOST}:${PORT}`,
     });
     assert('legitimate Origin → not 403', status !== 403, `got ${status}`);
@@ -66,7 +73,7 @@ function probe(method, pathStr, headers) {
 
   // 5. Legitimate Referer → 200 (same)
   try {
-    const status = await probe('GET', '/api/check-url?url=https://example.com', {
+    const { status } = await probe('GET', '/api/check-url?url=https://example.com', {
       'Referer': `http://${HOST}:${PORT}/app`,
     });
     assert('legitimate Referer → not 403', status !== 403, `got ${status}`);
@@ -74,7 +81,7 @@ function probe(method, pathStr, headers) {
 
   // 6. Localhost Origin → 200
   try {
-    const status = await probe('GET', '/api/check-url?url=https://example.com', {
+    const { status } = await probe('GET', '/api/check-url?url=https://example.com', {
       'Origin': `http://localhost:${PORT}`,
     });
     assert('localhost Origin → not 403', status !== 403, `got ${status}`);
@@ -82,7 +89,7 @@ function probe(method, pathStr, headers) {
 
   // 6b. IPv6 loopback Origin → 200
   try {
-    const status = await probe('GET', '/api/check-url?url=https://example.com', {
+    const { status } = await probe('GET', '/api/check-url?url=https://example.com', {
       'Origin': `http://[::1]:${PORT}`,
     });
     assert('IPv6 [::1] Origin → not 403', status !== 403, `got ${status}`);
@@ -90,7 +97,7 @@ function probe(method, pathStr, headers) {
 
   // 6c. Lookalike origin with valid prefix but extra suffix → 403
   try {
-    const status = await probe('GET', '/api/check-url?url=https://example.com', {
+    const { status } = await probe('GET', '/api/check-url?url=https://example.com', {
       'Origin': `http://localhost:${PORT}.evil.example`,
     });
     assert('lookalike "localhost:PORT.evil" Origin → 403', status === 403, `got ${status}`);
@@ -98,7 +105,7 @@ function probe(method, pathStr, headers) {
 
   // 6d. Malformed Referer → URL parse throws → 403
   try {
-    const status = await probe('GET', '/api/check-url?url=https://example.com', {
+    const { status } = await probe('GET', '/api/check-url?url=https://example.com', {
       'Referer': 'not a valid url',
     });
     assert('malformed Referer → 403', status === 403, `got ${status}`);
@@ -125,13 +132,13 @@ function probe(method, pathStr, headers) {
 
   // 8. No headers on /proxy → 403
   try {
-    const status = await probe('GET', '/proxy?url=http://example.com', {});
+    const { status } = await probe('GET', '/proxy?url=http://example.com', {});
     assert('/proxy no headers → 403', status === 403, `got ${status}`);
   } catch (e) { assert('/proxy no headers → 403', false, e.message); }
 
   // 9. Forged foreign Origin containing local URL → 403 (the original repro)
   try {
-    const status = await probe('GET', '/proxy?url=http://example.com', {
+    const { status } = await probe('GET', '/proxy?url=http://example.com', {
       'Origin': 'https://evil.example',
     });
     assert('/proxy forged foreign Origin → 403', status === 403, `got ${status} (SSRF bypass present)`);
@@ -139,7 +146,7 @@ function probe(method, pathStr, headers) {
 
   // 10. Forged foreign Referer with substring → 403
   try {
-    const status = await probe('GET', '/proxy?url=http://example.com', {
+    const { status } = await probe('GET', '/proxy?url=http://example.com', {
       'Referer': `https://evil.example/?next=http://${HOST}:${PORT}/`,
     });
     assert('/proxy forged Referer substring → 403', status === 403, `got ${status}`);
@@ -147,19 +154,25 @@ function probe(method, pathStr, headers) {
 
   // 11. Lookalike origin → 403
   try {
-    const status = await probe('GET', '/proxy?url=http://example.com', {
+    const { status } = await probe('GET', '/proxy?url=http://example.com', {
       'Origin': `http://localhost:${PORT}.evil.example`,
     });
     assert('/proxy lookalike Origin → 403', status === 403, `got ${status}`);
   } catch (e) { assert('/proxy lookalike Origin → 403', false, e.message); }
 
-  // 12. Legitimate same-origin Origin → not 403 (handler runs)
+  // 12. Legitimate same-origin Origin → not OUR guard's 403 (handler runs).
+  // Upstream (example.com behind Cloudflare) may return 403 too, but that
+  // means the request went through our guard and hit upstream — which is
+  // what we're testing. Distinguish by body: our guard sends "Forbidden"
+  // plain text; Cloudflare sends HTML.
   try {
-    const status = await probe('GET', '/proxy?url=http://example.com', {
+    const r = await probe('GET', '/proxy?url=http://example.com', {
       'Origin': `http://${HOST}:${PORT}`,
     });
-    assert('/proxy legitimate Origin → not 403', status !== 403, `got ${status}`);
-  } catch (e) { assert('/proxy legitimate Origin → not 403', false, e.message); }
+    assert('/proxy legitimate Origin → not blocked by our guard',
+      !isOurGuard403(r),
+      `status=${r.status} body=${(r.body || '').slice(0, 60)}`);
+  } catch (e) { assert('/proxy legitimate Origin → not blocked by our guard', false, e.message); }
 
   console.log(results.join('\n'));
   console.log(`\n=== ${passed} passed, ${failed} failed ===`);
