@@ -200,7 +200,7 @@ return (async function() {
   // (especially inside Workers). Without this, navigator.gpu.requestAdapter()
   // returns null on prod → lens silently drops to WASM → 30% slower.
   assert('Permissions-Policy explicitly allows webgpu for self',
-    /Permissions-Policy[^"]*webgpu=\(self\)/.test(vercelSrc));
+    /"Permissions-Policy"\s*:\s*"[^"]*webgpu=\(self\)[^"]*"/.test(vercelSrc));
   assert('CSP connect-src allows https: (decentralized nodes)', vercelSrc.includes("connect-src 'self' https:"));
   assert('CSP allows localhost for Local AI', vercelSrc.includes('localhost:*'));
   assert('X-Frame-Options DENY', vercelSrc.includes('DENY'));
