@@ -180,6 +180,12 @@ return (async function() {
     !vercelSrc.includes('fonts.googleapis.com') && !vercelSrc.includes('unpkg.com'));
   assert('CSP allows cdn.jsdelivr.net in script-src (transformers.js)',
     vercelSrc.includes('https://cdn.jsdelivr.net'));
+  // ONNX Runtime (used inside transformers.js) spawns its proxy worker
+  // from a blob: URL and dynamic-imports it as a script. script-src
+  // MUST include blob: or the lens silently fails to init in prod with
+  // "No available backend found".
+  assert('CSP script-src includes blob: (required by ORT proxy worker)',
+    /script-src[^;]*\bblob:/.test(vercelSrc));
   assert('CSP connect-src allows https: (decentralized nodes)', vercelSrc.includes("connect-src 'self' https:"));
   assert('CSP allows localhost for Local AI', vercelSrc.includes('localhost:*'));
   assert('X-Frame-Options DENY', vercelSrc.includes('DENY'));
