@@ -300,6 +300,41 @@ return (async function() {
   assert('handleToggleLens calls _updateLensStatusChip', /function handleToggleLens[\s\S]{0,300}_updateLensStatusChip/.test(lensSrc));
   assert('_updateLensStatusChip exists', lensSrc.includes('function _updateLensStatusChip()'));
 
+  // ─── 21b. v1.20.x forward-compat: saved config without `backend` field ───
+  // Pre-v1.21.0 users only had the single external RAG endpoint. On upgrade
+  // their saved config (no `backend` key) must resolve to 'external-server'
+  // so their RAG keeps working — NOT silently switch to in-browser.
+  console.log('\n21b. v1.20.x forward-compat migration');
+  (function () {
+    const _prev = localStorage.getItem('labcharts-lens-config');
+    // Simulate a v1.20.1 config: has url + enabled, no backend field
+    localStorage.setItem('labcharts-lens-config', JSON.stringify({
+      name: 'My RAG', url: 'https://rag.example.com/query', enabled: true, topK: 5
+    }));
+    const cfg = window.getLensConfig();
+    assert('v1.20.x config with URL → backend=external-server',
+      cfg.backend === 'external-server',
+      `got ${cfg.backend}`);
+    assert('v1.20.x config with URL preserves the URL',
+      cfg.url === 'https://rag.example.com/query');
+    // Fresh user (no saved config at all) → in-browser default
+    localStorage.removeItem('labcharts-lens-config');
+    const fresh = window.getLensConfig();
+    assert('fresh user with no saved config → backend=in-browser',
+      fresh.backend === 'in-browser');
+    // Pre-v1.21 config with NO url (never configured KB) → in-browser
+    localStorage.setItem('labcharts-lens-config', JSON.stringify({
+      name: '', url: '', enabled: false, topK: 5
+    }));
+    const never = window.getLensConfig();
+    assert('v1.20.x config with empty URL → backend=in-browser',
+      never.backend === 'in-browser',
+      `got ${never.backend}`);
+    // Restore
+    if (_prev) localStorage.setItem('labcharts-lens-config', _prev);
+    else localStorage.removeItem('labcharts-lens-config');
+  })();
+
   // ─── 22. BUG 4 regression: cache only clears on URL/topK change ───
   console.log('\n22. Cache survives toggle-only save');
   assert('saveLensConfig guards clearLensCache by urlChanged/topKChanged', /urlChanged[\s\S]{0,200}if \(urlChanged \|\| topKChanged\) clearLensCache/.test(lensSrc));

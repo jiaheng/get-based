@@ -44,7 +44,19 @@ export function getLensConfig() {
   try {
     const raw = localStorage.getItem(CONFIG_KEY);
     if (!raw) return { ...DEFAULT_CONFIG };
-    return migrateLensConfig({ ...DEFAULT_CONFIG, ...JSON.parse(raw) });
+    const saved = JSON.parse(raw);
+    // Pre-v1.21.0 configs had no `backend` field — only the single external
+    // RAG endpoint existed. Infer what they meant from whether a URL was
+    // saved: a populated URL means they configured a Custom Knowledge
+    // Source → promote to 'external-server' so their working setup keeps
+    // working. Empty URL means no RAG was configured → take the modern
+    // default ('in-browser'). Without this, v1.20.x users silently lose
+    // their lens on upgrade because DEFAULT_CONFIG.backend would spread
+    // into the gap as 'in-browser'.
+    if (!saved.backend) {
+      saved.backend = saved.url ? 'external-server' : 'in-browser';
+    }
+    return migrateLensConfig({ ...DEFAULT_CONFIG, ...saved });
   } catch { return { ...DEFAULT_CONFIG }; }
 }
 
