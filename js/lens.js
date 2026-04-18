@@ -706,6 +706,10 @@ async function _handleLocalLensIngest(fileList) {
       textEl.textContent = `Indexing ${p.index}/${p.total} · ${rate.toFixed(1)}/s · ${p.source}`;
     }
   });
+  // Flag drives the Settings backdrop/ESC nudge — while this is true,
+  // an accidental click-away won't dismiss the modal and strand the
+  // user's progress bar.
+  window._lensIngestRunning = true;
   try {
     const stats = await lens.ingest(files);
     const dur = ((performance.now() - t0) / 1000).toFixed(1);
@@ -715,6 +719,7 @@ async function _handleLocalLensIngest(fileList) {
     if (textEl) textEl.textContent = `Couldn't index: ${e.message || e}`;
     showNotification(`Couldn't index: ${e.message || e}`, 'error');
   } finally {
+    window._lensIngestRunning = false;
     unsub();
     setTimeout(() => { if (wrap) wrap.style.display = 'none'; }, 3000);
     await _loadLocalLensStats();

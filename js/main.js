@@ -216,8 +216,15 @@ document.addEventListener("click", e => {
   if (e.target.id === "modal-overlay") { window.closeModal(); return; }
   if (e.target.id === "glossary-modal-overlay") { window.closeGlossary(); return; }
   if (e.target.id === "changelog-modal-overlay") { window.closeChangelog(); return; }
-  // Auto-save modals — close on backdrop click
-  if (e.target.id === "settings-modal-overlay") { window.closeSettingsModal(); return; }
+  // Auto-save modals — close on backdrop click, but nudge while a lens
+  // ingest is running so an accidental click-away doesn't strand the
+  // in-progress progress bar (ingest itself runs in a worker and survives,
+  // but re-opening Settings re-renders innerHTML and loses the UI state).
+  if (e.target.id === "settings-modal-overlay") {
+    if (window._lensIngestRunning) nudgeModal(e.target);
+    else window.closeSettingsModal();
+    return;
+  }
   // Work-in-progress modals — nudge instead of closing
   const nudgeIds = ["import-modal-overlay","feedback-modal-overlay"];
   if (nudgeIds.includes(e.target.id)) { nudgeModal(e.target); return; }
@@ -276,7 +283,11 @@ document.addEventListener("keydown", e => {
     const glossaryOverlay = document.getElementById("glossary-modal-overlay");
     if (glossaryOverlay && glossaryOverlay.classList.contains("show")) { window.closeGlossary(); return; }
     const settingsOverlay = document.getElementById("settings-modal-overlay");
-    if (settingsOverlay && settingsOverlay.classList.contains("show")) { window.closeSettingsModal(); return; }
+    if (settingsOverlay && settingsOverlay.classList.contains("show")) {
+      if (window._lensIngestRunning) { nudgeModal(settingsOverlay); return; }
+      window.closeSettingsModal();
+      return;
+    }
     const modalOverlay = document.getElementById("modal-overlay");
     if (modalOverlay && modalOverlay.classList.contains("show")) { window.closeModal(); return; }
     return;

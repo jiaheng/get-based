@@ -152,9 +152,36 @@ async function handleInit() {
       console.warn(`[lens-local] ${device} init failed, falling back to WASM:`, e?.message || e);
       _embedder = await pipeline('feature-extraction', MODEL_ID);
       _embedderBackend = 'wasm';
+      device = 'wasm';
       console.log('[lens-local] Embedder ready on wasm (fallback)');
     } else {
       throw e;
+    }
+  }
+
+  // Sanity-check WebGPU: some driver combos (AMD Polaris + unvalidated
+  // Mesa, certain Linux/Chrome builds with enable-unsafe-webgpu) expose
+  // a working adapter, init the pipeline without errors, then embed at
+  // <1 token/s because shader compile falls into a slow path. A single
+  // warmup embed catches this — healthy WebGPU does one in ~20-50 ms;
+  // broken paths take seconds. Threshold 600 ms is generous; anything
+  // above that is a broken backend, not just a cold cache.
+  if (device === 'webgpu') {
+    const t0 = performance.now();
+    try {
+      await _embedder('warmup', { pooling: 'mean', normalize: true });
+      const dt = performance.now() - t0;
+      if (dt > 600) {
+        console.warn(`[lens-local] WebGPU pathologically slow (${dt.toFixed(0)} ms/embed), falling back to WASM`);
+        _embedder = await pipeline('feature-extraction', MODEL_ID, { device: 'wasm' });
+        _embedderBackend = 'wasm';
+      } else {
+        console.log(`[lens-local] WebGPU warmup ${dt.toFixed(0)} ms — backend confirmed`);
+      }
+    } catch (err) {
+      console.warn('[lens-local] WebGPU warmup threw, falling back to WASM:', err?.message || err);
+      _embedder = await pipeline('feature-extraction', MODEL_ID, { device: 'wasm' });
+      _embedderBackend = 'wasm';
     }
   }
 
