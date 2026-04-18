@@ -5,8 +5,7 @@ test-data.json
 !icon-192.png
 !icon-512.png
 !dashboard.png
-!electron/icons/*.png
-# Electron build artifacts
+# Build artifacts
 dist/
 out/
 release/
@@ -21,9 +20,3 @@ tools/
 dev-chrome.sh
 test-screenshots/
 .mcp.json
-
-# Python build artifacts (created by pip install)
-lens/build/
-lens/src/*.egg-info/
-__pycache__/
-*.pyc

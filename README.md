@@ -93,7 +93,7 @@ Open `http://localhost:8000`. You need an AI provider API key or local AI server
 
 ## Tech stack
 
-Web app: no build tools, no bundler, no package manager. Pure ES modules — 50 modules under `js/`. Desktop app: Electron shell around the same web codebase, packaged via electron-builder.
+Web app only — no build tools, no bundler, no package manager. Pure ES modules under `js/`.
 
 - Chart.js for interactive charts
 - pdf.js for PDF text extraction
@@ -104,39 +104,22 @@ Web app: no build tools, no bundler, no package manager. Pure ES modules — 50 
 
 ## Repo structure
 
-Three components in one repo, each with its own release cycle:
-
 ```
 get-based/
-├── js/ styles.css index.html  # Web dashboard — static files, runs in any browser
-│   ├── js/lens.js              #   Custom Knowledge Source dispatcher (remote or browser-local)
-│   ├── js/lens-local*.js       #   Browser-local lens — MiniLM in-browser, OPFS vectors
-│   └── js/knowledge-base.js    #   Desktop Python-lens UI
-├── electron/                   # Desktop shell (Node.js main process)
-│   ├── main.js                 #   BrowserWindow + IPC + security hardening + updater
-│   ├── preload.cjs             #   Context-isolated bridge with channel allowlist
-│   ├── setup.js                #   First-run: downloads Python standalone + installs Lens
-│   ├── lens-manager.js         #   Lens sidecar lifecycle (spawn, health check, reap)
-│   ├── gpu.js paths.js archive.js  # Platform detection, data dirs, tar extraction
-│   └── entitlements.mac.plist  #   Hardened-runtime entitlements for notarization
-├── lens/                       # Lens — Python RAG knowledge server (optional)
-│   ├── src/lens/
-│   │   ├── embedder.py         #   ONNX Runtime + sentence-transformers backends
-│   │   ├── store.py            #   Qdrant vector store
-│   │   ├── server.py           #   FastAPI REST API
-│   │   ├── ingest.py           #   Document chunking pipeline
-│   │   └── cli.py              #   CLI (lens serve / lens ingest / lens status)
-│   └── pyproject.toml          #   pip install getbased-lens[full]
-├── tests/                      # 45 test files (browser + node-side)
-├── .github/workflows/          # CI release pipeline for all three platforms
+├── js/ styles.css index.html  # The product — static files, runs in any browser
+│   ├── js/lens.js              #   Custom Knowledge Source dispatcher
+│   └── js/lens-local*.js       #   Browser-local lens — MiniLM in-browser, OPFS vectors
+├── tests/                      # Node-side + Puppeteer browser assertions
+├── .github/workflows/          # Tests on every PR / push
 └── docs/                       # User-facing documentation
 ```
 
-**For the web app**, nothing changes — `index.html` + `js/` + `styles.css` is the product. Open it in a browser, it works. The `electron/` and `lens/` folders are invisible to web users.
+Open `index.html` (or start `node dev-server.js` for development) and the dashboard runs.
 
-**For the desktop app**, Electron wraps the web dashboard (same `index.html`) and adds native capabilities: GPU detection, first-run setup that downloads Python + the Lens engine without needing a system install, sidecar process management, auto-update via GitHub Releases. One-click install, no terminal needed.
+### Related repos
 
-**For Lens**, it's a standalone Python package (`pip install getbased-lens`). The Electron app automates the install, but you can also run it independently on any server. [getbased-mcp](https://github.com/elkimek/getbased-mcp) exposes the same Lens API to AI agents via the Model Context Protocol.
+- [**getbased-rag**](https://github.com/elkimek/getbased-rag) — optional Python RAG backend. Self-host it and point Settings → AI → Knowledge Base → External server at its URL for local hardware-accelerated retrieval on large corpora.
+- [**getbased-relay**](https://github.com/elkimek/getbased-relay) — Evolu sync relay for opt-in cross-device sync.
 
 ## Testing
 

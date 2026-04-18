@@ -10,7 +10,7 @@ Uses AI APIs (PPQ, Routstr, OpenRouter, Venice, or Local AI) for AI-powered PDF 
 
 ## Architecture
 
-Web app: no build system, no bundler, no package manager — native ES modules (`<script type="module">`). The Electron desktop shell uses `electron-builder` for packaging only; the web code it loads is the same untranspiled ESM the PWA uses.
+Web app (PWA) only: no build system, no bundler, no package manager — native ES modules (`<script type="module">`). The Electron shell was retired in v1.21.0; any user who wants hardware-accelerated RAG self-hosts the Python backend at [`elkimek/getbased-rag`](https://github.com/elkimek/getbased-rag) and points the *External server* lens backend at it.
 
 - **`BRAND.md`** — brand manual (name rules, colors, typography, voice). Brand name is always `getbased` — lowercase, no space
 - **`index.html`** — HTML structure only (header, sidebar, modals with `role="dialog"`, chat panel, script/CSS includes)
@@ -49,7 +49,7 @@ Web app: no build system, no bundler, no package manager — native ES modules (
   - `sync.js` — Evolu CRDT sync layer, push/pull, mnemonic identity, AI settings sync, debounced `onDataSaved` hook, sync status indicator (header badge + popover)
   - `settings.js` — settings modal, privacy section, sync setup modal
   - `provider-panels.js` — AI provider panel rendering, model dropdowns, wallet UI (extracted from settings.js)
-  - `lens.js` — Knowledge Base backing the Interpretive Lens. `queryLens` retrieves top-K, `injectLensChunks` folds into `[section:interpretiveLens]`. LRU cache (20/5min, profile-scoped), tight fetch options. Three internal backends — **`in-browser`** (OPFS + MiniLM via `lens-local*`), **`desktop-engine`** (bundled Python backend on `127.0.0.1:8322`), **`external-server`** (user URL + Bearer key) — surfaced as **two pill buttons** in Settings → AI → Knowledge Base: "On this device" and "External server". `renderCustomLensSection()` auto-coerces the on-device backend to the environment's native flavor (`desktop-engine` on the Electron app, `in-browser` in the PWA) so users never see the mismatched option. Both on-device engines expose a **shared Library picker** above the backend section; `_libList`/`_libCreate`/`_libActivate`/`_libRename`/`_libDelete` dispatch per backend (worker messages for in-browser, IPC calls for desktop-engine). `cfg.name` is auto-synced with the active library name, so the status chip needs no user-visible "Display name" field for on-device backends. `migrateLensConfig()` maps legacy `remote`/`local-browser` values. Settings mounts `renderKnowledgeBaseSection()` for `desktop-engine`, renders inline ingest UI for `in-browser`, URL/key fields for `external-server`
+  - `lens.js` — Knowledge Base backing the Interpretive Lens. `queryLens` retrieves top-K, `injectLensChunks` folds into `[section:interpretiveLens]`. LRU cache (20/5min, profile-scoped), tight fetch options. Two backends — **`in-browser`** (OPFS + MiniLM via `lens-local*`) and **`external-server`** (user URL + Bearer key; pair with `elkimek/getbased-rag` for a self-hosted backend) — surfaced as two pill buttons in Settings → AI → Knowledge Base. The in-browser backend exposes a Library picker; `_libList`/`_libCreate`/`_libActivate`/`_libRename`/`_libDelete` dispatch to the worker. `cfg.name` is auto-synced with the active library name. `migrateLensConfig()` maps legacy `remote`/`local-browser`/`desktop-engine` values forward
   - `lens-local.js` / `lens-local-worker.js` / `lens-local-utils.js` / `lens-local-parsers.js` — browser-local lens stack. Main thread API + module Worker running transformers.js WASM + OPFS persistence via `FileSystemSyncAccessHandle` + MMR reranker (λ=0.5, 3× oversample) + pdf.js/mammoth/JSZip extraction. **Multi-library**: per-library OPFS subdirs under `/lens-local/<id>/`, `_libraries.json` at top-level tracks registry + active. ingest/query/stats/delete/clear scope to active library; create_library/rename_library/activate_library/delete_library manage the registry. Auto-migration from legacy flat layout on first multi-library launch. Lazy-loaded only when user selects the local backend
   - `glossary.js` — marker glossary modal
   - `feedback.js` — feedback modal (bug reports, feature requests)
@@ -61,7 +61,7 @@ Web app: no build system, no bundler, no package manager — native ES modules (
   - `main.js` — `DOMContentLoaded` init, OAuth callback, event listeners, refresh callback
 - **`vendor/`** — locally bundled Chart.js, chartjs-adapter-native, pdf.js (+worker), Google Fonts (woff2), `venice-e2ee.js` (Venice E2EE — ECDH + HKDF + AES-GCM), Evolu (CRDT sync + SQLite WASM + OPFS worker), cashu-ts (Cashu eCash), bip39-minimal, qrcode-generator, mammoth (DOCX parser for browser-local lens), JSZip (ZIP extraction). `@huggingface/transformers` is NOT vendored — the npm-dist bundle has bare module specifiers that need a bundler to resolve; runtime loads it from jsdelivr. Tracked as phase 2c in memory/project_browser_local_lens.md. Run `./update-vendor.sh` to refresh vendored files
 - **`data/`** — `demo-female.json`, `demo-male.json`, `emf-assessment-template.html`, `snp-health.json` (42 autosomal SNPs), `haplogroups.json` (28 mtDNA haplogroups with Wallace coupling classification), `mito-compounds.json` (108 mitochondrial compound effects)
-- **`tests/`** — 45 test files (`test-*.js`). Most run in Puppeteer (browser asserts via IIFE + `assert(name, cond)` pattern); three run node-side on dev-server / Electron helpers / lens-local-utils. Plus `verify-modules.js` + `spike-*.html` perf / ingest spikes + `spike-fixtures/` sample markdown
+- **`tests/`** — test files (`test-*.js`). Most run in Puppeteer (browser asserts via IIFE + `assert(name, cond)` pattern); a few run node-side on dev-server / native-dialog guard / lens-local-utils. Plus `verify-modules.js` + `spike-*.html` perf / ingest spikes + `spike-fixtures/` sample markdown
 
 Functions called from inline HTML `onclick` handlers are exposed via `Object.assign(window, {...})` at the bottom of each module. Cross-module calls use `window.fn()` to avoid circular dependencies.
 
@@ -107,15 +107,9 @@ Slide-out panel with streaming. 2+custom personalities, stop/discuss buttons, co
 
 Six backends: PPQ, Routstr, OpenRouter, Venice, Local AI (Ollama/LM Studio/Jan), Custom. `callClaudeAPI(opts)` routes to active provider. `hasAIProvider()` gates all AI features. Venice E2EE: ECDH + AES-256-GCM, per-chunk streaming decryption, 30-min TTL. See `api.js`, `provider-panels.js`, `cashu-wallet.js`.
 
-### Electron Desktop App
+### Desktop app
 
-Optional native shell around the same web codebase. Adds Python-backed Lens for large corpora (faster than the browser-local backend), auto-update via GitHub Releases, and a managed first-run installer that downloads Python without needing a system install.
-
-- **`electron/main.js`** — main process. Creates sandboxed BrowserWindow, wires all `ipcMain.handle` channels. Hardened: preload channel allowlist, `will-navigate` lock, URL-scheme validation on `shell.openExternal`, CSP injection, 2s `will-quit` timeout, cached `install_update`
-- **`electron/preload.cjs`** — context-isolated bridge. Exposes `window.api.{isDesktop, platform, invoke, on, getPathForFile}` with a fixed invoke-channel allowlist (fail-closed)
-- **`electron/setup.js`** + **`paths.js`** + **`gpu.js`** + **`archive.js`** — first-run pipeline: detect GPU → download Python standalone + SHA-256 verify → extract → venv → pip install bundled `lens/` source twice (upgrade + `--force-reinstall --no-deps` to catch same-version edits) → pick ONNX provider (CUDA/DirectML/CoreML/CPU) → download embedding model via `huggingface_hub`. Progress streams to renderer via `setup:progress`
-- **`electron/lens-manager.js`** — LensManager spawns the Python lens server on `:8322`, health check, orphan reaper (`/proc/<pid>/exe` match on Linux), HTTP client with Bearer redaction + percent-encoded paths. Start/stop serialized via promise-chain mutex + AbortController on the health loop
-- **Packaging** via `electron-builder` in `package.json` build block. Linux AppImage + deb, macOS dmg (hardened runtime + `entitlements.mac.plist`), Windows nsis. `lens/` Python source ships as `extraResources`. Signing via `CSC_LINK`/`APPLE_ID` env vars (skipped when absent). `.github/workflows/release.yml` matrix-builds on tag push or workflow_dispatch
+**Retired in v1.21.0.** The getbased Electron shell was removed; the Python RAG backend that used to ship inside it now lives at [`elkimek/getbased-rag`](https://github.com/elkimek/getbased-rag) (private). Users who want local hardware-accelerated RAG self-host that server and wire it into Settings → Knowledge Base → External server. See `memory/project_electron_retirement.md` for the full rationale.
 
 ### Dashboard Section Order
 

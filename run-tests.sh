@@ -21,9 +21,8 @@ if [ -z "$NODE_PATH_EXTRA" ]; then
 fi
 
 # Start server if not already running. nohup + disown fully detaches it
-# from the shell — signals sent to the shell's process group (xvfb-run
-# on GH Actions has done this in past runs) won't propagate. Log to
-# /tmp so we can inspect if it ever dies unexpectedly.
+# from the shell — signals sent to the shell's process group won't
+# propagate. Log to /tmp so we can inspect if it ever dies unexpectedly.
 SERVER_PID=""
 if ! curl -s -o /dev/null "http://localhost:$PORT/" 2>/dev/null; then
   nohup node "$DIR/dev-server.js" "$PORT" > /tmp/dev-server.log 2>&1 < /dev/null &
@@ -59,31 +58,10 @@ cleanup() {
 trap cleanup EXIT
 
 # Node-side tests first — no browser, fail fast on module / helper regressions.
-# ensure_server is called between each so that if dev-server dies (has
-# happened on GH Actions xvfb runners) we get a precise which-test-killed-it
-# signal instead of cascading ECONNREFUSED in the HTTP tests.
-node "$DIR/tests/test-electron-helpers.js" || exit 1
-ensure_server
 node "$DIR/tests/test-no-native-dialogs.js" || exit 1
 ensure_server
-# Python-side registry smoke test — only runs if python3 is on PATH.
-# The registry module has no external deps so we don't need the lens venv.
-if command -v python3 >/dev/null 2>&1; then
-  echo "▶ Running tests/test-lens-registry.py"
-  python3 "$DIR/tests/test-lens-registry.py" || exit 1
-  ensure_server
-fi
 node "$DIR/tests/test-lens-local-utils.js" || exit 1
 ensure_server
-node "$DIR/tests/test-electron-ipc.js" || exit 1
-ensure_server
-node "$DIR/tests/test-electron-ipc-drift.js" || exit 1
-ensure_server
-node "$DIR/tests/test-updater-wiring.js" || exit 1
-ensure_server
-# HTTP-reliant tests before the Electron E2E, so the E2E doesn't
-# cascade-kill downstream tests if it takes dev-server down with it.
+# HTTP-reliant test before the Puppeteer suite.
 PORT=$PORT node "$DIR/tests/test-dev-server-origin.js" || exit 1
 PORT=$PORT NODE_PATH="$NODE_PATH_EXTRA" node "$DIR/run-tests.js"
-# Full Electron E2E last. Graceful-skips if no display available.
-node "$DIR/tests/test-electron-e2e.js" || exit 1

@@ -5,33 +5,13 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
-    version: '1.21.0', date: '2026-04-17', title: 'Desktop app + Knowledge Base',
+    version: '1.21.0', date: '2026-04-18', title: 'PWA-only · Knowledge Base libraries',
     items: [
-      'Native desktop app for Linux, macOS, and Windows. One-click install — no terminal needed. Auto-updates itself in the background.',
-      'Knowledge Base (Settings → AI): one section, two buttons — "On this device" or "External server". The app picks the right on-device engine automatically (the desktop app uses a native backend for speed; the browser uses an in-browser one that works offline). No more guessing.',
-      'The AI grounds its answers in whichever engine you choose — no more juggling two settings that did the same thing.',
-      'Multiple libraries work on both engines now — desktop and in-browser. Keep research papers, clinical guides, and personal notes in separate collections; switch between them from Settings. Chat grounds its answers in whichever library is active.',
-      'Document parsers for on-device indexing: PDF, Word, Markdown, plain text, and ZIP archives (which expand inline — each inner doc becomes its own source).',
+      'Browser Knowledge Base gets multi-library support: keep research papers, clinical guides, and personal notes in separate collections and switch between them from Settings. Chat grounds its answers in whichever library is active.',
+      'Document parsers for in-browser indexing: PDF, Word, Markdown, plain text, and ZIP archives (which expand inline — each inner doc becomes its own source).',
       'Better retrieval variety — results now span multiple documents instead of piling up on one. Fixes queries like "vitamin D and circadian rhythm and cold exposure" that used to return only vitamin-D chunks.',
       'Inline drop-zone + document list under Settings → AI → Knowledge Base — add, preview, and remove files without leaving Settings.',
-      'Settings → Data → App Updates now has a manual "Check for updates" button for when you don\'t want to wait for the next auto-check.',
-      'Desktop app is hardened for everyday use: installer signing is supported, auto-update goes through GitHub Releases, and the shell is locked down against drive-by navigation.',
-    ]
-  },
-  {
-    version: '1.20.2', date: '2026-04-17', title: 'Desktop Lens: Audit Fixes',
-    items: [
-      'Engine setup now shows "Step N of 5" and a Cancel button — stops a stuck install without killing the app',
-      'After an ingest, the files that were skipped are listed under the drop zone so you know which ones to rename or convert',
-      'Drop zone is keyboard-accessible (Tab + Enter), progress bars expose ARIA roles, and the sync setup/restore modals respond to Escape + trap focus like the other dialogs',
-      'Auto-configure Custom Knowledge Source now refuses to run against an empty corpus — previously it silently wired up zero chunks and chat looked broken',
-      'Citations under chat messages have a visible ▸ caret so it\'s obvious they expand',
-      'Clear-all-documents now recreates the qdrant collection immediately, so the next chat query doesn\'t 500 on a missing collection',
-      'Python lens package reinstalls cleanly on upgrade — edits to bundled source files land even when the version string didn\'t bump',
-      'Security hardening: atomic O_EXCL API-key file creation, zip-slip prefix check now uses Path.is_relative_to, HTTP error bodies have any echoed Bearer tokens redacted, URL path encoding now handles UTF-8 and the full reserved-char set',
-      'Orphan lens-process reaper matches on the kernel-reported executable path — no longer spoofable via argv',
-      'Updater plugin disabled until real signing keys are generated (placeholder pubkey removed)',
-      'Internal: collapsed duplicate setup polling in js/setup.js — js/knowledge-base.js is now the single source of truth for engine setup UI',
+      'Desktop app is retired. The native shell was prototyped but added release-cadence friction without covering a real user need the PWA did not already handle. If you want local hardware-accelerated RAG, self-host the Python backend from github.com/elkimek/getbased-rag and point Settings → Knowledge Base → External server at it.',
     ]
   },
   {

@@ -2,136 +2,16 @@
   "name": "getbased",
   "version": "1.21.0",
   "private": true,
-  "description": "getbased — open-source health dashboard (Electron desktop app + PWA)",
-  "main": "electron/main.js",
+  "description": "getbased — open-source health dashboard (PWA)",
   "type": "module",
   "scripts": {
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",
-    "dev-server": "node dev-server.js",
-    "electron": "electron .",
-    "electron:dev": "ELECTRON_DEV=1 electron .",
-    "dist": "electron-builder --publish=never",
-    "dist:linux": "electron-builder --linux --publish=never",
-    "dist:mac": "electron-builder --mac --publish=never",
-    "dist:win": "electron-builder --win --publish=never",
-    "release": "electron-builder --publish=always"
+    "dev-server": "node dev-server.js"
   },
   "devDependencies": {
-    "electron": "^32.2.0",
-    "electron-builder": "^26.8.1",
     "puppeteer": "^24.40.0",
     "vitepress": "^1.6.3"
-  },
-  "dependencies": {
-    "electron-updater": "^6.8.3",
-    "tar": "^7.5.13"
-  },
-  "build": {
-    "appId": "health.getbased.app",
-    "productName": "getbased",
-    "copyright": "Copyright © 2026 getbased contributors",
-    "directories": {
-      "output": "release",
-      "buildResources": "electron/icons"
-    },
-    "asar": true,
-    "files": [
-      "electron/**/*",
-      "index.html",
-      "styles.css",
-      "version.js",
-      "manifest.json",
-      "service-worker.js",
-      "js/**/*",
-      "vendor/**/*",
-      "data/**/*",
-      "package.json",
-      "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
-      "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}",
-      "!**/node_modules/*.d.ts",
-      "!**/node_modules/.bin",
-      "!**/*.{iml,o,hprof,orig,pyc,pyo,rbc,swp,csproj,sln,xproj}",
-      "!.editorconfig",
-      "!**/._*",
-      "!**/{.DS_Store,.git,.hg,.svn,CVS,RCS,SCCS,.gitignore,.gitattributes}",
-      "!**/{__pycache__,thumbs.db,.flowconfig,.idea,.vs,.nyc_output}",
-      "!**/{appveyor.yml,.travis.yml,circle.yml}",
-      "!**/{npm-debug.log,yarn.lock,.yarn-integrity,.yarn-metadata.json}"
-    ],
-    "extraResources": [
-      {
-        "from": "lens",
-        "to": "lens",
-        "filter": [
-          "**/*",
-          "!build/**",
-          "!dist/**",
-          "!.venv/**",
-          "!.pytest_cache/**",
-          "!.mypy_cache/**",
-          "!**/__pycache__/**",
-          "!**/*.pyc",
-          "!**/*.pyo",
-          "!**/*.whl",
-          "!**/*.egg-info/**",
-          "!**/.*"
-        ]
-      }
-    ],
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "elkimek",
-        "repo": "get-based",
-        "releaseType": "release"
-      }
-    ],
-    "linux": {
-      "target": [
-        { "target": "AppImage", "arch": ["x64", "arm64"] },
-        { "target": "deb", "arch": ["x64", "arm64"] }
-      ],
-      "category": "Utility",
-      "synopsis": "Open-source health dashboard for lab results, genetics, and biological-age tracking",
-      "description": "getbased is a local-first dashboard for tracking biomarker trends over time. AI-powered PDF import, 17 standard lab categories, custom markers, genetic insights, biological-age scoring. Runs entirely on your device — your data never leaves unless you opt into sync.",
-      "maintainer": "elkimek <noreply@getbased.health>"
-    },
-    "deb": {
-      "depends": [
-        "libgtk-3-0",
-        "libnotify4",
-        "libnss3",
-        "libxss1",
-        "libxtst6",
-        "xdg-utils",
-        "libatspi2.0-0",
-        "libdrm2",
-        "libgbm1",
-        "libxcb-dri3-0"
-      ]
-    },
-    "mac": {
-      "target": [
-        { "target": "dmg", "arch": ["x64", "arm64"] }
-      ],
-      "category": "public.app-category.lifestyle",
-      "hardenedRuntime": true,
-      "gatekeeperAssess": false,
-      "entitlements": "electron/entitlements.mac.plist",
-      "entitlementsInherit": "electron/entitlements.mac.plist"
-    },
-    "win": {
-      "target": [
-        { "target": "nsis", "arch": ["x64", "arm64"] }
-      ]
-    },
-    "nsis": {
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
-      "deleteAppDataOnUninstall": false
-    }
   }
 }
