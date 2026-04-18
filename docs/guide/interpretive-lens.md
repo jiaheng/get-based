@@ -58,6 +58,8 @@ Runs entirely in your browser. First use downloads a small AI model (~100 MB) an
 
 Good for: typical use — a few dozen to a few hundred documents. No install, no server, no external dependencies.
 
+**While indexing:** a small progress pill appears bottom-right. You can close Settings and keep using the app — indexing runs in the background and the pill tracks it from anywhere. Click **Cancel** on the pill to stop at the next excerpt; anything already indexed stays in the library, so a 3-minute run that you cancel early isn't wasted. Large batches (several hundred files) can take 10+ minutes on the in-browser engine; if that's your workflow, consider the external-server backend below.
+
 ### External server
 
 Connect to a knowledge server you run (or one run by someone you trust). Useful for larger corpora, shared libraries, or when you want hardware-accelerated retrieval that your browser can't match. Roll your own using the endpoint contract described below — any server that accepts a `POST /query` with bearer auth and returns a `{chunks: […]}` payload works.
