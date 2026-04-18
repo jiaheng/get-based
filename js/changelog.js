@@ -8,10 +8,12 @@ const CHANGELOG = [
     version: '1.21.0', date: '2026-04-18', title: 'Knowledge Base libraries',
     items: [
       'Multi-library support — keep research papers, clinical guides, and personal notes in separate collections and switch between them from Settings.',
-      'WebGPU embedder — 3-10× faster retrieval on modern browsers. Transparent fallback to WASM when unavailable.',
+      'WebGPU embedder — 3-10× faster retrieval on modern browsers. Transparent fallback to WASM when unavailable or pathologically slow (auto-detected via startup benchmark).',
       'Document parsers: PDF, Word, Markdown, plain text, and ZIP archives (expanded inline).',
       'Better retrieval variety — results span multiple documents instead of piling up on one.',
       'Inline drop-zone under Settings → AI → Knowledge Base — add, preview, and remove files in one place.',
+      'Background ingest — a progress pill tracks indexing from anywhere in the app, so you can close Settings and keep working during long runs.',
+      'Cancel button on the pill — stops at the next excerpt and keeps what\'s already indexed (no lost work on a wrong-file bailout).',
     ]
   },
   {
