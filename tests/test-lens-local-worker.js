@@ -203,6 +203,51 @@ return (async function() {
   assert('active library stats unchanged after non-active delete',
     defaultAfterDelete.total_chunks === defaultStats.total_chunks);
 
+  // ─── Phase 15b: abort mid-ingest commits partial progress ───
+  console.log('%c[15b] Abort mid-ingest', 'font-weight:bold');
+  // Big batch so the embed loop runs long enough to race against the abort
+  // message. 40 files × ~8 chunks each = ~320 iterations; with the mock
+  // embedder each is a microtask, but macrotask boundaries between them
+  // give the 'abort' message a clear chance to land.
+  const bigFiles = [];
+  for (let k = 0; k < 40; k++) {
+    bigFiles.push({ name: `abort-${k}.md`, text: 'lorem ipsum dolor sit amet. '.repeat(50) });
+  }
+  const abortIngestDone = new Promise((resolve, reject) => {
+    const onMsg = (e) => {
+      if (e.data?.type === 'progress' && e.data.stage === 'embed' && e.data.index >= 3) {
+        // Fire abort as soon as we see real progress — guarantees we're
+        // mid-loop, not racing against an unpumped queue.
+        worker.postMessage({ type: 'abort' });
+      }
+      if (e.data?.type === 'ingest_done') {
+        worker.removeEventListener('message', onMsg);
+        resolve(e.data);
+      }
+      if (e.data?.type === 'error') {
+        worker.removeEventListener('message', onMsg);
+        reject(new Error(e.data.message));
+      }
+    };
+    worker.addEventListener('message', onMsg);
+    worker.postMessage({ type: 'ingest', files: bigFiles });
+  });
+  const aborted = await abortIngestDone;
+  assert('aborted ingest returns cancelled:true',
+    aborted.stats?.cancelled === true,
+    `got ${JSON.stringify(aborted.stats)}`);
+  assert('aborted ingest committed < planned',
+    aborted.stats?.chunks_indexed < aborted.stats?.chunks_planned,
+    `indexed=${aborted.stats?.chunks_indexed} planned=${aborted.stats?.chunks_planned}`);
+  assert('aborted ingest still indexed at least the 3 chunks before abort fired',
+    aborted.stats?.chunks_indexed >= 3);
+  // Partial-commit: the chunks that did embed are now in the corpus.
+  const statsAfterAbort = await roundTrip(worker, { type: 'stats' }, 'stats_result');
+  assert('partial commit persisted to corpus',
+    statsAfterAbort.total_chunks >= aborted.stats.chunks_indexed);
+  // Clean up so later phases start from a known state.
+  await roundTrip(worker, { type: 'clear' }, 'clear_done');
+
   // ─── Phase 15: deleting the last library auto-creates a default ───
   console.log('%c[15] Multi-library: delete last keeps one', 'font-weight:bold');
   // Currently only "default" remains. Deleting it should auto-create a

@@ -698,11 +698,21 @@ function _ensureIngestPill() {
       <button id="lens-ingest-pill-dismiss" title="Hide (ingest keeps running)" style="background:none;border:none;color:var(--text-muted,#888);cursor:pointer;padding:0 4px;font-size:16px;line-height:1">&times;</button>
     </div>
     <div id="lens-ingest-pill-text" style="margin-bottom:8px;font-size:12px;color:var(--text-secondary,#bbb);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Preparing…</div>
-    <progress id="lens-ingest-pill-bar" value="0" max="1" style="width:100%;height:6px"></progress>
+    <progress id="lens-ingest-pill-bar" value="0" max="1" style="width:100%;height:6px;margin-bottom:8px"></progress>
+    <button id="lens-ingest-pill-cancel" style="width:100%;padding:6px;background:transparent;border:1px solid var(--border,#333);border-radius:6px;color:var(--text-secondary,#bbb);font-size:11px;cursor:pointer">Cancel</button>
   `;
   document.body.appendChild(pill);
   pill.querySelector('#lens-ingest-pill-dismiss').addEventListener('click', () => {
     pill.style.display = 'none';
+  });
+  pill.querySelector('#lens-ingest-pill-cancel').addEventListener('click', async () => {
+    const btn = pill.querySelector('#lens-ingest-pill-cancel');
+    btn.disabled = true;
+    btn.textContent = 'Cancelling…';
+    try {
+      const lens = await _getLocalLens();
+      lens.abort();
+    } catch {}
   });
   return pill;
 }
@@ -775,11 +785,14 @@ async function _handleLocalLensIngest(fileList) {
   try {
     const stats = await lens.ingest(files);
     const dur = ((performance.now() - t0) / 1000).toFixed(1);
-    const doneMsg = `Indexed ${stats.chunks_indexed} excerpts from ${stats.files_seen} file${stats.files_seen !== 1 ? 's' : ''} in ${dur}s.`;
+    const planned = stats.chunks_planned ?? stats.chunks_indexed;
+    const doneMsg = stats.cancelled
+      ? `Cancelled — indexed ${stats.chunks_indexed} of ${planned} excerpts in ${dur}s.`
+      : `Indexed ${stats.chunks_indexed} excerpts from ${stats.files_seen} file${stats.files_seen !== 1 ? 's' : ''} in ${dur}s.`;
     pillText.textContent = doneMsg;
     const modalText = document.getElementById('lens-local-progress-text');
     if (modalText) modalText.textContent = doneMsg;
-    showNotification(`Indexed ${stats.chunks_indexed} excerpts from ${stats.files_seen} file${stats.files_seen !== 1 ? 's' : ''}.`, 'success');
+    showNotification(doneMsg, stats.cancelled ? 'info' : 'success');
   } catch (e) {
     const errMsg = `Couldn't index: ${e.message || e}`;
     pillText.textContent = errMsg;

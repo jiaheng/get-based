@@ -110,6 +110,10 @@ export async function openLocalLens() {
         writeCachedCount(s.total_chunks);
         return r.stats;
       },
+      // Fire-and-forget side-channel signal. Skips the serial queue so
+      // it can interrupt an in-flight ingest; the worker polls the flag
+      // between embeds and commits whatever's been indexed so far.
+      abort: () => { try { ensureWorker().postMessage({ type: 'abort' }); } catch {} },
       query: (text, topK = 10) => send({ type: 'query', text, topK }).then((r) => r.chunks),
       getStats: async () => {
         const r = await send({ type: 'stats' });

@@ -45,6 +45,7 @@ const CHUNK_MIN = 50;
 
 let _embedder = null;
 let _embedderBackend = 'wasm';  // 'webgpu' | 'wasm' — whichever transformers.js actually booted
+let _abortRequested = false;    // set by 'abort' message, checked between embeds in handleIngest
 let _rootDir = null;            // OPFS FileSystemDirectoryHandle at /lens-local/
 let _libraries = [];            // [{id, name, createdAt}]
 let _activeId = null;           // Currently active library id
@@ -80,6 +81,11 @@ self.addEventListener('message', async (e) => {
       case 'create_library':    return handleCreateLibrary(msg.name);
       case 'rename_library':    return handleRenameLibrary(msg.libraryId, msg.name);
       case 'delete_library':    return handleDeleteLibrary(msg.libraryId);
+      // Abort is a side-channel signal — skips the serial queue on the
+      // main thread so it can interrupt an in-flight ingest. handleIngest
+      // polls _abortRequested between embeds and commits whatever's been
+      // indexed so far.
+      case 'abort':             _abortRequested = true; return;
       default:                  throw new Error(`Unknown message type: ${msg.type}`);
     }
   } catch (err) {
@@ -348,6 +354,11 @@ async function persistLibraries() {
 async function handleIngest(files) {
   if (!_embedder) throw new Error('Worker not initialized');
 
+  // Fresh run — clear any abort flag left over from a prior run that
+  // raced with completion (the main thread can legitimately fire abort
+  // just as we post ingest_done).
+  _abortRequested = false;
+
   // First pass — chunk every file. We emit a "start" event with total
   // chunk count so the UI can render a bounded progress bar.
   const allChunks = [];
@@ -362,10 +373,19 @@ async function handleIngest(files) {
   // (padding every item to the longest sequence in the batch wastes
   // compute on a backend with no parallelism to exploit). On WebGPU the
   // GPU handles parallelism internally — still no obvious batch gain.
+  //
+  // Abort is checked before each embed so partial progress is committed
+  // cleanly: whatever chunks were indexed before the flag flipped become
+  // a permanent part of the corpus. Tearing them out would waste the
+  // compute the user already paid for.
   const newVectors = new Float32Array(allChunks.length * DIM);
+  let indexed = 0;
+  let cancelled = false;
   for (let i = 0; i < allChunks.length; i++) {
+    if (_abortRequested) { cancelled = true; break; }
     const out = await _embedder(allChunks[i].text, { pooling: 'mean', normalize: true });
     newVectors.set(out.data, i * DIM);
+    indexed = i + 1;
     if (i % 5 === 0 || i === allChunks.length - 1) {
       self.postMessage({
         type: 'progress', stage: 'embed',
@@ -373,17 +393,23 @@ async function handleIngest(files) {
       });
     }
   }
+  _abortRequested = false;
+
+  // Commit only the portion actually indexed — slicing when cancelled
+  // drops the trailing zeros from the pre-allocated newVectors buffer.
+  const commitChunks = cancelled ? allChunks.slice(0, indexed) : allChunks;
+  const commitVectors = cancelled ? newVectors.slice(0, indexed * DIM) : newVectors;
 
   // Merge into in-memory corpus.
-  const merged = new Float32Array(_vectors.length + newVectors.length);
+  const merged = new Float32Array(_vectors.length + commitVectors.length);
   merged.set(_vectors, 0);
-  merged.set(newVectors, _vectors.length);
+  merged.set(commitVectors, _vectors.length);
   _vectors = merged;
-  _chunks.push(...allChunks);
+  _chunks.push(...commitChunks);
 
   // Merge per-doc counts into manifest.
   const perDocAdded = new Map();
-  for (const c of allChunks) perDocAdded.set(c.source, (perDocAdded.get(c.source) || 0) + 1);
+  for (const c of commitChunks) perDocAdded.set(c.source, (perDocAdded.get(c.source) || 0) + 1);
   for (const [source, added] of perDocAdded) {
     const existing = _manifest.docs.find((d) => d.source === source);
     if (existing) existing.chunks += added;
@@ -396,7 +422,13 @@ async function handleIngest(files) {
 
   self.postMessage({
     type: 'ingest_done',
-    stats: { files_seen: files.length, chunks_indexed: allChunks.length, skipped: [] },
+    stats: {
+      files_seen: files.length,
+      chunks_indexed: commitChunks.length,
+      chunks_planned: allChunks.length,
+      cancelled,
+      skipped: [],
+    },
   });
 }
 
@@ -671,6 +703,12 @@ async function writeSync(name, bytes) {
 // MMR behave predictably in tests. Returns the shape transformers.js
 // pipelines return: an object with a `.data` Float32Array.
 async function mockEmbedder(text, _opts) {
+  // Force a task-queue boundary between embeds so incoming messages
+  // ('abort') can land. The real embedder's WASM/WebGPU work naturally
+  // spans tasks via its internal I/O; the synchronous hash stub would
+  // otherwise starve the event loop as a tight microtask chain, making
+  // abort untestable. Negligible (<5 ms total) for test corpus sizes.
+  await new Promise((r) => setTimeout(r, 0));
   const out = new Float32Array(DIM);
   let h = 2166136261;
   const s = String(text);
