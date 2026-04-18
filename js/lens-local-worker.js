@@ -47,6 +47,20 @@ let _embedder = null;
 let _embedderBackend = 'wasm';  // 'webgpu' | 'wasm' — whichever transformers.js actually booted
 let _abortRequested = false;    // set by 'abort' message, checked between embeds in handleIngest
 let _rootDir = null;            // OPFS FileSystemDirectoryHandle at /lens-local/
+
+// MessageChannel-based macrotask yield. Between embed calls the worker
+// would otherwise only yield to the microtask queue (a chain of awaits
+// on fast-resolving promises), which starves the message queue — incoming
+// 'abort' messages never dispatch and cancel becomes a no-op. Posting to a
+// MessageChannel port gives a real task boundary without setTimeout's 4ms
+// clamp, so the queue gets pumped between every chunk at near-zero cost.
+const _yieldChannel = new MessageChannel();
+function macroYield() {
+  return new Promise((resolve) => {
+    _yieldChannel.port1.onmessage = () => resolve();
+    _yieldChannel.port2.postMessage(null);
+  });
+}
 let _libraries = [];            // [{id, name, createdAt}]
 let _activeId = null;           // Currently active library id
 let _manifest = null;           // Active library's manifest (loaded on activate)
@@ -382,6 +396,10 @@ async function handleIngest(files) {
   let indexed = 0;
   let cancelled = false;
   for (let i = 0; i < allChunks.length; i++) {
+    // Pump the message queue so an 'abort' can actually land. Without
+    // this the embed loop is a tight chain of microtasks and the abort
+    // message sits forever in the task queue, making cancel a no-op.
+    await macroYield();
     if (_abortRequested) { cancelled = true; break; }
     const out = await _embedder(allChunks[i].text, { pooling: 'mean', normalize: true });
     newVectors.set(out.data, i * DIM);
@@ -703,12 +721,6 @@ async function writeSync(name, bytes) {
 // MMR behave predictably in tests. Returns the shape transformers.js
 // pipelines return: an object with a `.data` Float32Array.
 async function mockEmbedder(text, _opts) {
-  // Force a task-queue boundary between embeds so incoming messages
-  // ('abort') can land. The real embedder's WASM/WebGPU work naturally
-  // spans tasks via its internal I/O; the synchronous hash stub would
-  // otherwise starve the event loop as a tight microtask chain, making
-  // abort untestable. Negligible (<5 ms total) for test corpus sizes.
-  await new Promise((r) => setTimeout(r, 0));
   const out = new Float32Array(DIM);
   let h = 2166136261;
   const s = String(text);
