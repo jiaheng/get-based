@@ -50,13 +50,13 @@ Switch to the profile you want to update in getbased, make your changes, and the
 
 ## Compatible Tools
 
-Agent Access works with any agent that can call the context gateway's API using your token. The universal adapter is [getbased-mcp](https://github.com/elkimek/getbased-mcp) — an MCP server that exposes your lab context as tools.
+Agent Access works with any agent that can call the context gateway's API using your token. The universal adapter is [getbased-mcp](https://github.com/elkimek/getbased-agents/tree/main/packages/mcp) — an MCP server that exposes your lab context as tools.
 
 ### getbased-mcp
 
 ```bash
-git clone https://github.com/elkimek/getbased-mcp.git
-cd getbased-mcp
+git clone https://github.com/elkimek/getbased-agents.git
+cd getbased-agents/packages/mcp
 pip install .
 ```
 

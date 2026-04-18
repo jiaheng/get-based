@@ -1,6 +1,6 @@
 # OpenClaw
 
-[OpenClaw](https://openclaw.ai) is a self-hosted AI assistant you can connect to any messenger (Telegram, Signal, Discord, etc.). It connects to getbased via [getbased-mcp](https://github.com/elkimek/getbased-mcp), letting your OpenClaw bot answer questions about your blood work — "what's my vitamin D trend?" or "summarize my last labs" — directly in chat.
+[OpenClaw](https://openclaw.ai) is a self-hosted AI assistant you can connect to any messenger (Telegram, Signal, Discord, etc.). It connects to getbased via [getbased-mcp](https://github.com/elkimek/getbased-agents/tree/main/packages/mcp), letting your OpenClaw bot answer questions about your blood work — "what's my vitamin D trend?" or "summarize my last labs" — directly in chat.
 
 Only a read-only summary is shared. Your raw data and sync mnemonic never leave your browser.
 
@@ -23,8 +23,8 @@ Go to **Settings → Data → Agent Access** and toggle it on. A read-only token
 ### 2. Install getbased-mcp
 
 ```bash
-git clone https://github.com/elkimek/getbased-mcp.git
-cd getbased-mcp
+git clone https://github.com/elkimek/getbased-agents.git
+cd getbased-agents/packages/mcp
 pip install .
 ```
 

@@ -122,7 +122,7 @@ Quick access to JSON export (current profile) and data clearing. For full export
 
 ### Agent Access
 
-Let AI agents query your labs via [getbased-mcp](https://github.com/elkimek/getbased-mcp). Works with [Hermes Agent](https://github.com/hermes-agent/hermes-agent), [OpenClaw](https://openclaw.ai), and any MCP-compatible agent. Toggle on to generate a read-only token, then paste it into your agent's config. See [Agent Access](./agent-access.md) for full details.
+Let AI agents query your labs via [getbased-mcp](https://github.com/elkimek/getbased-agents/tree/main/packages/mcp). Works with [Hermes Agent](https://github.com/hermes-agent/hermes-agent), [OpenClaw](https://openclaw.ai), and any MCP-compatible agent. Toggle on to generate a read-only token, then paste it into your agent's config. See [Agent Access](./agent-access.md) for full details.
 
 ### Recommendations
 
