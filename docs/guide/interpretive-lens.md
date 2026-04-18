@@ -38,23 +38,37 @@ Click the card to open the editor. Type or paste your lens text, then click **Sa
 
 The Interpretive Lens is included in your [JSON export](/guide/json-export-import) and restored on import.
 
-## Custom Knowledge Source
+## Custom Knowledge Base
 
-The lens text above tells the AI *which perspective* to use. A Knowledge Source takes this further by giving the AI *actual passages* to reason from — excerpts from research papers, clinical guides, textbook chapters, or any documents you've collected.
+The lens text above tells the AI *which perspective* to use. A Knowledge Base takes this further by giving the AI *actual passages* to reason from — excerpts from research papers, clinical guides, textbook chapters, or any documents you've collected.
 
 When connected, every chat question and focus card insight triggers a search of your knowledge base. getbased sends the question, receives the most relevant passages, and includes them alongside your lab data. The AI then interprets your results grounded in those sources and cites them back to you.
 
-### What you need
-
-A Knowledge Source is a server (run by you or someone you trust) that accepts a question and returns relevant passages from a document collection. Under the hood this uses **RAG** (Retrieval-Augmented Generation) — a technique where the AI first searches a curated document set for relevant content, then uses those results to inform its answer.
+Under the hood this uses **RAG** (Retrieval-Augmented Generation) — a technique where the AI first searches a curated document set for relevant content, then uses those results to inform its answer.
 
 ::: tip
 Think of it like a research assistant: you ask a question, they pull the most relevant pages from your library, and the AI reads those pages before answering.
 :::
 
-### Setup
+There are two backends to choose from in **Settings → AI → Knowledge Base**:
 
-1. Open **Settings → AI → Knowledge Source**
+### On this device (in-browser)
+
+Runs entirely in your browser. First use downloads a small AI model (~100 MB) and then works offline. Drop your documents (PDF, Word, Markdown, plain text, or ZIP archives) into the settings panel — they're indexed locally in your browser's storage. Multiple libraries are supported so you can keep research papers, clinical guides, and personal notes in separate collections.
+
+Good for: typical use — a few dozen to a few hundred documents. No install, no server, no external dependencies.
+
+### External server
+
+Connect to a knowledge server you run (or someone you trust). Useful for larger corpora, shared libraries, or when you want hardware-accelerated retrieval that your browser can't match.
+
+The easiest pre-built option is [**getbased-rag**](https://github.com/elkimek/getbased-rag) — a standalone Python server that implements the exact protocol below. `pipx install` it, point the external-server backend at `http://127.0.0.1:8322` with the generated API key, and you're done.
+
+You can also roll your own using the endpoint contract described below.
+
+### Setup (external server)
+
+1. Open **Settings → AI → Knowledge Base → External server**
 2. Toggle **Enable Knowledge Source**
 3. Enter a display name (e.g., *Functional Medicine Library*)
 4. Enter your server URL (HTTPS, or `http://localhost` for local servers)
