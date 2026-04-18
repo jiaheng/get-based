@@ -409,7 +409,7 @@ export function renderCustomLensSection() {
       <div style="font-size:11px;color:var(--text-muted);margin-top:6px">
         ${isBrowser
           ? 'Runs entirely in this browser. No install — first use downloads a small AI model (~100 MB); after that it works offline.'
-          : 'Connect to a knowledge server you run (e.g. <a href="https://github.com/elkimek/getbased-rag" target="_blank" rel="noopener">getbased-rag</a>) or someone you trust.'}
+          : 'Connect to a knowledge server you run (e.g. <a href="https://github.com/elkimek/getbased-rag" target="_blank" rel="noopener" style="color:var(--accent)">getbased-rag</a>) or someone you trust.'}
       </div>
     </div>
 
