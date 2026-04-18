@@ -86,12 +86,8 @@ getbased-mcp provides these tools:
 | `getbased_lab_context` | Full lab summary — values, ranges, trends, context cards, supplements, goals |
 | `getbased_section` | Query a specific section (hormones, biometrics, etc.) or list available sections |
 | `getbased_list_profiles` | List all profiles by name and ID |
-| `knowledge_search` | Semantic search over your knowledge base. Requires [getbased-rag](https://github.com/elkimek/getbased-rag) running locally (the same backend the PWA's External server lens points at). Degrades gracefully — if no RAG server is reachable, the lab-context tools still work. |
+| `knowledge_search` | Semantic search over your knowledge base. Requires a Lens RAG server running locally (port 8321 by default, configurable via `LENS_URL`). Degrades gracefully — the lab-context tools keep working even if no RAG server is reachable. |
 | `getbased_lens_config` | Show the Custom Knowledge Source endpoint + key from getbased, so the agent can stay in sync with what the PWA is configured to query. |
-
-::: tip
-The `knowledge_search` tool and the PWA's **Settings → AI → Knowledge Base → External server** backend both query the same `getbased-rag` server over HTTP. Running one RAG backend lets you ground answers from both your browser chats AND your MCP agents (Claude Desktop, Hermes, Cursor) in the same document corpus.
-:::
 
 ## Security
 
