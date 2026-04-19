@@ -442,6 +442,15 @@ export function renderCustomLensSection() {
     ` : ''}
 
     <div id="lens-remote-fields" style="${externalFieldsStyle}">
+      <!-- Setup hint: point users at getbased-rag as the reference
+           implementation of the external-server protocol. Saves the
+           "where do I even start" hunt through docs. -->
+      <div style="margin-top:8px;padding:10px 12px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;font-size:11.5px;color:var(--text-muted);line-height:1.6">
+        <strong style="color:var(--text-primary);font-weight:600">New here?</strong>
+        The reference server is <a href="https://github.com/elkimek/getbased-agents/tree/main/packages/rag" target="_blank" rel="noopener" style="color:var(--accent)">getbased-rag</a> — a one-command install, runs on <code style="font-family:var(--font-mono,monospace);font-size:11px">127.0.0.1:8322</code> by default.
+        <div style="margin-top:6px;font-family:var(--font-mono,monospace);font-size:11px;background:var(--bg-primary);padding:6px 10px;border-radius:4px;color:var(--text-primary)">pipx install "getbased-agent-stack[full]"</div>
+        <div style="margin-top:6px">Then <code style="font-family:var(--font-mono,monospace);font-size:11px">lens serve</code> to start the server, <code style="font-family:var(--font-mono,monospace);font-size:11px">lens key</code> to get the API key to paste below. Or add <a href="https://github.com/elkimek/getbased-agents/tree/main/packages/dashboard" target="_blank" rel="noopener" style="color:var(--accent)">getbased-dashboard</a> for a browser UI (library management, drag-drop ingest, per-library model picker).</div>
+      </div>
       <!-- Display name: only meaningful for external-server, which is a
            remote endpoint rather than a named library. in-browser derives
            the chip label from the active library name. -->
