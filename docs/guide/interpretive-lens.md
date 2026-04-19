@@ -64,16 +64,15 @@ Good for: typical use — a few dozen to a few hundred documents. No install, no
 
 Connect to a knowledge server you run (or one run by someone you trust). Useful for larger corpora, shared libraries, or when you want hardware-accelerated retrieval that your browser can't match.
 
-The easiest way to stand one up is [**getbased-rag**](https://github.com/elkimek/getbased-agents/tree/main/packages/rag) — the Python reference implementation that speaks this exact contract. It's a `pipx install` away and comes with [getbased-dashboard](https://github.com/elkimek/getbased-agents/tree/main/packages/dashboard), a browser UI for creating libraries, picking embedding models, and drag-drop ingest:
+One command stands one up — the [**getbased-agent-stack**](https://github.com/elkimek/getbased-agents) bundles the RAG server, an optional browser dashboard, and the MCP adapter for AI clients:
 
 ```bash
 pipx install "getbased-agent-stack[full]"
 lens serve                 # starts the RAG server on 127.0.0.1:8322
 lens key                   # prints the bearer token to paste below
-getbased-dashboard serve   # optional — web UI at 127.0.0.1:8323
 ```
 
-Any server speaking the same protocol also works — see the endpoint contract below to roll your own.
+Optional: run `getbased-dashboard serve` to get a browser UI for library management + drag-drop ingest at `http://127.0.0.1:8323`. Any server speaking the same protocol also works — see the endpoint contract below to roll your own.
 
 ### Setup (external server)
 

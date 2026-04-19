@@ -20,13 +20,13 @@ getbased (browser) → Context Gateway ← getbased-mcp ← OpenClaw bot
 
 Go to **Settings → Data → Agent Access** and toggle it on. A read-only token is generated.
 
-### 2. Install getbased-mcp
+### 2. Install the agent stack
 
 ```bash
-pipx install getbased-mcp
+pipx install "getbased-agent-stack[full]"
 ```
 
-(Or `pipx install "getbased-agent-stack[full]"` to get the adapter alongside a local RAG knowledge server and a browser [dashboard](https://github.com/elkimek/getbased-agents/tree/main/packages/dashboard) in one command.)
+One command — installs the MCP adapter, a local RAG knowledge server, and a browser setup dashboard. (If you only want the MCP adapter and nothing else, `pipx install getbased-mcp` is a smaller ~10 MB alternative.)
 
 ### 3. Configure OpenClaw
 

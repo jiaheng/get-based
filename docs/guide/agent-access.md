@@ -50,17 +50,17 @@ Switch to the profile you want to update in getbased, make your changes, and the
 
 ## Compatible Tools
 
-Agent Access works with any agent that can call the context gateway's API using your token. The universal adapter is [getbased-mcp](https://github.com/elkimek/getbased-agents/tree/main/packages/mcp) — an MCP server that exposes your lab context as tools. It's published on PyPI as part of the [getbased-agents](https://github.com/elkimek/getbased-agents) monorepo.
+Agent Access works with any agent that can call the context gateway's API using your token. The universal adapter is the [**getbased-agent-stack**](https://github.com/elkimek/getbased-agents) — one install covers the MCP adapter, a local RAG knowledge server, and a browser dashboard for setup.
 
-### getbased-mcp
+### Install
 
 ```bash
-pipx install getbased-mcp                    # just the agent adapter
-# — or —
-pipx install "getbased-agent-stack[full]"    # adapter + local RAG server + web dashboard
+pipx install "getbased-agent-stack[full]"
 ```
 
-Add it to your agent's MCP config with your token. Works with any MCP-compatible agent — Claude Code, Claude Desktop, Cursor, Cline, Windsurf, [Hermes Agent](https://github.com/hermes-agent/hermes-agent), [OpenClaw](https://openclaw.ai), and more. If you installed the full stack, the [getbased-dashboard](https://github.com/elkimek/getbased-agents/tree/main/packages/dashboard) web UI generates paste-ready config blocks for every client.
+Add it to your agent's MCP config with your token. Works with any MCP-compatible agent — Claude Code, Claude Desktop, Cursor, Cline, Windsurf, [Hermes Agent](https://github.com/hermes-agent/hermes-agent), [OpenClaw](https://openclaw.ai), and more. Run `getbased-dashboard serve` afterwards — it generates paste-ready config blocks for every client, no manual YAML/JSON authoring needed.
+
+(If you only want the MCP adapter without the RAG server, `pipx install getbased-mcp` is a smaller ~10 MB alternative.)
 
 ### Hermes Agent example
 

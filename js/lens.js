@@ -442,13 +442,13 @@ export function renderCustomLensSection() {
     ` : ''}
 
     <div id="lens-remote-fields" style="${externalFieldsStyle}">
-      <!-- Setup hint: point users at getbased-rag as the reference
-           implementation of the external-server protocol. Saves the
-           "where do I even start" hunt through docs. -->
+      <!-- Setup hint: one install, one server. The stack bundles the
+           RAG server + optional dashboard UI + MCP adapter, so the
+           user doesn't need to reason about which package to pick. -->
       <div style="margin-top:8px;padding:12px 14px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text-muted);line-height:1.6">
-        <div><strong style="color:var(--text-primary);font-weight:600">Need a server?</strong> The reference implementation is <a href="https://github.com/elkimek/getbased-agents/tree/main/packages/rag" target="_blank" rel="noopener" style="color:var(--accent)">getbased-rag</a> — one command, runs on <code style="font-family:var(--font-mono,monospace);font-size:11px">127.0.0.1:8322</code>:</div>
+        <div><strong style="color:var(--text-primary);font-weight:600">Need a server?</strong> Install <a href="https://github.com/elkimek/getbased-agents" target="_blank" rel="noopener" style="color:var(--accent)">getbased-agent-stack</a> — one command, runs on <code style="font-family:var(--font-mono,monospace);font-size:11px">127.0.0.1:8322</code>:</div>
         <div style="margin-top:8px;font-family:var(--font-mono,monospace);font-size:11.5px;background:var(--bg-primary);padding:8px 12px;border-radius:4px;color:var(--text-primary);line-height:1.8">pipx install "getbased-agent-stack[full]"<br>lens serve&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--text-muted)"># start the server</span><br>lens key&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--text-muted)"># prints the bearer token for below</span></div>
-        <div style="margin-top:8px">Or add <a href="https://github.com/elkimek/getbased-agents/tree/main/packages/dashboard" target="_blank" rel="noopener" style="color:var(--accent)">getbased-dashboard</a> for a browser UI with library management, drag-drop ingest, and a per-library embedding-model picker. Already have a server? Skip this and fill in the fields below.</div>
+        <div style="margin-top:8px">Already have a server? Skip this and fill in the fields below.</div>
       </div>
       <!-- Display name: only meaningful for external-server, which is a
            remote endpoint rather than a named library. in-browser derives
