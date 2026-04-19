@@ -5,6 +5,16 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.21.1', date: '2026-04-19', title: 'Knowledge Base setup polish',
+    items: [
+      'getbased-agent-stack is now live on PyPI — one command (pipx install "getbased-agent-stack[full]") stands up the RAG server, the browser dashboard, and the MCP adapter.',
+      'Settings → Knowledge Base → External server rewritten into a 3-step setup flow: install → run both services → paste bearer here. Points at the dashboard\'s one-click login URL and its show/copy key — no more copy-pasting from the terminal.',
+      'Button renamed from "Save & Test" to "Save + connect". Endpoint URL helper simplified to a one-liner about the /query suffix.',
+      'OpenClaw added as a documented MCP client (6 total: Claude Desktop, Claude Code, Cursor, Cline, Hermes, OpenClaw). The dashboard generates paste-ready config for each.',
+      'Docs refresh: new Knowledge Base Grounding section in AI Chat, Custom API provider now listed correctly across Settings + AI Chat + providers guide, Interpretive Lens one-click-login section added.',
+    ]
+  },
+  {
     version: '1.21.0', date: '2026-04-18', title: 'Knowledge Base libraries',
     items: [
       'Multi-library support — keep research papers, clinical guides, and personal notes in separate collections and switch between them from Settings.',

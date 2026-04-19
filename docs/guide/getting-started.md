@@ -80,4 +80,4 @@ Alternatively, use **Manual Entry** to type in values directly.
 You must have an AI provider configured before dropping a PDF. If the drop zone shows a prompt to set up a provider, visit Settings first.
 :::
 
-Once data is imported, charts and analysis appear automatically across all 16 biomarker categories.
+Once data is imported, charts and analysis appear automatically across all 17 biomarker categories.

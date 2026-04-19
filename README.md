@@ -47,7 +47,7 @@ Opt-in feature that lets AI agents query your lab context — coding agents (Cla
 - Enable in **Settings → Data → Agent Access** to generate a read-only token
 - Context is pushed to a lightweight gateway on every save and profile switch
 - Per-profile: each profile's context is stored separately; agents can query any profile by ID
-- Use [getbased-mcp](https://github.com/elkimek/getbased-mcp) to connect [Hermes Agent](https://github.com/hermes-agent/hermes-agent), [OpenClaw](https://openclaw.ai), or any MCP-compatible agent
+- Install via `pipx install "getbased-agent-stack[full]"` — [getbased-agents](https://github.com/elkimek/getbased-agents) bundles the MCP adapter, local RAG knowledge server, and browser setup dashboard. Works with [Hermes Agent](https://github.com/hermes-agent/hermes-agent), [OpenClaw](https://openclaw.ai), Claude Code, Claude Desktop, Cursor, Cline, or any MCP-compatible agent
 - Only the AI-readable context text is shared — never your mnemonic or raw lab data
 - Token is revocable at any time from the same settings panel
 
@@ -119,7 +119,7 @@ Open `index.html` (or start `node dev-server.js` for development) and the dashbo
 ### Related repos
 
 - [**getbased-relay**](https://github.com/elkimek/getbased-relay) — Evolu sync relay for opt-in cross-device sync.
-- [**getbased-mcp**](https://github.com/elkimek/getbased-mcp) — MCP server exposing your lab context to AI agents (Claude Desktop, Hermes, Cursor, etc.).
+- [**getbased-agents**](https://github.com/elkimek/getbased-agents) — `pipx install "getbased-agent-stack[full]"` installs the MCP adapter for AI clients (Claude Desktop, Hermes, Cursor, etc.), a local RAG knowledge server backing the "External server" Knowledge Base, and a browser setup dashboard in one command.
 
 ## Testing
 

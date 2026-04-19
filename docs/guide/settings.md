@@ -58,7 +58,7 @@ At the top of the AI Provider tab, a toggle slider lets you **pause all AI featu
 
 ## AI Provider
 
-Choose and configure one of five AI backends:
+Choose and configure one of six AI backends:
 
 | Provider | Best for |
 |---|---|
@@ -67,12 +67,14 @@ Choose and configure one of five AI backends:
 | **PPQ** | Pay-per-query, 300+ models, crypto or gift card topup |
 | **Venice** | Privacy-first, nothing logged on their end |
 | **Local** | Fully local, completely offline, free — Ollama, LM Studio, Jan, etc. |
+| **Custom** | Any OpenAI-compatible endpoint — bring your own base URL + API key |
 
 Each provider has its own panel:
 
 - **OpenRouter, PPQ, Venice**: Paste your API key, select a model from the dropdown. OpenRouter also has a custom model input for any model ID not in the curated list — a health check indicator (✓/✗) confirms connectivity. The app fetches available models from the provider automatically when you open Settings.
 - **Routstr**: Fund the built-in Cashu wallet (Lightning or Cashu token), browse online nodes discovered via Nostr, deposit sats to connect. A 12-word seed phrase is generated on first deposit for wallet recovery.
 - **Local**: Enter your server URL (default `http://localhost:11434`), optionally add an API key, and choose from your locally available models. Works with any OpenAI-compatible server. When connected to Ollama, a **Model Advisor** panel appears showing your GPU, each model's fitness for lab analysis (★ Recommended / Capable / Underpowered / Inadequate), and VRAM fit. If you don't have a recommended model, it suggests the best one to pull.
+- **Custom**: Point at any OpenAI-compatible `/v1/*` endpoint — paste the base URL and API key, and the app fetches the provider's model list from `/v1/models`. Useful for private deployments, self-hosted gateways, or providers not yet in the curated list above.
 
 See [AI Providers](./ai-providers.md) for full setup instructions.
 

@@ -50,17 +50,17 @@ Switch to the profile you want to update in getbased, make your changes, and the
 
 ## Compatible Tools
 
-Agent Access works with any agent that can call the context gateway's API using your token. The universal adapter is [getbased-mcp](https://github.com/elkimek/getbased-agents/tree/main/packages/mcp) — an MCP server that exposes your lab context as tools.
+Agent Access works with any agent that can call the context gateway's API using your token. The universal adapter is the [**getbased-agent-stack**](https://github.com/elkimek/getbased-agents) — one install covers the MCP adapter, a local RAG knowledge server, and a browser dashboard for setup.
 
-### getbased-mcp
+### Install
 
 ```bash
-git clone https://github.com/elkimek/getbased-agents.git
-cd getbased-agents/packages/mcp
-pip install .
+pipx install "getbased-agent-stack[full]"
 ```
 
-Add it to your agent's MCP config with your token and gateway URL. Works with any MCP-compatible agent — Claude Code, Cursor, Windsurf, [Hermes Agent](https://github.com/hermes-agent/hermes-agent), [OpenClaw](https://openclaw.ai), and more.
+Add it to your agent's MCP config with your token. Works with any MCP-compatible agent — Claude Code, Claude Desktop, Cursor, Cline, Windsurf, [Hermes Agent](https://github.com/hermes-agent/hermes-agent), [OpenClaw](https://openclaw.ai), and more. Run `getbased-dashboard serve` afterwards — it generates paste-ready config blocks for every client, no manual YAML/JSON authoring needed.
+
+(If you only want the MCP adapter without the RAG server, `pipx install getbased-mcp` is a smaller ~10 MB alternative.)
 
 ### Hermes Agent example
 
@@ -69,9 +69,8 @@ Add it to your agent's MCP config with your token and gateway URL. Works with an
 ```yaml
 mcp_servers:
   getbased:
-    command: python3
-    args:
-      - /path/to/getbased_mcp.py
+    command: getbased-mcp
+    args: []
     env:
       GETBASED_GATEWAY: https://sync.getbased.health
       GETBASED_TOKEN: your-token
@@ -86,7 +85,10 @@ getbased-mcp provides these tools:
 | `getbased_lab_context` | Full lab summary — values, ranges, trends, context cards, supplements, goals |
 | `getbased_section` | Query a specific section (hormones, biometrics, etc.) or list available sections |
 | `getbased_list_profiles` | List all profiles by name and ID |
-| `knowledge_search` | Semantic search over your knowledge base. Requires a Lens RAG server running locally (port 8321 by default, configurable via `LENS_URL`). Degrades gracefully — the lab-context tools keep working even if no RAG server is reachable. |
+| `knowledge_search` | Semantic search over your knowledge base. Requires a lens RAG server (default: `http://127.0.0.1:8322`, configurable via `LENS_URL`). Degrades gracefully — the lab-context tools keep working even if no RAG server is reachable. |
+| `knowledge_list_libraries` | List all libraries on the RAG server with their ids + which is active |
+| `knowledge_activate_library` | Switch the active library. Subsequent searches target the new one. |
+| `knowledge_stats` | Per-source chunk counts for the active library — useful for diagnosing missing results |
 | `getbased_lens_config` | Show the Custom Knowledge Source endpoint + key from getbased, so the agent can stay in sync with what the PWA is configured to query. |
 
 ## Security
