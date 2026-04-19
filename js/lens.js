@@ -473,6 +473,15 @@ export function renderCustomLensSection() {
         <input type="text" class="api-key-input" id="lens-test-probe-input" value="${escapeAttr(cfg.testProbe || DEFAULT_TEST_PROBE)}" placeholder="${escapeAttr(DEFAULT_TEST_PROBE)}" style="margin-top:4px">
         <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Sent to your endpoint on <strong>Save &amp; Test</strong> to verify the connection. Pick a query your documents should have good matches for.</div>
       </div>
+      <!-- Library management lives on the dashboard. One-line pointer
+           so users understand the split of responsibilities — this
+           panel is "which server to use"; the dashboard is "what's
+           inside the server". Deep-linking isn't possible without
+           knowing the user's network topology (laptop vs VM vs
+           tunnel), so a text hint is the honest answer. -->
+      <div style="margin-top:14px;padding:10px 12px;border-left:3px solid var(--accent);background:var(--bg-secondary);font-size:11.5px;color:var(--text-muted);line-height:1.6">
+        Chat grounds on the server's <strong>active library</strong>. To create or switch libraries, ingest documents, or pick embedding models, run <code style="font-family:var(--font-mono,monospace);font-size:11px">getbased-dashboard serve</code> (typically at <code style="font-family:var(--font-mono,monospace);font-size:11px">http://127.0.0.1:8323</code>) — it manages the same server this panel points at.
+      </div>
     </div>
 
     <div id="lens-local-fields" style="${browserFieldsStyle}">
