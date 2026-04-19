@@ -397,7 +397,7 @@ export function renderCustomLensSection() {
   const externalFieldsStyle = isExternal ? '' : 'display:none';
 
   return `<div class="ai-provider-panel">
-    <div class="ai-provider-desc">A Knowledge Base grounds the AI's analysis in real documents you provide — research papers, clinical guides, personal notes. Add your documents below and the AI references them when answering your questions.</div>
+    <div class="ai-provider-desc">Optional. A Knowledge Base grounds the AI's answers in documents you provide — research papers, clinical guides, personal notes. Add your documents below and the AI cites them when answering chat questions. <a href="/docs/guide/interpretive-lens.html" target="_blank" rel="noopener" style="color:var(--accent)">Learn more →</a></div>
     <div class="api-key-status" id="lens-status-chip">${statusChip}${lastInfo}</div>
 
     <div style="margin-top:10px">
@@ -408,8 +408,8 @@ export function renderCustomLensSection() {
       </div>
       <div style="font-size:11px;color:var(--text-muted);margin-top:6px">
         ${isBrowser
-          ? 'Runs entirely in this browser. No install — first use downloads a small AI model (~100 MB); after that it works offline.'
-          : 'Connect to a knowledge server you run, or one run by someone you trust.'}
+          ? 'Runs entirely in this browser. No install — first use downloads a small AI model (~100 MB); after that it works offline. Good for a few hundred documents.'
+          : 'Connect to a RAG server on your machine or LAN. Best for large corpora (thousands of files) and hardware-accelerated retrieval.'}
       </div>
     </div>
 
@@ -445,31 +445,33 @@ export function renderCustomLensSection() {
       <!-- Setup hint: point users at getbased-rag as the reference
            implementation of the external-server protocol. Saves the
            "where do I even start" hunt through docs. -->
-      <div style="margin-top:8px;padding:10px 12px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;font-size:11.5px;color:var(--text-muted);line-height:1.6">
-        <strong style="color:var(--text-primary);font-weight:600">New here?</strong>
-        The reference server is <a href="https://github.com/elkimek/getbased-agents/tree/main/packages/rag" target="_blank" rel="noopener" style="color:var(--accent)">getbased-rag</a> — a one-command install, runs on <code style="font-family:var(--font-mono,monospace);font-size:11px">127.0.0.1:8322</code> by default.
-        <div style="margin-top:6px;font-family:var(--font-mono,monospace);font-size:11px;background:var(--bg-primary);padding:6px 10px;border-radius:4px;color:var(--text-primary)">pipx install "getbased-agent-stack[full]"</div>
-        <div style="margin-top:6px">Then <code style="font-family:var(--font-mono,monospace);font-size:11px">lens serve</code> to start the server, <code style="font-family:var(--font-mono,monospace);font-size:11px">lens key</code> to get the API key to paste below. Or add <a href="https://github.com/elkimek/getbased-agents/tree/main/packages/dashboard" target="_blank" rel="noopener" style="color:var(--accent)">getbased-dashboard</a> for a browser UI (library management, drag-drop ingest, per-library model picker).</div>
+      <div style="margin-top:8px;padding:12px 14px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text-muted);line-height:1.6">
+        <div><strong style="color:var(--text-primary);font-weight:600">Need a server?</strong> The reference implementation is <a href="https://github.com/elkimek/getbased-agents/tree/main/packages/rag" target="_blank" rel="noopener" style="color:var(--accent)">getbased-rag</a> — one command, runs on <code style="font-family:var(--font-mono,monospace);font-size:11px">127.0.0.1:8322</code>:</div>
+        <div style="margin-top:8px;font-family:var(--font-mono,monospace);font-size:11.5px;background:var(--bg-primary);padding:8px 12px;border-radius:4px;color:var(--text-primary);line-height:1.8">pipx install "getbased-agent-stack[full]"<br>lens serve&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--text-muted)"># start the server</span><br>lens key&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--text-muted)"># prints the bearer token for below</span></div>
+        <div style="margin-top:8px">Or add <a href="https://github.com/elkimek/getbased-agents/tree/main/packages/dashboard" target="_blank" rel="noopener" style="color:var(--accent)">getbased-dashboard</a> for a browser UI with library management, drag-drop ingest, and a per-library embedding-model picker. Already have a server? Skip this and fill in the fields below.</div>
       </div>
       <!-- Display name: only meaningful for external-server, which is a
            remote endpoint rather than a named library. in-browser derives
            the chip label from the active library name. -->
-      <div style="margin-top:8px">
+      <div style="margin-top:12px">
         <label style="font-size:12px;color:var(--text-muted)" for="lens-name-input">Display name</label>
         <input type="text" class="api-key-input" id="lens-name-input" value="${escapeAttr(cfg.name)}" placeholder="e.g. Functional Medicine Library" style="margin-top:4px">
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Shown in the chat-header badge when this source is feeding answers.</div>
       </div>
-      <div style="margin-top:8px">
+      <div style="margin-top:10px">
         <label style="font-size:12px;color:var(--text-muted)" for="lens-url-input">Endpoint URL</label>
-        <input type="text" class="api-key-input" id="lens-url-input" value="${escapeAttr(cfg.url)}" placeholder="https://your-server.example.com/query" style="margin-top:4px">
+        <input type="text" class="api-key-input" id="lens-url-input" value="${escapeAttr(cfg.url)}" placeholder="http://127.0.0.1:8322/query" style="margin-top:4px">
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Full URL to the <code style="font-family:var(--font-mono,monospace);font-size:11px">POST /query</code> endpoint. For local <code style="font-family:var(--font-mono,monospace);font-size:11px">lens serve</code>, it's <code style="font-family:var(--font-mono,monospace);font-size:11px">http://127.0.0.1:8322/query</code>.</div>
       </div>
-      <div style="margin-top:8px">
+      <div style="margin-top:10px">
         <label style="font-size:12px;color:var(--text-muted)" for="lens-key-input">API key</label>
-        <input type="password" class="api-key-input" id="lens-key-input" value="${escapeAttr(keySet ? '••••••••' : '')}" placeholder="Your access key" style="margin-top:4px">
+        <input type="password" class="api-key-input" id="lens-key-input" value="${escapeAttr(keySet ? '••••••••' : '')}" placeholder="Bearer token (run: lens key)" style="margin-top:4px">
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Encrypted at rest on this device. Never sent to any third party.</div>
       </div>
-      <div style="margin-top:8px">
+      <div style="margin-top:10px">
         <label style="font-size:12px;color:var(--text-muted)" for="lens-test-probe-input">Test query</label>
         <input type="text" class="api-key-input" id="lens-test-probe-input" value="${escapeAttr(cfg.testProbe || DEFAULT_TEST_PROBE)}" placeholder="${escapeAttr(DEFAULT_TEST_PROBE)}" style="margin-top:4px">
-        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Sent to your endpoint on Save &amp; Test to verify the connection. Pick a query your documents should have good matches for.</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Sent to your endpoint on <strong>Save &amp; Test</strong> to verify the connection. Pick a query your documents should have good matches for.</div>
       </div>
     </div>
 
