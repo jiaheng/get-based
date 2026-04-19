@@ -40,7 +40,7 @@ The nine context cards sit in a grid under the heading "What your GP won't ask y
 
 - Health Goals
 - Medical Conditions
-- Diet
+- Diet & Digestion
 - Exercise
 - Sleep & Rest
 - Light & Circadian

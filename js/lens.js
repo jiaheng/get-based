@@ -8,7 +8,7 @@ import { hashString, showNotification, showConfirmDialog, showPromptDialog, isDe
 const CONFIG_KEY = 'labcharts-lens-config';
 const SECRET_KEY = 'labcharts-lens-key';
 
-// testProbe — per-user "canary" query used by Save & Test to verify the
+// testProbe — per-user "canary" query used by Save + connect to verify the
 // endpoint. Default is health-themed because getbased's audience typically
 // indexes health research, but any user with a different domain corpus (legal
 // docs, code docs, recipes…) can change it so the test result reflects their
@@ -442,14 +442,39 @@ export function renderCustomLensSection() {
     ` : ''}
 
     <div id="lens-remote-fields" style="${externalFieldsStyle}">
-      <!-- Setup hint: one install, one server. The stack bundles the
-           RAG server + optional dashboard UI + MCP adapter, so the
-           user doesn't need to reason about which package to pick. -->
-      <div style="margin-top:8px;padding:12px 14px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text-muted);line-height:1.6">
-        <div><strong style="color:var(--text-primary);font-weight:600">Need a server?</strong> Install <a href="https://github.com/elkimek/getbased-agents" target="_blank" rel="noopener" style="color:var(--accent)">getbased-agent-stack</a> — one command, runs on <code style="font-family:var(--font-mono,monospace);font-size:11px">127.0.0.1:8322</code>:</div>
-        <div style="margin-top:8px;font-family:var(--font-mono,monospace);font-size:11.5px;background:var(--bg-primary);padding:8px 12px;border-radius:4px;color:var(--text-primary);line-height:1.8">pipx install "getbased-agent-stack[full]"<br>lens serve&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--text-muted)"># start the server</span><br>lens key&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--text-muted)"># prints the bearer token for below</span></div>
-        <div style="margin-top:8px">Already have a server? Skip this and fill in the fields below.</div>
-      </div>
+      <!-- Integrated setup flow. The agent-stack bundles rag + dashboard
+           + MCP — one install, three services — so the narrative below
+           tells users exactly the steps they'd follow in order on a
+           fresh machine. Much better than the old two disconnected hint
+           boxes (top "here's the install", bottom "oh also there's a
+           dashboard") that forced users to stitch the story together
+           themselves. Dashboard 0.6.0 shipped a one-click login URL
+           + show/copy API key, so the terminal-only "lens key" path is
+           now the fallback, not the default flow. -->
+      <details class="lens-setup-details" style="margin-top:8px;padding:12px 14px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text-muted);line-height:1.6" open>
+        <summary style="cursor:pointer;color:var(--text-primary);font-weight:600;font-size:13px;user-select:none;list-style:none">🚀 New here? 3-minute setup</summary>
+        <div style="margin-top:10px">
+          <div style="margin-bottom:10px"><strong style="color:var(--text-primary)">1. Install (once):</strong></div>
+          <div style="font-family:var(--font-mono,monospace);font-size:11.5px;background:var(--bg-primary);padding:8px 12px;border-radius:4px;color:var(--text-primary);line-height:1.8">pipx install "getbased-agent-stack[full]"</div>
+          <div style="font-size:11px;margin-top:4px;opacity:0.85"><code style="font-family:var(--font-mono,monospace);font-size:11px">[full]</code> adds PDF/DOCX parsers + ONNX acceleration (~500 MB).</div>
+        </div>
+        <div style="margin-top:14px">
+          <div style="margin-bottom:10px"><strong style="color:var(--text-primary)">2. Start both services</strong> (leave both terminals open):</div>
+          <div style="font-family:var(--font-mono,monospace);font-size:11.5px;background:var(--bg-primary);padding:8px 12px;border-radius:4px;color:var(--text-primary);line-height:1.8">lens serve&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--text-muted)"># RAG engine → http://127.0.0.1:8322</span><br>getbased-dashboard serve&nbsp;&nbsp;<span style="color:var(--text-muted)"># web UI     → http://127.0.0.1:8323</span></div>
+          <div style="font-size:11px;margin-top:4px;opacity:0.85">The dashboard prints a <a href="/docs/guide/interpretive-lens.html#one-click-login" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:underline">one-click login URL</a> at startup — click it to open the UI. Running unattended? Drop both into systemd user units.</div>
+        </div>
+        <div style="margin-top:14px">
+          <div style="margin-bottom:10px"><strong style="color:var(--text-primary)">3. In the dashboard:</strong></div>
+          <div style="font-size:12px;line-height:1.7">
+            • <strong>Knowledge</strong> tab — create a library, drop files in, wait for indexing<br>
+            • <strong>MCP</strong> tab → <strong>Environment</strong> panel — copy <code style="font-family:var(--font-mono,monospace);font-size:11px">LENS_API_KEY</code> (show/copy button)
+          </div>
+        </div>
+        <div style="margin-top:14px">
+          <div style="margin-bottom:6px"><strong style="color:var(--text-primary)">4. Back here</strong> — paste the bearer into <em>API key</em> below, hit <em>Save + connect</em>.</div>
+        </div>
+        <div style="margin-top:14px;font-size:11px;padding-top:10px;border-top:1px dashed var(--border)">Already have a server? Skip this and fill in the fields below.</div>
+      </details>
       <!-- Display name: only meaningful for external-server, which is a
            remote endpoint rather than a named library. in-browser derives
            the chip label from the active library name. -->
@@ -461,26 +486,23 @@ export function renderCustomLensSection() {
       <div style="margin-top:10px">
         <label style="font-size:12px;color:var(--text-muted)" for="lens-url-input">Endpoint URL</label>
         <input type="text" class="api-key-input" id="lens-url-input" value="${escapeAttr(cfg.url)}" placeholder="http://127.0.0.1:8322/query" style="margin-top:4px">
-        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Full URL to the <code style="font-family:var(--font-mono,monospace);font-size:11px">POST /query</code> endpoint. For local <code style="font-family:var(--font-mono,monospace);font-size:11px">lens serve</code>, it's <code style="font-family:var(--font-mono,monospace);font-size:11px">http://127.0.0.1:8322/query</code>.</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Include the <code style="font-family:var(--font-mono,monospace);font-size:11px">/query</code> path — it's the specific endpoint the chat hits, not the server root.</div>
       </div>
       <div style="margin-top:10px">
         <label style="font-size:12px;color:var(--text-muted)" for="lens-key-input">API key</label>
-        <input type="password" class="api-key-input" id="lens-key-input" value="${escapeAttr(keySet ? '••••••••' : '')}" placeholder="Bearer token (run: lens key)" style="margin-top:4px">
-        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Encrypted at rest on this device. Never sent to any third party.</div>
+        <input type="password" class="api-key-input" id="lens-key-input" value="${escapeAttr(keySet ? '••••••••' : '')}" placeholder="Bearer token" style="margin-top:4px">
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Paste from the dashboard's <em>MCP → Environment</em> panel, or run <code style="font-family:var(--font-mono,monospace);font-size:11px">lens key</code> in a terminal on the server. Encrypted at rest on this device; never sent to any third party.</div>
       </div>
       <div style="margin-top:10px">
         <label style="font-size:12px;color:var(--text-muted)" for="lens-test-probe-input">Test query</label>
         <input type="text" class="api-key-input" id="lens-test-probe-input" value="${escapeAttr(cfg.testProbe || DEFAULT_TEST_PROBE)}" placeholder="${escapeAttr(DEFAULT_TEST_PROBE)}" style="margin-top:4px">
-        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Sent to your endpoint on <strong>Save &amp; Test</strong> to verify the connection. Pick a query your documents should have good matches for.</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Sent to your endpoint on <strong>Save + connect</strong> to verify the connection. Pick a query your documents should have good matches for.</div>
       </div>
-      <!-- Library management lives on the dashboard. One-line pointer
-           so users understand the split of responsibilities — this
-           panel is "which server to use"; the dashboard is "what's
-           inside the server". Deep-linking isn't possible without
-           knowing the user's network topology (laptop vs VM vs
-           tunnel), so a text hint is the honest answer. -->
-      <div style="margin-top:14px;padding:10px 12px;border-left:3px solid var(--accent);background:var(--bg-secondary);font-size:11.5px;color:var(--text-muted);line-height:1.6">
-        Chat grounds on the server's <strong>active library</strong>. To create or switch libraries, ingest documents, or pick embedding models, run <code style="font-family:var(--font-mono,monospace);font-size:11px">getbased-dashboard serve</code> (typically at <code style="font-family:var(--font-mono,monospace);font-size:11px">http://127.0.0.1:8323</code>) — it manages the same server this panel points at.
+      <!-- Footnote: the panel points at a server; the server's libraries
+           are managed in the dashboard. Integrated flow covers this in
+           step 3, so the once-separate callout is now a terse reminder. -->
+      <div style="margin-top:14px;padding:8px 12px;border-left:3px solid var(--accent);background:var(--bg-secondary);font-size:11.5px;color:var(--text-muted);line-height:1.5">
+        Chat grounds on the server's <strong>active library</strong>. Switch or create libraries from the dashboard — this panel only says which server to talk to.
       </div>
     </div>
 
@@ -510,7 +532,7 @@ export function renderCustomLensSection() {
     </div>
 
     <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
-      <button class="import-btn import-btn-primary" onclick="handleSaveLensConfig()">${isExternal ? 'Save &amp; Test' : 'Save'}</button>
+      <button class="import-btn import-btn-primary" onclick="handleSaveLensConfig()">${isExternal ? 'Save + connect' : 'Save'}</button>
       ${connected ? '<button class="import-btn import-btn-secondary" onclick="handleClearLensCache()">Clear cache</button>' : ''}
       ${connected ? '<button class="import-btn import-btn-secondary" onclick="handleRemoveLens()">Remove</button>' : ''}
     </div>

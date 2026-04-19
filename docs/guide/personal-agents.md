@@ -49,7 +49,7 @@ Easiest path — launch the dashboard and copy a paste-ready config block for yo
 getbased-dashboard serve   # http://127.0.0.1:8323
 ```
 
-Open it in a browser, paste your bearer key at the auth gate, switch to the **MCP** tab, pick your client from the dropdown (Claude Desktop / Claude Code / Cursor / Cline / Hermes), click **copy**. Paste into the client's config file (path shown in the dashboard).
+Open it in a browser, paste your bearer key at the auth gate, switch to the **MCP** tab, pick your client from the dropdown (Claude Desktop / Claude Code / Cursor / Cline / Hermes / OpenClaw), click **copy**. Paste into the client's config file (path shown in the dashboard).
 
 Click **Run test** to verify the adapter spawns correctly before switching to your agent.
 

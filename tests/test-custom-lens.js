@@ -48,7 +48,7 @@ return (async function() {
   // The old hardcoded 'vitamin D deficiency supplementation' only made sense
   // for health-focused RAGs. Custom Knowledge Source must work for any
   // domain — legal, code docs, recipes — so the probe is now per-user and
-  // the "Save & Test" result separates connectivity (pass/fail) from
+  // the "Save + connect" result separates connectivity (pass/fail) from
   // passage count (informational).
   assert('DEFAULT_TEST_PROBE constant defined', lensSrc.includes('DEFAULT_TEST_PROBE ='));
   assert('testProbe included in DEFAULT_CONFIG', lensSrc.includes('testProbe:') && lensSrc.includes('DEFAULT_CONFIG'));
@@ -264,7 +264,7 @@ return (async function() {
     assert('lens section has key input', !!document.getElementById('lens-key-input'));
     assert('lens section has topk input', !!document.getElementById('lens-topk-input'));
     assert('lens section has enabled toggle', !!document.getElementById('lens-enabled-toggle'));
-    assert('lens section has Save & Test button', lensSection.innerHTML.includes('handleSaveLensConfig'));
+    assert('lens section has Save + connect button', lensSection.innerHTML.includes('handleSaveLensConfig'));
   }
   window.closeSettingsModal();
 

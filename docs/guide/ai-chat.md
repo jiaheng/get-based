@@ -105,7 +105,7 @@ Web search injects search results into the AI's context, significantly increasin
 :::
 
 ::: tip Availability
-Web search is available with **OpenRouter** and **Venice** only. The toggle is hidden when using other providers.
+Web search is available with **OpenRouter**, **PPQ**, and **Venice**. The toggle is hidden when using other providers.
 :::
 
 ## Per-Marker AI Explanations
@@ -165,9 +165,15 @@ Using Claude Sonnet 4 via OpenRouter (~$3/$15 per 1M input/output tokens):
 
 Every AI response includes a footnote showing the model name, estimated cost, and total token count — so you always know exactly what you're spending.
 
+## Knowledge Base grounding
+
+If you've set up a **Knowledge Base** (Settings → AI → Knowledge Base) — either the in-browser backend or an external server running `lens serve` — the chat automatically grounds its answers in the most relevant passages from your documents. A small badge appears in the chat header when this is active, showing the library name that's feeding answers.
+
+The chat fetches the top-K passages per question (default 5, configurable 1–10) and folds them into the AI's context before the response streams. The AI cites them inline when relevant. See [Interpretive Lens](/guide/interpretive-lens) for setup.
+
 ## Choosing a Provider
 
-The AI chat works with any of the five supported providers: OpenRouter, Routstr, PPQ, Venice, or Local AI. See [AI Providers](/guide/ai-providers) to configure your key or local server. The chat is not available until a provider is set up.
+The AI chat works with any of the six supported providers: OpenRouter, Routstr, PPQ, Venice, Local AI, or Custom (any OpenAI-compatible endpoint). See [AI Providers](/guide/ai-providers) to configure your key or local server. The chat is not available until a provider is set up.
 
 ::: warning
 Conversations are stored locally in your browser and encrypted if you have set a passphrase. The last 30 messages from each conversation are sent to the AI provider with every request to maintain context. Your provider's privacy policy applies to that data.

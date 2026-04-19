@@ -64,25 +64,42 @@ Good for: typical use — a few dozen to a few hundred documents. No install, no
 
 Connect to a knowledge server you run (or one run by someone you trust). Useful for larger corpora, shared libraries, or when you want hardware-accelerated retrieval that your browser can't match.
 
-One command stands one up — the [**getbased-agent-stack**](https://github.com/elkimek/getbased-agents) bundles the RAG server, an optional browser dashboard, and the MCP adapter for AI clients:
+One command stands one up — the [**getbased-agent-stack**](https://github.com/elkimek/getbased-agents) bundles the RAG server, the browser dashboard, and the MCP adapter for AI clients:
 
 ```bash
-pipx install "getbased-agent-stack[full]"
-lens serve                 # starts the RAG server on 127.0.0.1:8322
-lens key                   # prints the bearer token to paste below
+pipx install "getbased-agent-stack[full]"       # install (once)
+
+lens serve                                      # RAG engine → http://127.0.0.1:8322
+getbased-dashboard serve                        # web UI     → http://127.0.0.1:8323
 ```
 
-Optional: run `getbased-dashboard serve` to get a browser UI for library management + drag-drop ingest at `http://127.0.0.1:8323`. Any server speaking the same protocol also works — see the endpoint contract below to roll your own.
+Leave both terminals open (or drop them into systemd user units). The dashboard handles library management, drag-drop ingest, embedding-model selection, MCP config generation, and agent-activity inspection. Any server speaking the same `POST /query` protocol also works — see the endpoint contract below to roll your own.
+
+#### One-click login {#one-click-login}
+
+When `getbased-dashboard serve` starts, it prints a magic URL tagged `[LOGIN-URL]`:
+
+```
+[LOGIN-URL] http://127.0.0.1:8323/?key=aSNUTKG4…6GW4
+```
+
+Click it — the dashboard auto-authenticates using the `?key=` query parameter (same convention as Jupyter Lab, Open WebUI, and code-server). The bearer key is stripped from the URL after capture so it doesn't linger in browser history.
+
+Lost the URL?
+
+- `getbased-dashboard login-url` re-prints it on demand
+- Under systemd: `journalctl --user -u getbased-dashboard | grep LOGIN-URL`
+- Or just visit `http://127.0.0.1:8323` directly — the "I don't have my key" help block on the sign-in page shows the exact commands for your install.
 
 ### Setup (external server)
 
 1. Open **Settings → AI → Knowledge Base → External server**
 2. Toggle **Enable Knowledge Source**
 3. Enter a display name (e.g., *Functional Medicine Library*)
-4. Enter your server URL (HTTPS, or `http://localhost:8322` for a local getbased-rag)
-5. Enter your API key (encrypted at rest on your device; get it with `lens key`)
+4. Enter your server URL (HTTPS, or `http://127.0.0.1:8322/query` for a local `lens serve`)
+5. Enter your API key — paste from the dashboard's **MCP → Environment** panel, or run `lens key` on the server. Encrypted at rest on your device
 6. Set how many passages to retrieve per query (1–10, default 5)
-7. Click **Save & Test** — a test query runs to confirm the connection works
+7. Click **Save + connect** — a test query runs to confirm the connection works
 
 When active, a **badge** appears in the chat header showing the knowledge source is being used.
 
