@@ -62,15 +62,26 @@ Good for: typical use — a few dozen to a few hundred documents. No install, no
 
 ### External server
 
-Connect to a knowledge server you run (or one run by someone you trust). Useful for larger corpora, shared libraries, or when you want hardware-accelerated retrieval that your browser can't match. Roll your own using the endpoint contract described below — any server that accepts a `POST /query` with bearer auth and returns a `{chunks: […]}` payload works.
+Connect to a knowledge server you run (or one run by someone you trust). Useful for larger corpora, shared libraries, or when you want hardware-accelerated retrieval that your browser can't match.
+
+The easiest way to stand one up is [**getbased-rag**](https://github.com/elkimek/getbased-agents/tree/main/packages/rag) — the Python reference implementation that speaks this exact contract. It's a `pipx install` away and comes with [getbased-dashboard](https://github.com/elkimek/getbased-agents/tree/main/packages/dashboard), a browser UI for creating libraries, picking embedding models, and drag-drop ingest:
+
+```bash
+pipx install "getbased-agent-stack[full]"
+lens serve                 # starts the RAG server on 127.0.0.1:8322
+lens key                   # prints the bearer token to paste below
+getbased-dashboard serve   # optional — web UI at 127.0.0.1:8323
+```
+
+Any server speaking the same protocol also works — see the endpoint contract below to roll your own.
 
 ### Setup (external server)
 
 1. Open **Settings → AI → Knowledge Base → External server**
 2. Toggle **Enable Knowledge Source**
 3. Enter a display name (e.g., *Functional Medicine Library*)
-4. Enter your server URL (HTTPS, or `http://localhost` for local servers)
-5. Enter your API key (encrypted at rest on your device)
+4. Enter your server URL (HTTPS, or `http://localhost:8322` for a local getbased-rag)
+5. Enter your API key (encrypted at rest on your device; get it with `lens key`)
 6. Set how many passages to retrieve per query (1–10, default 5)
 7. Click **Save & Test** — a test query runs to confirm the connection works
 

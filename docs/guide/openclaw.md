@@ -23,10 +23,10 @@ Go to **Settings → Data → Agent Access** and toggle it on. A read-only token
 ### 2. Install getbased-mcp
 
 ```bash
-git clone https://github.com/elkimek/getbased-agents.git
-cd getbased-agents/packages/mcp
-pip install .
+pipx install getbased-mcp
 ```
+
+(Or `pipx install "getbased-agent-stack[full]"` to get the adapter alongside a local RAG knowledge server and a browser [dashboard](https://github.com/elkimek/getbased-agents/tree/main/packages/dashboard) in one command.)
 
 ### 3. Configure OpenClaw
 
