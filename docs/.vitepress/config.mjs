@@ -83,7 +83,7 @@ export default defineConfig({
             { text: 'Encryption', link: '/guide/encryption' },
             { text: 'Cross-Device Sync', link: '/guide/cross-device-sync' },
             { text: 'Agent Access', link: '/guide/agent-access' },
-            { text: 'OpenClaw', link: '/guide/openclaw' },
+            { text: 'Personal Agents', link: '/guide/personal-agents' },
             { text: 'Folder Backup', link: '/guide/folder-backup' },
             { text: 'Tor Access', link: '/guide/tor-access' }
           ]
