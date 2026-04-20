@@ -58,6 +58,77 @@ return (async function() {
     !/['"]vitamin D deficiency supplementation['"][\s\S]{0,100}_doQuery/.test(lensSrc),
     'the probe should be read from config, not passed literally to _doQuery');
   assert('renderCustomLensSection includes lens-test-probe-input field', lensSrc.includes('lens-test-probe-input'));
+  // Per-library embedding-model picker (step 3). Library creation now
+  // opens a custom dialog with name + model radio group instead of the
+  // plain showPromptDialog. If this ever regresses back to a bare
+  // prompt, users would silently default every new library to MiniLM
+  // regardless of their hardware tier — wasted quality jump.
+  assert('_showLibraryCreateDialog helper defined',
+    lensSrc.includes('function _showLibraryCreateDialog'),
+    'step 3 library-creation dialog must exist');
+  assert('_libCreate forwards model argument',
+    /async function _libCreate\(name,\s*model\)/.test(lensSrc));
+  assert('handleLibraryNew no longer calls showPromptDialog as primary path',
+    /handleLibraryNew[\s\S]{0,2000}_showLibraryCreateDialog/.test(lensSrc),
+    'the rich dialog should be tried before the plain prompt fallback');
+  assert('Plain prompt fallback still exists for pre-worker-ready case',
+    lensSrc.includes('function _plainNamePrompt'));
+  assert('Dialog renders radio group with name "lens-create-model"',
+    lensSrc.includes('name="lens-create-model"'));
+  assert('Dialog includes locked-at-creation warning',
+    /locked at creation/i.test(lensSrc),
+    'users need to know switching model means re-indexing');
+
+  // Worker-side invariants (things mock-mode round-trips can't exercise).
+  // Fetched once, reused across several assertions below.
+  const workerSrcForPicker = await fetch('js/lens-local-worker.js').then((r) => r.text());
+
+  // DEFAULT_MODEL_KEY must be a real entry in the MODELS catalog — a
+  // typo here silently makes the back-compat fallback point at
+  // "undefined", crashing at _applyModelSpec on every library-less
+  // fresh install.
+  assert('DEFAULT_MODEL_KEY referenced in MODELS catalog',
+    /DEFAULT_MODEL_KEY\s*=\s*['"]([a-z0-9-]+)['"]/.test(workerSrcForPicker)
+      && (() => {
+        const key = workerSrcForPicker.match(/DEFAULT_MODEL_KEY\s*=\s*['"]([a-z0-9-]+)['"]/)[1];
+        return new RegExp(`['"]${key}['"]\\s*:\\s*\\{[\\s\\S]*?id:`).test(workerSrcForPicker);
+      })(),
+    'DEFAULT_MODEL_KEY must name an actual catalog entry');
+
+  // Tier thresholds — regressing these (e.g. a refactor dropping a
+  // zero from 150 → 15) would silently shift every user's
+  // recommended model. Pin the two numeric boundaries.
+  assert('Tier 3 threshold at < 30 ms/embed',
+    /msPerEmbed\s*<\s*30\b/.test(workerSrcForPicker));
+  assert('Tier 2 threshold at < 150 ms/embed',
+    /msPerEmbed\s*<\s*150\b/.test(workerSrcForPicker));
+
+  // Library migration — existing libraries (pre-1.21.4) lack a .model
+  // field and must get auto-filled at registry-load time. Missing
+  // migration = crash in _applyModelSpec(undefined).
+  assert('loadOrMigrateLibraries auto-fills missing lib.model',
+    /loadOrMigrateLibraries[\s\S]*?lib\.model\s*=\s*DEFAULT_MODEL_KEY/.test(workerSrcForPicker),
+    'back-compat migration for libraries that predate the model field');
+
+  // Model-swap branch in handleActivateLibrary — activating a library
+  // with a different model than the currently-loaded one must
+  // trigger _loadEmbedder. Mock mode skips the live reload so this
+  // can only be pinned via source inspection.
+  assert('handleActivateLibrary reloads embedder on model change',
+    /handleActivateLibrary[\s\S]*?targetModelKey\s*!==\s*_modelKey[\s\S]*?_loadEmbedder\(/.test(workerSrcForPicker),
+    'library switch must swap the model when they differ');
+
+  // Recommended-model logic in the dialog: must step DOWN through
+  // tiers looking for a match, prefer English, and fall back to the
+  // first catalog entry if nothing matches. Any of these regressing
+  // would break the "recommended for your device" UX silently.
+  assert('Dialog recommendation prefers English within a tier',
+    /candidates\.find\(\(c\)\s*=>\s*c\.spec\.language\s*===\s*['"]en['"]\)/.test(lensSrc)
+      || /spec\.language\s*===\s*['"]en['"]/.test(lensSrc));
+  assert('Dialog recommendation steps down tiers when no match',
+    /for\s*\(\s*let\s+t\s*=\s*detectedTier;\s*t\s*>=?\s*1;\s*t--\s*\)/.test(lensSrc),
+    'no tier-3-capable device should be told "no recommendation available" — step down to tier 2 or 1');
+
   // Setup copy uses the one-command curl installer. If someone ever
   // regresses this back to the two-terminal `lens serve` flow without
   // also updating the landing-site installer, users would be left with

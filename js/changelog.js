@@ -5,6 +5,14 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.21.4', date: '2026-04-20', title: 'Per-library embedding model',
+    items: [
+      'New libraries in the on-device Knowledge Base can pick from four embedding models — MiniLM (fast, small), BGE-small (balanced English), Multilingual-E5 (100+ languages), and BGE-base (best English quality).',
+      'Hardware-matched recommendation — the library-creation dialog benchmarks your device on first load and pre-selects the strongest model your hardware can run smoothly.',
+      'Model is locked at library creation — switching would mean re-indexing every document, so the choice is made upfront. Existing libraries continue on MiniLM; no forced migration.',
+    ]
+  },
+  {
     version: '1.21.3', date: '2026-04-20', title: 'One-command Knowledge Base setup',
     items: [
       'External server setup collapsed from 4 steps to 1 terminal command — <code>curl -sSL https://getbased.health/install.sh | bash</code> installs the agent stack, starts the services, prints a one-click dashboard login URL.',
