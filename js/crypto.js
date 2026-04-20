@@ -658,7 +658,7 @@ export async function changePassphrase() {
 
 // ═══════════════════════════════════════════════
 // Backup/restore, auto-backup, folder backup extracted to js/backup.js
-import { buildBackupSnapshot, exportEncryptedBackup, importEncryptedBackup, scheduleAutoBackup, getAutoBackupSnapshots, restoreAutoBackup, openBackupDB, initFolderBackup, pickFolderForBackup, reauthorizeFolderBackup, removeFolderBackup, getFolderBackupState, renderFolderBackupSection, MAX_SNAPSHOTS } from './backup.js';
+import { buildBackupSnapshot, exportEncryptedBackup, importEncryptedBackup, scheduleAutoBackup, getAutoBackupSnapshots, restoreAutoBackup, openBackupDB, initFolderBackup, getFolderBackupState, renderFolderBackupSection, MAX_SNAPSHOTS } from './backup.js';
 export { buildBackupSnapshot, scheduleAutoBackup, openBackupDB, initFolderBackup };
 
 // ═══════════════════════════════════════════════

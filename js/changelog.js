@@ -5,6 +5,13 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.21.7', date: '2026-04-20', title: 'Dead-code cleanup',
+    items: [
+      'Removed ~140 lines of unreachable code — five unused Routstr/PPQ wallet helpers, four stale lens-library aliases, and a handful of debug/migration helpers with zero callers. No user-visible change; faster loads and a smaller codebase to reason about.',
+      'Dropped 19 unused imports across the module tree. Makes it easier to see what each file actually depends on.',
+    ]
+  },
+  {
     version: '1.21.6', date: '2026-04-20', title: 'Docs accuracy sweep',
     items: [
       'README provider table now lists all 6 AI providers (Custom API was missing from the table, though it\'s been supported since v1.16.1).',

@@ -1,8 +1,8 @@
 // client-list.js — Client List modal for managing profiles
 
 import { state } from './state.js';
-import { escapeHTML, escapeAttr, hashString } from './utils.js';
-import { getProfiles, getActiveProfileId, createProfile, switchProfile, deleteProfile, updateProfileMeta, getAllTags, getLocationCache, latitudeToBand, getLatitudeFromLocation, detectLatitudeWithAI, getProfileHeight, setProfileHeight } from './profile.js';
+import { escapeHTML, escapeAttr } from './utils.js';
+import { getProfiles, getActiveProfileId, createProfile, switchProfile, deleteProfile, updateProfileMeta, getAllTags, getLocationCache, latitudeToBand, getLatitudeFromLocation, detectLatitudeWithAI, getProfileHeight } from './profile.js';
 import { LATITUDE_BANDS } from './constants.js';
 import { getAvatarColor } from './nav.js';
 

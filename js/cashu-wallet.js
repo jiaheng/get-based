@@ -2,7 +2,7 @@
 // Uses cashu-ts (vendored IIFE → global `cashuts`) for protocol operations.
 // Proofs stored in IndexedDB, included in backup/sync.
 
-import { isDebugMode, showConfirmDialog } from './utils.js';
+import { isDebugMode } from './utils.js';
 import { encryptedSetItem, encryptedGetItem } from './crypto.js';
 
 // ═══════════════════════════════════════════════

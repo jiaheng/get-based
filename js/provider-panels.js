@@ -2,7 +2,7 @@
 
 import { escapeHTML, escapeAttr, showNotification, showConfirmDialog } from './utils.js';
 import {
-  getVeniceKey, saveVeniceKey, getOpenRouterKey, saveOpenRouterKey, getAIProvider, setAIProvider,
+  getVeniceKey, saveVeniceKey, getOpenRouterKey, saveOpenRouterKey, setAIProvider,
   getVeniceModel, setVeniceModel, getOpenRouterModel, setOpenRouterModel,
   getOllamaMainModel, setOllamaMainModel, getOllamaPIIModel, setOllamaPIIModel,
   getOllamaPIIUrl, setOllamaPIIUrl,

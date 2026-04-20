@@ -1172,12 +1172,6 @@ export function handleLibraryDelete() {
   });
 }
 
-// Legacy aliases for any outstanding callsites.
-export const handleLocalLensActivate = handleLibraryActivate;
-export const handleLocalLensNewLibrary = handleLibraryNew;
-export const handleLocalLensRenameLibrary = handleLibraryRename;
-export const handleLocalLensDeleteLibrary = handleLibraryDelete;
-
 export function handleToggleLens(checked) {
   saveLensConfig({ enabled: checked });
   _updateLensStatusChip();
@@ -1223,6 +1217,4 @@ Object.assign(window, {
   handleLensBackendChange,
   handleLocalLensDeleteDoc, handleLocalLensClear,
   handleLibraryActivate, handleLibraryNew, handleLibraryRename, handleLibraryDelete,
-  handleLocalLensActivate, handleLocalLensNewLibrary,
-  handleLocalLensRenameLibrary, handleLocalLensDeleteLibrary,
 });

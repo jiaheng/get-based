@@ -3,14 +3,14 @@
 import { state } from './state.js';
 import { CHAT_PERSONALITIES, CHAT_SYSTEM_PROMPT, LATITUDE_BANDS } from './constants.js';
 import { calculateCost, formatCost, trackUsage } from './schema.js';
-import { escapeHTML, showNotification, showConfirmDialog, isDebugMode, formatValue, getStatus, hasCardContent } from './utils.js';
+import { escapeHTML, showNotification, showConfirmDialog, formatValue, getStatus, hasCardContent } from './utils.js';
 import { getActiveData, getEffectiveRange, getEffectiveRangeForDate, getLatestValueIndex, saveImportedData } from './data.js';
 import { encryptedSetItem, encryptedGetItem, getEncryptionEnabled } from './crypto.js';
 import { getProfileLocation, setProfileLocation, getLatitudeFromLocation, getLocationCache, latitudeToBand, detectLatitudeWithAI, getProfiles, renameProfile, setProfileSex, setProfileDob } from './profile.js';
 import { callClaudeAPI, hasAIProvider, isAIPaused, setAIPaused, getAIProvider, getActiveModelId, getActiveModelDisplay, supportsVision, supportsWebSearch, isVeniceE2EEActive } from './api.js';
 import { resizeImage, isValidImageType, formatImageBlock, buildVisionContent } from './image-utils.js';
 import { onChatSaved } from './sync.js';
-import { buildLabContext, invalidateLabContextCache, getContextSummary, isGroupInAIContext, injectLensChunks } from './lab-context.js';
+import { buildLabContext, getContextSummary, injectLensChunks } from './lab-context.js';
 import { hasLens, queryLens, updateLensIndicator } from './lens.js';
 import { applyInlineMarkdown, renderMarkdown } from './markdown.js';
 
@@ -1398,18 +1398,6 @@ async function _generateSummary() {
   } finally {
     _summaryAbortController = null;
   }
-}
-
-export function regenerateSummary() {
-  const thread = state.chatThreads.find(t => t.id === state.currentThreadId);
-  if (thread) {
-    delete thread.summary;
-    delete thread.summaryDate;
-    delete thread.summaryModel;
-    delete thread.summaryCost;
-    saveChatThreadIndex();
-  }
-  _generateSummary();
 }
 
 // ── Standalone summary storage ──
@@ -3333,7 +3321,6 @@ Object.assign(window, {
   saveChatHistory,
   clearChatHistory,
   summarizeThread,
-  regenerateSummary,
   closeSummaryModal,
   updateSummaryButton,
   viewSavedSummary,
