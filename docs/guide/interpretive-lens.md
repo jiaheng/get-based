@@ -64,16 +64,52 @@ Good for: typical use — a few dozen to a few hundred documents. No install, no
 
 Connect to a knowledge server you run (or one run by someone you trust). Useful for larger corpora, shared libraries, or when you want hardware-accelerated retrieval that your browser can't match.
 
-One command stands one up — the [**getbased-agent-stack**](https://github.com/elkimek/getbased-agents) bundles the RAG server, the browser dashboard, and the MCP adapter for AI clients:
+**One command on Linux** — the [**getbased-agent-stack**](https://github.com/elkimek/getbased-agents) bundles the RAG server, the browser dashboard, and the MCP adapter:
 
 ```bash
-pipx install "getbased-agent-stack[full]"       # install (once)
-
-lens serve                                      # RAG engine → http://127.0.0.1:8322
-getbased-dashboard serve                        # web UI     → http://127.0.0.1:8323
+curl -sSL https://getbased.health/install.sh | bash
 ```
 
-Leave both terminals open (or drop them into systemd user units). The dashboard handles library management, drag-drop ingest, embedding-model selection, MCP config generation, and agent-activity inspection. Any server speaking the same `POST /query` protocol also works — see the endpoint contract below to roll your own.
+The script auto-detects `uv` or `pipx` (install one first if you have neither), pulls `getbased-agent-stack[full]`, and starts the RAG server (`:8322`) and dashboard (`:8323`) as systemd user services. On non-systemd hosts (macOS, Docker, WSL1) the install succeeds but the services don't auto-start — see the manual alternative below.
+
+**Linux only for auto-start.** macOS and Windows users can install the package, but need to run the services manually (or wait for launchd / Windows Service support).
+
+#### Cautious? Review or verify first
+
+```bash
+# Read the script
+curl -sSL https://getbased.health/install.sh | less
+
+# Or download and verify against the published hash
+curl -sSL https://getbased.health/install.sh       -o install.sh
+curl -sSL https://getbased.health/install.sh.sha256 | sha256sum -c
+bash install.sh
+```
+
+Source: [github.com/elkimek/get-based-site/blob/main/install.sh](https://github.com/elkimek/get-based-site/blob/main/install.sh).
+
+#### Manual install (macOS, Windows, WSL1, or if you'd rather not run a shell script from the internet)
+
+```bash
+# pipx — --include-deps exposes lens + getbased-dashboard on PATH
+pipx install --include-deps "getbased-agent-stack[full]"
+
+# or uv
+uv tool install \
+  --with-executables-from getbased-rag \
+  --with-executables-from getbased-dashboard \
+  --with-executables-from getbased-mcp \
+  "getbased-agent-stack[full]"
+
+# One-shot configuration (non-interactive)
+getbased-stack init --yes
+
+# On non-systemd hosts, run the services in two terminals
+lens serve                # RAG engine → http://127.0.0.1:8322
+getbased-dashboard serve  # web UI     → http://127.0.0.1:8323
+```
+
+The dashboard handles library management, drag-drop ingest, embedding-model selection, MCP config generation, and agent-activity inspection. Any server speaking the same `POST /query` protocol also works — see the endpoint contract below to roll your own.
 
 #### One-click login {#one-click-login}
 
@@ -93,13 +129,15 @@ Lost the URL?
 
 ### Setup (external server)
 
-1. Open **Settings → AI → Knowledge Base → External server**
-2. Toggle **Enable Knowledge Source**
-3. Enter a display name (e.g., *Functional Medicine Library*)
-4. Enter your server URL (HTTPS, or `http://127.0.0.1:8322/query` for a local `lens serve`)
-5. Enter your API key — paste from the dashboard's **MCP → Environment** panel, or run `lens key` on the server. Encrypted at rest on your device
-6. Set how many passages to retrieve per query (1–10, default 5)
-7. Click **Save + connect** — a test query runs to confirm the connection works
+After the installer (or manual install) finishes, open the dashboard — the installer prints a one-click login URL at the end. Then:
+
+1. Dashboard → **Knowledge** tab — create a library, drop your files in, wait for indexing.
+2. Dashboard → **MCP** → **Environment** → copy the `LENS_API_KEY`.
+3. In the app: **Settings → AI → Knowledge Base → External server**.
+4. Toggle **Enable Knowledge Source**, enter a display name (e.g., *Functional Medicine Library*), paste the API key.
+5. Endpoint URL defaults to `http://127.0.0.1:8322/query` — leave it alone for a local install, or point at an HTTPS endpoint if you're hosting the server elsewhere.
+6. Set how many passages to retrieve per query (1–10, default 5).
+7. Click **Save + connect** — a test query runs to confirm the connection works.
 
 When active, a **badge** appears in the chat header showing the knowledge source is being used.
 

@@ -35,18 +35,36 @@ Go to **Settings → Data → Agent Access** and toggle it on. A read-only token
 
 ### 2. Install the agent stack
 
+Linux, one command:
+
 ```bash
-pipx install "getbased-agent-stack[full]"
+curl -sSL https://getbased.health/install.sh | bash
 ```
 
-One command — installs the MCP adapter, a local RAG knowledge server, and a browser setup dashboard. (If you only want the MCP adapter and nothing else, `pipx install getbased-mcp` is a smaller ~10 MB alternative with no RAG dependencies.)
+Installs the MCP adapter, the local RAG knowledge server, and the browser setup dashboard; starts the latter two as systemd user services. [Read the script first](https://github.com/elkimek/get-based-site/blob/main/install.sh) if you prefer to audit before running — the [Interpretive Lens guide](./interpretive-lens.md#external-server) lists the `sha256sum -c` verification command.
+
+macOS / Windows / WSL1, or prefer a manual path:
+
+```bash
+pipx install --include-deps "getbased-agent-stack[full]"
+# or with uv:
+# uv tool install --with-executables-from getbased-rag \
+#                 --with-executables-from getbased-dashboard \
+#                 --with-executables-from getbased-mcp \
+#                 "getbased-agent-stack[full]"
+getbased-stack init --yes      # writes config, generates API key
+```
+
+If you only want the MCP adapter and nothing else (no RAG), `pipx install getbased-mcp` is a smaller ~10 MB alternative.
 
 ### 3. Generate client config
 
-Easiest path — launch the dashboard and copy a paste-ready config block for your client:
+Launch the dashboard (or open it via the one-click login URL the installer prints at the end) and copy a paste-ready config block for your client:
 
 ```bash
-getbased-dashboard serve   # http://127.0.0.1:8323
+# Already running via systemd after install.sh — visit http://127.0.0.1:8323
+# Manual install? run:
+getbased-dashboard serve       # http://127.0.0.1:8323
 ```
 
 Open it in a browser, paste your bearer key at the auth gate, switch to the **MCP** tab, pick your client from the dropdown (Claude Desktop / Claude Code / Cursor / Cline / Hermes / OpenClaw), click **copy**. Paste into the client's config file (path shown in the dashboard).
@@ -70,13 +88,15 @@ In your agent, ask anything about your labs. The adapter exposes these tools:
 
 ## Running a local knowledge base
 
-`getbased-agent-stack[full]` includes `lens serve` — a local RAG server. Run it and you get `knowledge_search` grounded in your own document corpus (research papers, clinical guides, personal notes):
+`getbased-agent-stack[full]` includes `lens serve` — a local RAG server. `install.sh` already starts it as a systemd user service on Linux; on other platforms, run it manually:
 
 ```bash
 lens serve                   # starts on 127.0.0.1:8322
 # ingest via the dashboard's Knowledge tab, or CLI:
 lens ingest ~/Documents/research
 ```
+
+With `lens serve` running, `knowledge_search` is grounded in your own document corpus (research papers, clinical guides, personal notes).
 
 See [Interpretive Lens](./interpretive-lens.md#external-server) for the full RAG setup — including per-library embedding models (MiniLM for speed, BGE-M3 for quality) and connecting the same server to the in-app AI chat via the External server backend.
 
