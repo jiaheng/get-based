@@ -35,8 +35,75 @@
 
 import { chunkText, mmrSelect } from './lens-local-utils.js';
 
-const MODEL_ID = 'Xenova/all-MiniLM-L6-v2';
-const DIM = 384;
+// Catalog of embedding models available for per-library selection.
+// Each entry names the transformers.js model ID, its output dimension,
+// a tier hint for the UI's "recommended for your device" logic, and a
+// download-size hint. Adding an entry here makes it pickable without
+// additional worker changes — the library-creation UI (step 3) reads
+// this catalog.
+//
+// `downloadMB` is approximate (the quantized q8/q4 variants that
+// transformers.js actually fetches, not the full fp32 weights). Tier
+// matches the msPerEmbed bands used in `_benchmarkEmbedder()`.
+const MODELS = {
+  'all-minilm': {
+    id: 'Xenova/all-MiniLM-L6-v2',
+    label: 'MiniLM (fast, small)',
+    dim: 384,
+    tier: 1,
+    downloadMB: 22,
+    language: 'en',
+    notes: 'Current default. Universally works, including WASM-only.',
+  },
+  'bge-small-en': {
+    id: 'Xenova/bge-small-en-v1.5',
+    label: 'BGE-small (balanced English)',
+    dim: 384,
+    tier: 2,
+    downloadMB: 33,
+    language: 'en',
+    notes: 'Better English retrieval than MiniLM. Same 384-dim.',
+  },
+  'multilingual-e5-small': {
+    id: 'Xenova/multilingual-e5-small',
+    label: 'Multilingual-E5 (100+ languages)',
+    dim: 384,
+    tier: 2,
+    downloadMB: 40,
+    language: 'multi',
+    notes: 'Covers 100+ languages. Strong default if your corpus isn\'t English-only.',
+  },
+  'bge-base-en': {
+    id: 'Xenova/bge-base-en-v1.5',
+    label: 'BGE-base (best English)',
+    dim: 768,
+    tier: 3,
+    downloadMB: 110,
+    language: 'en',
+    notes: 'Highest quality for English. Needs WebGPU or a fast CPU.',
+  },
+};
+
+/// Default model key for back-compat. Existing libraries without a
+/// model field are migrated to this; new libraries without an explicit
+/// choice inherit it. Keep as MiniLM — it's what users already have
+/// indexed and switching the default would force a re-embed.
+const DEFAULT_MODEL_KEY = 'all-minilm';
+
+/// Current model driving the embedder. These are mutable because the
+/// active library dictates which model gets loaded — switching library
+/// can trigger a model swap. See _applyModelSpec().
+let _modelKey = DEFAULT_MODEL_KEY;
+let MODEL_ID = MODELS[DEFAULT_MODEL_KEY].id;
+let DIM = MODELS[DEFAULT_MODEL_KEY].dim;
+
+function _applyModelSpec(modelKey) {
+  const spec = MODELS[modelKey] || MODELS[DEFAULT_MODEL_KEY];
+  _modelKey = MODELS[modelKey] ? modelKey : DEFAULT_MODEL_KEY;
+  MODEL_ID = spec.id;
+  DIM = spec.dim;
+}
+
 // Chunk target: 800 chars, overlap 50, min 50 — matches lens/src/lens/store.py
 // defaults so ingest behavior is consistent across browser + Python backends.
 const CHUNK_SIZE = 800;
@@ -45,6 +112,8 @@ const CHUNK_MIN = 50;
 
 let _embedder = null;
 let _embedderBackend = 'wasm';  // 'webgpu' | 'wasm' — whichever transformers.js actually booted
+let _benchmarkVerdict = null;   // Latest benchmark result for the currently-loaded model; null until first load
+let _transformersModule = null; // Lazy-cached transformers.js module so library swaps don't re-import
 let _abortRequested = false;    // set by 'abort' message, checked between embeds in handleIngest
 let _rootDir = null;            // OPFS FileSystemDirectoryHandle at /lens-local/
 
@@ -92,7 +161,7 @@ self.addEventListener('message', async (e) => {
       case 'clear':             return handleClear();
       case 'list_libraries':    return handleListLibraries();
       case 'activate_library':  return handleActivateLibrary(msg.libraryId);
-      case 'create_library':    return handleCreateLibrary(msg.name);
+      case 'create_library':    return handleCreateLibrary(msg.name, msg.model);
       case 'rename_library':    return handleRenameLibrary(msg.libraryId, msg.name);
       case 'delete_library':    return handleDeleteLibrary(msg.libraryId);
       // Abort is a side-channel signal — skips the serial queue on the
@@ -125,6 +194,27 @@ async function handleInit() {
     return;
   }
 
+  // Library registry must load BEFORE the embedder — the active library's
+  // model field determines which model we boot. Previously this ran in
+  // the opposite order and MODEL_ID was a compile-time constant; after
+  // step 2 (per-library models) the active library picks the model.
+  await openOpfs();
+
+  const modelKey = _libraryModelKey(_activeId);
+  await _loadEmbedder(modelKey);
+
+  // Manifest + corpus load AFTER embedder so MODEL_ID + DIM reflect the
+  // active library's configured model. The manifest.dim/modelId check
+  // in loadActiveManifest compares against these module-level values.
+  await loadActiveManifest();
+  await loadCorpusIntoMemory();
+  self.postMessage(readyPayload());
+}
+
+/// Lazy-cache the transformers.js module. Library swaps that trigger a
+/// model reload shouldn't re-import the ~2 MB bundle.
+async function _ensureTransformers() {
+  if (_transformersModule) return _transformersModule;
   // Library loads from jsdelivr — the npm-dist bundle has bare module
   // specifiers (`onnxruntime-web/webgpu` etc.) that browsers can't resolve
   // without a bundler, and jsdelivr auto-rewrites them. Pin @4.1.0 for
@@ -137,7 +227,7 @@ async function handleInit() {
   // ESM locally via a bundler pass at vendor-update time; tracked as
   // phase 2c in project_browser_local_lens.md. Until then, trust is
   // rooted in jsdelivr + our CSP's cdn.jsdelivr.net allowlist.
-  const { pipeline, env } = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.1.0');
+  const mod = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.1.0');
   // ORT picks one of 4 WASM variants at runtime (plain / asyncify / jsep /
   // jspi) based on what the browser supports — SharedArrayBuffer gates
   // threaded, cross-origin isolation headers gate jsep, etc. Vendoring
@@ -149,7 +239,19 @@ async function handleInit() {
   // Running inside a Worker. ORT's default spawns a NESTED worker for
   // inference which is 10-15× slower than in-worker execution.
   // https://onnxruntime.ai/docs/tutorials/web/env-flags.html#envwasmproxy
-  env.backends.onnx.wasm.proxy = false;
+  mod.env.backends.onnx.wasm.proxy = false;
+  _transformersModule = mod;
+  return mod;
+}
+
+/// Load (or reload) the embedder for the given model key. Handles
+/// WebGPU detection with diagnostic logging, slow-shader-compile
+/// fallback, and the tier-benchmark pass. Updates module-level
+/// MODEL_ID / DIM / _embedder / _embedderBackend / _benchmarkVerdict.
+async function _loadEmbedder(modelKey) {
+  _applyModelSpec(modelKey);
+  console.log(`[lens-local] Loading embedder: ${_modelKey} (${MODEL_ID}, ${DIM}d)`);
+  const { pipeline } = await _ensureTransformers();
 
   // Try WebGPU first. On a Polaris AMD box + Intel iGPU, WebGPU through
   // ANGLE typically runs 3-10× faster than WASM for transformer
@@ -219,25 +321,21 @@ async function handleInit() {
   }
 
   // Embedding-tier benchmark — measures ms/embed on the final (post-
-  // fallback) backend with real-chunk-sized text. Runs 5 embeds and
-  // reports the median so the first-embed JIT warmup doesn't skew the
-  // number. Verdict is informational only right now — step 1 of the
-  // per-library embedding model picker. Thresholds are initial best
-  // guesses to be calibrated against real user hardware.
+  // fallback) backend with real-chunk-sized text. Verdict gets stashed
+  // at _benchmarkVerdict and propagated through readyPayload so the
+  // main thread can surface a tier recommendation in the library-
+  // creation UI (step 3).
   try {
-    const verdict = await _benchmarkEmbedder();
+    _benchmarkVerdict = await _benchmarkEmbedder();
     console.log(
-      `[lens-local] Embedding benchmark: ${_embedderBackend}, ` +
-      `${verdict.msPerEmbed.toFixed(0)} ms/embed median → tier ${verdict.tier} (${verdict.tierLabel})`
+      `[lens-local] Embedding benchmark: ${_modelKey} on ${_embedderBackend}, ` +
+      `${_benchmarkVerdict.msPerEmbed.toFixed(0)} ms/embed median → tier ${_benchmarkVerdict.tier} (${_benchmarkVerdict.tierLabel})`
     );
-    self._lensLocalBenchmark = verdict; // stash for devtools inspection
+    self._lensLocalBenchmark = _benchmarkVerdict; // devtools inspection
   } catch (err) {
     console.warn('[lens-local] benchmark failed:', err?.message || err);
+    _benchmarkVerdict = null;
   }
-
-  await openOpfs();
-  await loadCorpusIntoMemory();
-  self.postMessage(readyPayload());
 }
 
 // 5 synthetic chunks at ~500-600 char lengths — representative of the
@@ -296,9 +394,37 @@ function readyPayload() {
     libraries: _libraries.slice(),
     activeId: _activeId,
     activeName: _libraries.find((l) => l.id === _activeId)?.name || '',
+    activeModel: _modelKey,
     numChunks: _manifest?.numChunks || 0,
     numDocs: _manifest?.docs?.length || 0,
+    // Embedder metadata so the main thread can surface "recommended for
+    // your device" hints in the library-creation UI without running a
+    // second benchmark. Null if benchmark hasn't completed yet or failed.
+    embedder: _benchmarkVerdict
+      ? {
+          backend: _embedderBackend,
+          modelKey: _modelKey,
+          modelId: MODEL_ID,
+          dim: DIM,
+          msPerEmbed: _benchmarkVerdict.msPerEmbed,
+          tier: _benchmarkVerdict.tier,
+          tierLabel: _benchmarkVerdict.tierLabel,
+        }
+      : null,
+    // Catalog is static (compile-time) but we pass it through so the
+    // renderer doesn't need to duplicate the model list.
+    models: MODELS,
   };
+}
+
+/// Look up a library's configured model key with a back-compat fallback
+/// to DEFAULT_MODEL_KEY. Accepts an id or a library object.
+function _libraryModelKey(libOrId) {
+  const lib = typeof libOrId === 'string'
+    ? _libraries.find((l) => l.id === libOrId)
+    : libOrId;
+  const key = lib?.model;
+  return (key && MODELS[key]) ? key : DEFAULT_MODEL_KEY;
 }
 
 async function openOpfs() {
@@ -337,6 +463,21 @@ async function loadOrMigrateLibraries() {
     _libraries = registry.libraries;
     _activeId = registry.activeId || _libraries[0].id;
     if (!_libraries.some((l) => l.id === _activeId)) _activeId = _libraries[0].id;
+    // Per-library embedding-model migration. Pre-step-2 libraries had no
+    // `model` field; they were all MiniLM by definition. Fill it in so
+    // downstream code can read `lib.model` uniformly, and persist once
+    // so the file format matches on next load.
+    let migrated = false;
+    for (const lib of _libraries) {
+      if (!lib.model || !MODELS[lib.model]) {
+        lib.model = DEFAULT_MODEL_KEY;
+        migrated = true;
+      }
+    }
+    if (migrated) {
+      console.log('[lens-local] Filled missing lib.model → ' + DEFAULT_MODEL_KEY);
+      await persistLibraries();
+    }
     return;
   }
 
@@ -359,7 +500,7 @@ async function loadOrMigrateLibraries() {
         console.warn(`[lens-local] Migration: ${fn} skip — ${e.message}`);
       }
     }
-    _libraries = [{ id: 'default', name: DEFAULT_LIBRARY_NAME, createdAt: Date.now() }];
+    _libraries = [{ id: 'default', name: DEFAULT_LIBRARY_NAME, createdAt: Date.now(), model: DEFAULT_MODEL_KEY }];
     _activeId = 'default';
     await persistLibraries();
     return;
@@ -367,7 +508,7 @@ async function loadOrMigrateLibraries() {
 
   // Fresh install — create a single default library so the UI always has
   // something to show. User can rename it later.
-  _libraries = [{ id: 'default', name: DEFAULT_LIBRARY_NAME, createdAt: Date.now() }];
+  _libraries = [{ id: 'default', name: DEFAULT_LIBRARY_NAME, createdAt: Date.now(), model: DEFAULT_MODEL_KEY }];
   _activeId = 'default';
   await _rootDir.getDirectoryHandle('default', { create: true });
   await persistLibraries();
@@ -647,6 +788,9 @@ function handleListLibraries() {
 
 /// Swap the active library. Loads the new library's manifest + corpus
 /// into memory; the previous library's memory is released for GC.
+/// If the new library uses a different embedding model than the
+/// currently-loaded one, reload the embedder first — 1-2s on a
+/// browser-cached model, longer if it needs to be downloaded.
 async function handleActivateLibrary(libraryId) {
   if (!_libraries.some((l) => l.id === libraryId)) {
     throw new Error(`No library with id "${libraryId}"`);
@@ -657,23 +801,39 @@ async function handleActivateLibrary(libraryId) {
   }
   _activeId = libraryId;
   await persistLibraries();
+
+  // Reload embedder if the target library uses a different model.
+  // Skip for mock mode (tests pin _embedder to mockEmbedder and don't
+  // want it replaced by a jsdelivr import).
+  const targetModelKey = _libraryModelKey(_activeId);
+  const params = new URLSearchParams(self.location.search || '');
+  if (targetModelKey !== _modelKey && !params.has('mock')) {
+    console.log(`[lens-local] Library model change: ${_modelKey} → ${targetModelKey}, reloading embedder`);
+    await _loadEmbedder(targetModelKey);
+  }
+
   await loadActiveManifest();
   await loadCorpusIntoMemory();
   self.postMessage(readyPayload());
 }
 
-/// Create a new library with the given display name. Generates a random
-/// id for the directory — decoupled from the user-facing name so renames
-/// don't require moving data.
-async function handleCreateLibrary(name) {
+/// Create a new library with the given display name and (optional)
+/// embedding model. Generates a random id for the directory —
+/// decoupled from the user-facing name so renames don't require moving
+/// data. Model is locked at creation time: existing chunks are embedded
+/// with whatever the library was created under, and switching model
+/// would require re-embedding every document. The UI (step 3) offers
+/// the choice at this gate.
+async function handleCreateLibrary(name, modelKey) {
   const label = String(name || '').trim() || 'Untitled library';
   const id = `lib-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-  _libraries.push({ id, name: label, createdAt: Date.now() });
+  const model = (modelKey && MODELS[modelKey]) ? modelKey : DEFAULT_MODEL_KEY;
+  _libraries.push({ id, name: label, createdAt: Date.now(), model });
   await _rootDir.getDirectoryHandle(id, { create: true });
   await persistLibraries();
   self.postMessage({
     type: 'library_created',
-    id, name: label,
+    id, name: label, model,
     libraries: _libraries.slice(),
     activeId: _activeId,
   });

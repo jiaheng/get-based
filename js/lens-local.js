@@ -153,9 +153,9 @@ export async function openLocalLens() {
           numDocs: r.numDocs,
         };
       },
-      createLibrary: async (name) => {
-        const r = await send({ type: 'create_library', name });
-        return { id: r.id, name: r.name, libraries: r.libraries };
+      createLibrary: async (name, model) => {
+        const r = await send({ type: 'create_library', name, model });
+        return { id: r.id, name: r.name, model: r.model, libraries: r.libraries };
       },
       renameLibrary: async (libraryId, name) => {
         const r = await send({ type: 'rename_library', libraryId, name });
