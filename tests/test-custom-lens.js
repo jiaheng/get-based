@@ -58,6 +58,26 @@ return (async function() {
     !/['"]vitamin D deficiency supplementation['"][\s\S]{0,100}_doQuery/.test(lensSrc),
     'the probe should be read from config, not passed literally to _doQuery');
   assert('renderCustomLensSection includes lens-test-probe-input field', lensSrc.includes('lens-test-probe-input'));
+  // Per-library embedding-model picker (step 3). Library creation now
+  // opens a custom dialog with name + model radio group instead of the
+  // plain showPromptDialog. If this ever regresses back to a bare
+  // prompt, users would silently default every new library to MiniLM
+  // regardless of their hardware tier — wasted quality jump.
+  assert('_showLibraryCreateDialog helper defined',
+    lensSrc.includes('function _showLibraryCreateDialog'),
+    'step 3 library-creation dialog must exist');
+  assert('_libCreate forwards model argument',
+    /async function _libCreate\(name,\s*model\)/.test(lensSrc));
+  assert('handleLibraryNew no longer calls showPromptDialog as primary path',
+    /handleLibraryNew[\s\S]{0,2000}_showLibraryCreateDialog/.test(lensSrc),
+    'the rich dialog should be tried before the plain prompt fallback');
+  assert('Plain prompt fallback still exists for pre-worker-ready case',
+    lensSrc.includes('function _plainNamePrompt'));
+  assert('Dialog renders radio group with name "lens-create-model"',
+    lensSrc.includes('name="lens-create-model"'));
+  assert('Dialog includes locked-at-creation warning',
+    /locked at creation/i.test(lensSrc),
+    'users need to know switching model means re-indexing');
   // Setup copy uses the one-command curl installer. If someone ever
   // regresses this back to the two-terminal `lens serve` flow without
   // also updating the landing-site installer, users would be left with

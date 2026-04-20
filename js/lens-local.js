@@ -102,6 +102,15 @@ export async function openLocalLens() {
       libraries: ready.libraries || [],
       activeId: ready.activeId,
       activeName: ready.activeName,
+      activeModel: ready.activeModel,
+      // Embedder-tier benchmark — used by the library-creation UI to
+      // default-select a model matched to the user's hardware. Null
+      // until the benchmark completes.
+      embedder: ready.embedder || null,
+      // Static catalog of pickable models (keyed by short id). Frozen
+      // at worker-boot time; library creation reads this to render
+      // the picker.
+      models: ready.models || {},
 
       // Corpus ops — all scope to the active library.
       ingest: async (files) => {
