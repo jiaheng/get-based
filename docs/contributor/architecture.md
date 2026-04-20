@@ -23,7 +23,7 @@ data/
   demo-male.json    — Male demo profile (Alex)
 
 tests/
-  test-*.js         — 41 browser-based test files
+  test-*.js         — browser-based + node-side test files (see run-tests.js for the list)
   verify-modules.js — Module integrity assertions
 
 js/

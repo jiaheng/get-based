@@ -54,11 +54,24 @@ Agent Access works with any agent that can call the context gateway's API using 
 
 ### Install
 
+Linux, one command:
+
 ```bash
-pipx install "getbased-agent-stack[full]"
+curl -sSL https://getbased.health/install.sh | bash
 ```
 
-Add it to your agent's MCP config with your token. Works with any MCP-compatible agent — Claude Code, Claude Desktop, Cursor, Cline, Windsurf, [Hermes Agent](https://github.com/hermes-agent/hermes-agent), [OpenClaw](https://openclaw.ai), and more. Run `getbased-dashboard serve` afterwards — it generates paste-ready config blocks for every client, no manual YAML/JSON authoring needed.
+Runs `pipx install --include-deps "getbased-agent-stack[full]"` (or the uv equivalent) and starts the RAG server + browser dashboard as systemd user services. See the [Interpretive Lens guide](./interpretive-lens.md#external-server) for the full one-shot flow including the hash-verification path.
+
+macOS / Windows / manual:
+
+```bash
+pipx install --include-deps "getbased-agent-stack[full]"
+# --include-deps is required — without it, the MCP / rag / dashboard
+# binaries from the bundled dependencies aren't exposed on your PATH
+getbased-stack init --yes   # scaffolds config + starts services where supported
+```
+
+Add it to your agent's MCP config with your token. Works with any MCP-compatible agent — Claude Code, Claude Desktop, Cursor, Cline, Windsurf, [Hermes Agent](https://github.com/hermes-agent/hermes-agent), [OpenClaw](https://openclaw.ai), and more. The dashboard (at `http://127.0.0.1:8323` after `install.sh` or `getbased-dashboard serve`) generates paste-ready config blocks for every client, no manual YAML/JSON authoring needed.
 
 (If you only want the MCP adapter without the RAG server, `pipx install getbased-mcp` is a smaller ~10 MB alternative.)
 

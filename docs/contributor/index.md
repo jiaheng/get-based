@@ -33,7 +33,7 @@ Open `http://localhost:8000`. The app loads immediately — no compilation, no `
 | [Module Reference](./module-reference) | All 42 JS modules: exports, purpose, window bindings |
 | [Cross-Module Patterns](./cross-module-patterns) | Window exports, circular dep avoidance, state access |
 | [Data Pipeline](./data-pipeline) | `getActiveData()` walkthrough, marker keys, values arrays |
-| [Testing](./testing) | 41 test files, `./run-tests.sh`, writing new assertions |
+| [Testing](./testing) | headless test runner, `./run-tests.sh`, writing new assertions |
 | [Deployment](./deployment) | Vercel config, CSP, service worker cache, PWA |
 | [Storage Schema](./storage-schema) | All localStorage keys, importedData structure, IndexedDB |
 
@@ -68,6 +68,6 @@ const currentProfile = state.currentProfile;
 
 ## Pull request checklist
 
-- Run `./run-tests.sh` — all 41 test files must pass
+- Run `./run-tests.sh` — every test file must pass
 - Bump the SW cache version in `service-worker.js` if any app file changed
 - Update `CLAUDE.md` if you changed architecture, added a module, or changed how a system-level feature works

@@ -78,7 +78,7 @@ There is no linter. Just follow the patterns you see in the existing code.
 
 ## Tests
 
-There are 41 browser-based test files (`test-*.js`). Each is a self-executing IIFE that runs assertions against the live DOM, source code, CSS, and behavior. They don't use a test framework — just a small `assert(name, condition, detail)` helper pattern.
+Test files live in `tests/test-*.js` — a mix of Puppeteer-driven browser tests and a few node-side ones. Browser tests are self-executing IIFEs that run assertions against the live DOM, source code, CSS, and behavior. They don't use a test framework — just a small `assert(name, condition, detail)` helper pattern. Run `ls tests/test-*.js | wc -l` for the current count.
 
 Run all headlessly:
 

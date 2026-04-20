@@ -5,6 +5,15 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.21.6', date: '2026-04-20', title: 'Docs accuracy sweep',
+    items: [
+      'README provider table now lists all 6 AI providers (Custom API was missing from the table, though it\'s been supported since v1.16.1).',
+      'Agent Access + Personal Agents guides updated to lead with the one-command <code>curl | bash</code> installer and the <code>--include-deps</code> pipx flag — without that flag, the MCP / rag / dashboard binaries weren\'t exposed on PATH.',
+      'Electron-era framing removed from helper docstrings and test comments now that the Electron shell has been retired.',
+      'Stale Python-path references (`lens/src/lens/store.py`) in the in-browser worker updated to point at the current `getbased-rag` location.',
+    ]
+  },
+  {
     version: '1.21.5', date: '2026-04-20', title: 'Security hardening',
     items: [
       'Attribute-safe HTML escaping — <code>escapeHTML()</code> now encodes all five HTML-special chars including both quote styles. Closes 31+ attribute-breakout sites across supplements, context cards, client list, chat, views, cycle, EMF, PDF import, and provider panels that were previously vulnerable to self-XSS via user-authored strings containing a bare double quote.',
