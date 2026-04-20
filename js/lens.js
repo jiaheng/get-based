@@ -442,38 +442,41 @@ export function renderCustomLensSection() {
     ` : ''}
 
     <div id="lens-remote-fields" style="${externalFieldsStyle}">
-      <!-- Integrated setup flow. The agent-stack bundles rag + dashboard
-           + MCP — one install, three services — so the narrative below
-           tells users exactly the steps they'd follow in order on a
-           fresh machine. Much better than the old two disconnected hint
-           boxes (top "here's the install", bottom "oh also there's a
-           dashboard") that forced users to stitch the story together
-           themselves. Dashboard 0.6.0 shipped a one-click login URL
-           + show/copy API key, so the terminal-only "lens key" path is
-           now the fallback, not the default flow. -->
+      <!-- One-command install via curl | bash, served from the landing
+           site's Vercel deploy. Hits the same pipx/uv → agent-stack →
+           systemd-user-services flow a user would do by hand, just
+           scripted. Linux-only for now — the installer degrades on
+           macOS/containers (unit files land but don't activate) but
+           auto-start is a systemd-only feature. Source is public so
+           security-conscious users can audit before running. -->
       <details class="lens-setup-details" style="margin-top:8px;padding:12px 14px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text-muted);line-height:1.6" open>
-        <summary style="cursor:pointer;color:var(--text-primary);font-weight:600;font-size:13px;user-select:none;list-style:none">🚀 New here? 3-minute setup</summary>
+        <summary style="cursor:pointer;color:var(--text-primary);font-weight:600;font-size:13px;user-select:none;list-style:none">🚀 New here? One-command setup (Linux)</summary>
         <div style="margin-top:10px">
-          <div style="margin-bottom:10px"><strong style="color:var(--text-primary)">1. Install (once):</strong></div>
-          <div style="font-family:var(--font-mono,monospace);font-size:11.5px;background:var(--bg-primary);padding:8px 12px;border-radius:4px;color:var(--text-primary);line-height:1.8">pipx install "getbased-agent-stack[full]"</div>
-          <div style="font-size:11px;margin-top:4px;opacity:0.85"><code style="font-family:var(--font-mono,monospace);font-size:11px">[full]</code> adds PDF/DOCX parsers + ONNX acceleration (~500 MB).</div>
+          <div style="margin-bottom:10px"><strong style="color:var(--text-primary)">1. Install the agent stack:</strong></div>
+          <div style="font-family:var(--font-mono,monospace);font-size:11.5px;background:var(--bg-primary);padding:8px 12px;border-radius:4px;color:var(--text-primary);line-height:1.8;overflow-wrap:anywhere">curl -sSL https://getbased.health/install.sh | bash</div>
+          <div style="font-size:11px;margin-top:4px;opacity:0.85">Installs via <code style="font-family:var(--font-mono,monospace);font-size:11px">pipx</code> or <code style="font-family:var(--font-mono,monospace);font-size:11px">uv</code> (auto-detected), starts rag + dashboard as systemd user services. <strong>Linux only</strong> — macOS and Windows aren't supported yet (the script installs but services won't auto-start).</div>
         </div>
         <div style="margin-top:14px">
-          <div style="margin-bottom:10px"><strong style="color:var(--text-primary)">2. Start both services</strong> (leave both terminals open):</div>
-          <div style="font-family:var(--font-mono,monospace);font-size:11.5px;background:var(--bg-primary);padding:8px 12px;border-radius:4px;color:var(--text-primary);line-height:1.8">lens serve&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--text-muted)"># RAG engine → http://127.0.0.1:8322</span><br>getbased-dashboard serve&nbsp;&nbsp;<span style="color:var(--text-muted)"># web UI     → http://127.0.0.1:8323</span></div>
-          <div style="font-size:11px;margin-top:4px;opacity:0.85">The dashboard prints a <a href="/docs/guide/interpretive-lens.html#one-click-login" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:underline">one-click login URL</a> at startup — click it to open the UI. Running unattended? Drop both into systemd user units.</div>
-        </div>
-        <div style="margin-top:14px">
-          <div style="margin-bottom:10px"><strong style="color:var(--text-primary)">3. In the dashboard:</strong></div>
+          <div style="margin-bottom:10px"><strong style="color:var(--text-primary)">2. Open the dashboard</strong> — the script prints a <a href="/docs/guide/interpretive-lens.html#one-click-login" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:underline">one-click login URL</a> at the end.</div>
           <div style="font-size:12px;line-height:1.7">
             • <strong>Knowledge</strong> tab — create a library, drop files in, wait for indexing<br>
-            • <strong>MCP</strong> tab → <strong>Environment</strong> panel — copy <code style="font-family:var(--font-mono,monospace);font-size:11px">LENS_API_KEY</code> (show/copy button)
+            • <strong>MCP</strong> tab → <strong>Environment</strong> panel — copy <code style="font-family:var(--font-mono,monospace);font-size:11px">LENS_API_KEY</code>
           </div>
         </div>
         <div style="margin-top:14px">
-          <div style="margin-bottom:6px"><strong style="color:var(--text-primary)">4. Back here</strong> — paste the bearer into <em>API key</em> below, hit <em>Save + connect</em>.</div>
+          <div><strong style="color:var(--text-primary)">3. Paste the bearer</strong> into <em>API key</em> below, hit <em>Save + connect</em>.</div>
         </div>
-        <div style="margin-top:14px;font-size:11px;padding-top:10px;border-top:1px dashed var(--border)">Already have a server? Skip this and fill in the fields below.</div>
+        <!-- Audit/verification block — the audience is security-conscious
+             by definition (they care about grounding health data on their
+             own RAG), so curl | bash deserves an honest review-first path
+             rather than pretending HTTPS is all anyone needs. -->
+        <div style="margin-top:14px;font-size:11px;padding-top:10px;border-top:1px dashed var(--border);line-height:1.55">
+          <strong style="color:var(--text-primary)">Cautious?</strong> Read the script first or verify its hash:<br>
+          <code style="font-family:var(--font-mono,monospace);font-size:11px;display:inline-block;margin-top:4px">curl -sSL https://getbased.health/install.sh | less</code><br>
+          <code style="font-family:var(--font-mono,monospace);font-size:11px;display:inline-block;margin-top:2px">curl -sSL https://getbased.health/install.sh.sha256 | sha256sum -c</code><br>
+          <a href="https://github.com/elkimek/get-based-site/blob/main/install.sh" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:underline">Source on GitHub →</a>
+        </div>
+        <div style="margin-top:10px;font-size:11px">Already have a server? Skip this and fill in the fields below.</div>
       </details>
       <!-- Display name: only meaningful for external-server, which is a
            remote endpoint rather than a named library. in-browser derives

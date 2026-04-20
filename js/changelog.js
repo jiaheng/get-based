@@ -5,6 +5,14 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.21.3', date: '2026-04-20', title: 'One-command Knowledge Base setup',
+    items: [
+      'External server setup collapsed from 4 steps to 1 terminal command — <code>curl -sSL https://getbased.health/install.sh | bash</code> installs the agent stack, starts the services, prints a one-click dashboard login URL.',
+      'Honest security footer in the setup panel: review the script before running, verify against the published SHA256, and a link to the public source on GitHub.',
+      'Linux-only for now (macOS and Windows install the package but can\'t auto-start the services). Explicitly noted in the panel so Mac users aren\'t left guessing.',
+    ]
+  },
+  {
     version: '1.21.2', date: '2026-04-20', title: 'Sync fix on Chrome for Android',
     items: [
       'Cross-device sync now works on Chrome for Android — the pre-flight check was wrongly gating on the SharedWorker API, which Evolu doesn\'t actually use (it uses dedicated Workers + BroadcastChannel + navigator.locks). Removing the spurious gate restores sync for any browser that has the real primitives.',
