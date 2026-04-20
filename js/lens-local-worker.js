@@ -104,8 +104,9 @@ function _applyModelSpec(modelKey) {
   DIM = spec.dim;
 }
 
-// Chunk target: 800 chars, overlap 50, min 50 — matches lens/src/lens/store.py
-// defaults so ingest behavior is consistent across browser + Python backends.
+// Chunk target: 800 chars, overlap 50, min 50 — matches getbased-rag's
+// `packages/rag/src/lens/store.py` defaults so ingest behavior stays
+// consistent across the browser backend and the external-server backend.
 const CHUNK_SIZE = 800;
 const CHUNK_OVERLAP = 50;
 const CHUNK_MIN = 50;

@@ -9,7 +9,7 @@
 /// Split a text into chunks of at most maxSize chars, with `overlap` chars
 /// carried between adjacent chunks. Snaps to whitespace boundaries when
 /// possible so chunks don't end mid-word. Matches the lens Python
-/// chunker's defaults (lens/src/lens/store.py::chunk_text) so retrieval
+/// chunker's defaults (getbased-rag's `packages/rag/src/lens/store.py::chunk_text`) so retrieval
 /// behavior stays consistent across backends.
 export function chunkText(text, maxSize = 800, overlap = 50, minSize = 50) {
   text = String(text || '').trim();

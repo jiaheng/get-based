@@ -60,6 +60,7 @@ Opt-in feature that lets AI agents query your lab context — coding agents (Cla
 | **OpenRouter** | 200+ models (Claude, GPT, Gemini, Grok). Pay with card or USDC. One-click OAuth. |
 | **Venice AI** | Uncensored models with optional E2EE. No-log policy. |
 | **Local AI** | Any OpenAI-compatible server — Ollama, LM Studio, Jan, llama.cpp. Fully offline. Free forever. |
+| **Custom API** | Bring your own OpenAI-compatible endpoint — corporate proxies, self-hosted gateways, any provider with a `/v1/chat/completions` route. Base URL + API key. |
 
 Switch providers anytime. All non-AI features work without a provider configured.
 
@@ -70,7 +71,7 @@ Switch providers anytime. All non-AI features work without a provider configured
 | Open source | GPL-3.0 | Closed source |
 | Cost | Free | Free tier + paid upsell |
 | Data storage | Local browser, encrypted | Cloud (their servers) |
-| AI providers | 5 choices (including fully local) | Locked to one |
+| AI providers | 6 choices (including fully local + bring-your-own) | Locked to one |
 | Lab import | Any PDF, any format, any language | Specific labs/formats only |
 | Biomarkers | 287+ standard + unlimited custom | Limited set |
 | Specialty labs | OAT, fatty acids + custom marker pipeline for any test | Blood only |
@@ -123,7 +124,7 @@ Open `index.html` (or start `node dev-server.js` for development) and the dashbo
 
 ## Testing
 
-45 test files — node-side helpers plus Puppeteer-driven browser assertions — run headlessly:
+Node-side helpers plus Puppeteer-driven browser assertions, all run headlessly (`ls tests/test-*.js | wc -l` for the current count):
 
 ```bash
 ./run-tests.sh

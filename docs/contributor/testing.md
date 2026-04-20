@@ -38,7 +38,7 @@ Every test file defines a local `assert` helper and collects results:
 
 The `detail` argument appears in the failure output — use it to print the actual value that caused the failure.
 
-## The 41 test files
+## The test files
 
 All test files live in the `tests/` directory. Run `ls tests/test-*.js | wc -l` for the current count.
 

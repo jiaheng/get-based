@@ -80,7 +80,7 @@ In your agent, ask anything about your labs. The adapter exposes these tools:
 | `getbased_lab_context` | Full lab summary — values, ranges, trends, context cards, supplements, goals |
 | `getbased_section` | One specific section (hormones, biometrics, etc.) or the section index |
 | `getbased_list_profiles` | List all profiles you track |
-| `knowledge_search` | Semantic search over your Knowledge Base — requires the local RAG server (`lens serve`) to be running. Degrades gracefully when unavailable. |
+| `knowledge_search` | Semantic search over your Knowledge Base — requires the local RAG server running (systemd user service on Linux after `install.sh`, or `lens serve` manually on other platforms). Degrades gracefully when unavailable. |
 | `knowledge_list_libraries` | List RAG libraries + which is active |
 | `knowledge_activate_library` | Switch the active library for subsequent searches |
 | `knowledge_stats` | Per-source chunk counts for diagnosing missing results |

@@ -128,12 +128,12 @@ export function showConfirmDialog(message, onConfirm) {
   document.getElementById("confirm-cancel").focus();
 }
 
-/// Prompt dialog that works in Electron. Chromium disables window.prompt()
-/// in file:// contexts and Electron removed it entirely (security model:
-/// sync dialogs block the renderer and can be abused). Returns a Promise
-/// that resolves to the trimmed string on OK, or null on Cancel / Esc /
-/// backdrop-click. Reuses the confirm-dialog CSS so both dialogs look
-/// consistent.
+/// Promise-based replacement for `window.prompt()`. Browsers block the
+/// native prompt in many common contexts (file://, sandboxed iframes,
+/// cross-origin workers, some PWA configurations) and its synchronous
+/// nature makes it awkward inside async flows. This helper reuses the
+/// confirm-dialog CSS so both dialogs look consistent; resolves to the
+/// trimmed string on OK, or null on Cancel / Esc / backdrop-click.
 export function showPromptDialog(message, { defaultValue = '', okLabel = 'OK', cancelLabel = 'Cancel', placeholder = '' } = {}) {
   return new Promise((resolve) => {
     let overlay = document.getElementById('prompt-dialog-overlay');

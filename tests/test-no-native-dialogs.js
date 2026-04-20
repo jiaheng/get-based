@@ -1,17 +1,16 @@
 #!/usr/bin/env node
 // Guard against window.prompt() / window.confirm() / window.alert() regressions.
-// Electron removed all three (the Chromium team considers blocking modals a
-// security+UX liability), so any of them in js/ would be silently broken on
-// the desktop build and throw "prompt() is and will not be supported" at
-// runtime. The PWA still has them, but if we ever add a desktop build
-// regression, we want it to blow up in CI — not when a user clicks Rename.
+// Native blocking dialogs are a UX liability (they freeze the tab, can't be
+// styled, don't fit dark mode) and flat-out unavailable in several common
+// contexts — sandboxed iframes, file:// PWAs, cross-origin workers, some
+// enterprise browser configurations. We replaced all three with custom
+// Promise-based dialogs (`showConfirmDialog`, `showPromptDialog`, and
+// `showNotification`) and this test pins the replacement: any new call site
+// with a raw window.prompt/confirm/alert breaks CI before it reaches users.
 //
-// Allowed call sites:
-//   - js/utils.js   (defines the showPromptDialog replacement)
-//   - js/lens.js    (comments reference window.prompt)
-// Both matched via the comment line `// Electron strips window.prompt…` or
-// the docstring inside utils.js, which this test tolerates via a
-// whole-line regex excluding comments.
+// Allowed references (docstrings only, never active calls):
+//   - js/utils.js   — docstring for the showPromptDialog replacement
+//   - js/lens.js    — comment referencing the native API in passing
 
 import fs from 'node:fs';
 import path from 'node:path';
