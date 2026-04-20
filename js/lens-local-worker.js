@@ -394,7 +394,13 @@ function readyPayload() {
     libraries: _libraries.slice(),
     activeId: _activeId,
     activeName: _libraries.find((l) => l.id === _activeId)?.name || '',
-    activeModel: _modelKey,
+    // activeModel = the LIBRARY's configured model, not the loaded
+    // embedder's. In normal operation these are the same (handleInit
+    // and handleActivateLibrary sync them via _loadEmbedder), but on
+    // any code path that activates without reloading (mock-mode tests,
+    // future "lazy swap" optimizations) the library's registry field
+    // is the source of truth for the UI.
+    activeModel: _libraryModelKey(_activeId),
     numChunks: _manifest?.numChunks || 0,
     numDocs: _manifest?.docs?.length || 0,
     // Embedder metadata so the main thread can surface "recommended for

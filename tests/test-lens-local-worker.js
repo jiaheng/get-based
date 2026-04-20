@@ -259,6 +259,79 @@ return (async function() {
   assert('fallback library has empty stats',
     afterLast.numChunks === 0);
 
+  // ─── Phase 16: per-library embedding-model picker (v1.21.4+) ───
+  // Contract tests for the MODELS catalog plumbing that backs the
+  // library-creation UI. Mock mode skips the real embedder reload so
+  // these validate metadata persistence only — the actual cross-model
+  // ingest/query test lives in manual QA. Regressing any of these
+  // would silently break the picker for every user.
+  console.log('%c[16] Per-library model picker', 'font-weight:bold');
+  // Re-init to pick up the latest readyPayload shape after the
+  // auto-created fallback library is in place.
+  const modelReady = await roundTrip(worker, { type: 'init' }, 'ready');
+
+  assert('ready payload exposes models catalog',
+    modelReady.models && typeof modelReady.models === 'object' && Object.keys(modelReady.models).length > 0,
+    'UI needs the catalog to render the picker');
+  assert('ready payload exposes activeModel',
+    typeof modelReady.activeModel === 'string' && modelReady.activeModel.length > 0);
+  assert('activeModel points at a key in the catalog',
+    modelReady.models[modelReady.activeModel] !== undefined,
+    'catalog and activeModel must agree');
+
+  // Catalog shape — every entry needs these fields or the dialog's
+  // "X MB download · Y-dim · English/multi" row breaks.
+  const requiredFields = ['id', 'label', 'dim', 'tier', 'downloadMB', 'language', 'notes'];
+  let shapeOk = true;
+  for (const [key, spec] of Object.entries(modelReady.models)) {
+    for (const field of requiredFields) {
+      if (spec[field] === undefined || spec[field] === null) {
+        shapeOk = false;
+        console.warn(`[test] MODELS[${key}] missing "${field}"`);
+      }
+    }
+  }
+  assert('every catalog entry carries all required UI fields', shapeOk);
+  assert('catalog includes the MiniLM back-compat default',
+    modelReady.models['all-minilm']?.id === 'Xenova/all-MiniLM-L6-v2');
+
+  // create_library with explicit non-default model persists it.
+  const bgeLib = await roundTrip(worker,
+    { type: 'create_library', name: 'BGE English', model: 'bge-small-en' },
+    'library_created');
+  assert('create_library echoes the chosen model', bgeLib.model === 'bge-small-en');
+  const bgeInList = bgeLib.libraries.find((l) => l.id === bgeLib.id);
+  assert('created library stores model in the registry',
+    bgeInList?.model === 'bge-small-en');
+
+  // create_library with an unknown model key falls back to default
+  // (rather than persisting garbage that would crash on next load).
+  const badLib = await roundTrip(worker,
+    { type: 'create_library', name: 'Typo', model: 'not-a-real-model-key' },
+    'library_created');
+  assert('unknown model key falls back to all-minilm default',
+    badLib.model === 'all-minilm');
+
+  // create_library without a model uses the default.
+  const defaultLib = await roundTrip(worker,
+    { type: 'create_library', name: 'No model field' },
+    'library_created');
+  assert('omitted model uses all-minilm default', defaultLib.model === 'all-minilm');
+
+  // list_libraries returns the model field on every entry.
+  const listed = await roundTrip(worker, { type: 'list_libraries' }, 'libraries_list');
+  const allHaveModel = listed.libraries.every((l) =>
+    typeof l.model === 'string' && modelReady.models[l.model]);
+  assert('list_libraries: every entry has a valid model field', allHaveModel);
+
+  // activate_library includes activeModel in the ready response so the
+  // UI chip + model-change detection can react without another roundtrip.
+  const activated = await roundTrip(worker,
+    { type: 'activate_library', libraryId: bgeLib.id },
+    'ready');
+  assert('activate_library returns activeModel reflecting the new library',
+    activated.activeModel === 'bge-small-en');
+
   worker.terminate();
 
   console.log('\n' + results.join('\n'));
