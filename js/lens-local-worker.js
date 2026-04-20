@@ -157,11 +157,24 @@ async function handleInit() {
   // pipeline init throws (some browsers expose navigator.gpu but fail at
   // shader compile for MiniLM's ops).
   let device = 'wasm';
-  if (typeof navigator !== 'undefined' && navigator.gpu) {
+  // Emit a diag line on every branch so users reporting "WebGPU didn't
+  // fire on my system" can tell us which early-exit they hit. Without
+  // this the silent-fall-to-WASM path is indistinguishable from "the
+  // worker picked WASM and never thought about it", which has come up
+  // during tier-benchmark calibration.
+  if (typeof navigator === 'undefined' || !navigator.gpu) {
+    console.log('[lens-local] navigator.gpu unavailable in this Worker context — WASM only');
+  } else {
     try {
       const adapter = await navigator.gpu.requestAdapter();
-      if (adapter) device = 'webgpu';
-    } catch {}
+      if (adapter) {
+        device = 'webgpu';
+      } else {
+        console.log('[lens-local] navigator.gpu.requestAdapter() returned null — WASM only');
+      }
+    } catch (e) {
+      console.log('[lens-local] navigator.gpu.requestAdapter() threw — WASM only:', e?.message || e);
+    }
   }
   try {
     _embedder = await pipeline('feature-extraction', MODEL_ID, { device });
@@ -205,9 +218,72 @@ async function handleInit() {
     }
   }
 
+  // Embedding-tier benchmark — measures ms/embed on the final (post-
+  // fallback) backend with real-chunk-sized text. Runs 5 embeds and
+  // reports the median so the first-embed JIT warmup doesn't skew the
+  // number. Verdict is informational only right now — step 1 of the
+  // per-library embedding model picker. Thresholds are initial best
+  // guesses to be calibrated against real user hardware.
+  try {
+    const verdict = await _benchmarkEmbedder();
+    console.log(
+      `[lens-local] Embedding benchmark: ${_embedderBackend}, ` +
+      `${verdict.msPerEmbed.toFixed(0)} ms/embed median → tier ${verdict.tier} (${verdict.tierLabel})`
+    );
+    self._lensLocalBenchmark = verdict; // stash for devtools inspection
+  } catch (err) {
+    console.warn('[lens-local] benchmark failed:', err?.message || err);
+  }
+
   await openOpfs();
   await loadCorpusIntoMemory();
   self.postMessage(readyPayload());
+}
+
+// 5 synthetic chunks at ~500-600 char lengths — representative of the
+// text we actually feed the embedder during ingest (see `chunk()` in
+// lens-local-utils.js; target_size defaults to 512 tokens ≈ 2-2.5 KB
+// of prose but real ingested chunks land around this character range).
+// Mixing topics keeps any per-text caching honest.
+const _BENCHMARK_TEXTS = [
+  'Vitamin D3 supplementation timing matters for circadian alignment — morning dosing coincides with natural UV-B exposure and supports endogenous synthesis pathways. Sublingual or oil-suspended forms outperform dry tablets for absorption. Co-administration with magnesium and vitamin K2 is standard practice for bone calcium targeting.',
+  'Mitochondrial biogenesis responds to cold thermogenesis via PGC-1α upregulation. Brown adipose tissue activation increases with repeated 10-15 minute exposures below 15°C. The adaptive response compounds over 4-6 weeks. Population studies show metabolic flexibility improvements independent of caloric restriction.',
+  'Serum ferritin above 200 ng/mL in the absence of iron-deficient anemia often reflects inflammatory state rather than iron overload. hs-CRP co-elevation and transferrin saturation below 45% distinguish acute-phase response from hemochromatosis. HFE genotyping is warranted only when TSAT exceeds 45% persistently.',
+  'APOE ε4 carriers show differential lipid response to saturated fat intake compared to ε3 homozygotes. Cardiovascular risk stratification should factor in genotype. Mediterranean-pattern diets appear to mitigate the ε4 penalty in most intervention trials but not all, and the heterogeneity likely reflects background polygenic risk.',
+  'GABA-A receptor agonism underlies much of the sedative effect of chamomile-derived apigenin and the flavonoids in valerian root. These act at the benzodiazepine site but with substantially lower efficacy — useful clinically for not producing tolerance in short courses. Drug interactions with licensed GABA-ergic agents are clinically relevant.',
+];
+
+/// Measure ms/embed on the currently-loaded embedder. Runs 5 embeds on
+/// varied realistic text, returns the median. Thresholds pick a tier
+/// target for per-library model selection (step 1 spike — values are
+/// initial guesses to be calibrated against real user hardware).
+async function _benchmarkEmbedder() {
+  const timings = [];
+  for (const text of _BENCHMARK_TEXTS) {
+    const t0 = performance.now();
+    await _embedder(text, { pooling: 'mean', normalize: true });
+    timings.push(performance.now() - t0);
+  }
+  const sorted = timings.slice().sort((a, b) => a - b);
+  const msPerEmbed = sorted[Math.floor(sorted.length / 2)];
+  let tier, tierLabel;
+  if (msPerEmbed < 30) {
+    tier = 3;
+    tierLabel = 'recent HW — larger model viable';
+  } else if (msPerEmbed < 150) {
+    tier = 2;
+    tierLabel = 'modern HW — small/medium model';
+  } else {
+    tier = 1;
+    tierLabel = 'slower HW — small model only';
+  }
+  return {
+    backend: _embedderBackend,
+    msPerEmbed,
+    timings,
+    tier,
+    tierLabel,
+  };
 }
 
 /// Shape of the `ready` message + the response from any library-management
