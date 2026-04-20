@@ -108,7 +108,7 @@ Web app only — no build tools, no bundler, no package manager. Pure ES modules
 get-based/
 ├── js/ styles.css index.html  # The product — static files, runs in any browser
 │   ├── js/lens.js              #   Custom Knowledge Source dispatcher
-│   └── js/lens-local*.js       #   Browser-local lens — MiniLM in-browser, OPFS vectors
+│   └── js/lens-local*.js       #   Browser-local lens — per-library embedding model, OPFS vectors
 ├── tests/                      # Node-side + Puppeteer browser assertions
 ├── .github/workflows/          # Tests on every PR / push
 └── docs/                       # User-facing documentation
