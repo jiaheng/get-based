@@ -58,6 +58,24 @@ return (async function() {
     !/['"]vitamin D deficiency supplementation['"][\s\S]{0,100}_doQuery/.test(lensSrc),
     'the probe should be read from config, not passed literally to _doQuery');
   assert('renderCustomLensSection includes lens-test-probe-input field', lensSrc.includes('lens-test-probe-input'));
+  // Setup copy uses the one-command curl installer. If someone ever
+  // regresses this back to the two-terminal `lens serve` flow without
+  // also updating the landing-site installer, users would be left with
+  // install instructions that don't match what the Vercel-hosted script
+  // does. Pin both the curl line and the Linux-only caveat.
+  assert('Setup block uses one-command curl | bash install',
+    lensSrc.includes('curl -sSL https://getbased.health/install.sh | bash'));
+  assert('Setup block no longer instructs "lens serve" or "getbased-dashboard serve" manually',
+    !/lens serve\s*&nbsp;|getbased-dashboard serve\s*&nbsp;/.test(lensSrc),
+    'manual two-terminal flow was replaced by install.sh');
+  assert('Setup block notes the Linux-only constraint',
+    /Linux only|Linux-only|\(Linux\)/.test(lensSrc),
+    'macOS/Windows users need to know services won\'t auto-start');
+  assert('Setup block links to install.sh source for audit',
+    lensSrc.includes('github.com/elkimek/get-based-site/blob/main/install.sh'));
+  assert('Setup block documents the SHA256 verification path',
+    lensSrc.includes('install.sh.sha256') && lensSrc.includes('sha256sum -c'),
+    'security-conscious users should have a pre-run verification option');
   assert('handleSaveLensConfig persists testProbe', lensSrc.includes('saveLensConfig({ name, url, enabled, topK, testProbe, backend })'));
   assert('Connected toast distinguishes zero-result case',
     lensSrc.includes("the test query didn't find any close matches") && lensSrc.includes('your endpoint works'),
