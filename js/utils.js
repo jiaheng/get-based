@@ -1,9 +1,17 @@
 // utils.js — Pure utility functions, notifications, dialogs
 
+/// Encode all five HTML-special characters — &, <, >, ", '. Safe to use
+/// in both text content AND attribute contexts. The prior implementation
+/// (textContent → innerHTML) only encoded & < >, which made every
+/// `attr="${escapeHTML(userStr)}"` site in the codebase breakout-vulnerable
+/// whenever the value contained a bare " character — user-authored
+/// supplement notes, marker names, PDF-parsed labels, custom personality
+/// fields, etc. The regex below handles all five in one pass so every
+/// existing caller becomes safe without touching call sites.
+const _ESCAPE_HTML_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 export function escapeHTML(str) {
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
+  if (str === null || str === undefined) return '';
+  return String(str).replace(/[&<>"']/g, (c) => _ESCAPE_HTML_MAP[c]);
 }
 
 export function hashString(str) {
@@ -181,6 +189,11 @@ export function hasCardContent(obj) {
   return false;
 }
 
-export function escapeAttr(s) { return escapeHTML(s).replace(/'/g, '&#39;'); }
+/// Historical alias: escapeAttr used to add an extra `'` encoding on top
+/// of an escapeHTML that missed quote chars. Now that escapeHTML encodes
+/// all five HTML-special chars including both quote styles, escapeAttr is
+/// redundant but kept as an alias so existing call sites that chose
+/// escapeAttr for attribute contexts continue to work and read clearly.
+export const escapeAttr = escapeHTML;
 
 Object.assign(window, { showNotification, showConfirmDialog, showPromptDialog, isDebugMode, setDebugMode, isPIIReviewEnabled, setPIIReviewEnabled, isAnalyticsEnabled, setAnalyticsEnabled, hasCardContent, escapeAttr });
