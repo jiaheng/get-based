@@ -5,6 +5,12 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.21.8', date: '2026-04-20', title: 'Internal doc trim',
+    items: [
+      'Internal architecture doc (CLAUDE.md) trimmed from 18 KB to 13 KB — regrouped the 47-module roster by concern (core, data pipeline, AI, views, chat, sync, knowledge base) and removed per-function enumerations that duplicated what\'s readable in the source. No user-facing change.',
+    ]
+  },
+  {
     version: '1.21.7', date: '2026-04-20', title: 'Dead-code cleanup',
     items: [
       'Removed ~140 lines of unreachable code — five unused Routstr/PPQ wallet helpers, four stale lens-library aliases, and a handful of debug/migration helpers with zero callers. No user-visible change; faster loads and a smaller codebase to reason about.',
