@@ -105,13 +105,12 @@ export function checkRelayConnection(timeout = 4000) {
  * when it isn't. Used to fail-fast with a clear message instead of letting
  * Evolu's worker hang for 30s on a missing primitive.
  *
- * Historically this hit the Tauri desktop build on Linux (wry/webkit2gtk
- * gated navigator.storage off regardless of distro, which is part of why
- * we pivoted to Electron). Under Electron's Chromium these primitives
- * are always present; the check stays for PWA users on old browsers.
+ * Evolu uses dedicated Workers coordinated across tabs via BroadcastChannel
+ * + navigator.locks (see createSharedWebWorker in evolu-bundle.js — the
+ * "Shared" in the name refers to cross-tab sharing, not the SharedWorker
+ * API). So the real requirements are locks + OPFS + WebCrypto.
  */
 export function getSyncBlocker() {
-  if (typeof SharedWorker === 'undefined') return 'SharedWorker not available in this browser';
   if (!navigator.locks?.request) return 'navigator.locks not available — browser missing Web Locks API';
   if (!navigator.storage) return 'navigator.storage not available — browser missing StorageManager API. Upgrade to a current browser (Chrome 86+, Firefox 105+, Safari 15.2+) for cross-device sync.';
   if (!navigator.storage.getDirectory) return 'OPFS (Origin Private File System) not available. Upgrade to a current browser for cross-device sync.';
@@ -136,7 +135,7 @@ export async function initSync() {
   // Re-entrancy guard — don't create duplicate Evolu instances
   if (evolu) return;
 
-  // Defer to next microtask — SharedWorker + navigator.locks can race during DOMContentLoaded
+  // Defer to next microtask — Worker + navigator.locks can race during DOMContentLoaded
   await new Promise(r => setTimeout(r, 0));
 
   try {
@@ -250,7 +249,7 @@ export async function enableSync({ skipPush = false } = {}) {
   // the persisted flag and starting init only to time out at 30s.
   const blocker = getSyncBlocker();
   if (blocker) {
-    showNotification(`Sync unavailable in this build: ${blocker}`, 'error');
+    showNotification(`Sync unavailable in this browser: ${blocker}`, 'error');
     return;
   }
   localStorage.setItem(SYNC_STORAGE_KEY, 'true');
@@ -264,10 +263,10 @@ export async function enableSync({ skipPush = false } = {}) {
     showNotification(`Sync failed to initialize. ${_appOwnerError || 'Check console for [sync] errors.'}`, 'error');
     return;
   }
-  // Race the owner-resolution promise against a 30s ceiling. webkit2gtk
-  // can leave Evolu's appOwner promise pending forever when OPFS or the
-  // SharedWorker can't be acquired — without this race the await blocks
-  // toggleSync's finally block too, leaving the UI stuck.
+  // Race the owner-resolution promise against a 30s ceiling. A stuck
+  // OPFS handle or a Web Lock that never resolves can leave Evolu's
+  // appOwner promise pending forever — without this race the await
+  // blocks toggleSync's finally, leaving the UI stuck.
   const timeout = new Promise(resolve => setTimeout(() => resolve('__timeout__'), 30000));
   const result = await Promise.race([_readyPromise.then(() => 'ok'), timeout]);
   if (result === '__timeout__' || !_appOwner) {
@@ -288,8 +287,8 @@ export async function enableSync({ skipPush = false } = {}) {
 
 export async function disableSync() {
   // Flip the persisted flag FIRST, before any awaits. If anything below
-  // hangs (Evolu worker stuck on OPFS / SharedWorker locks — observed in
-  // webkit2gtk), a manual page reload will still see sync as off.
+  // hangs (Evolu worker stuck on OPFS or a Web Lock), a manual page
+  // reload will still see sync as off.
   localStorage.setItem(SYNC_STORAGE_KEY, 'false');
   _syncEnabled = false;
   _appOwnerError = null;
@@ -309,9 +308,8 @@ export async function disableSync() {
   }
 
   // Fire-and-forget the Evolu reset. We can't trust this await: if the
-  // worker is hung (the same OPFS/SharedWorker contention that traps
-  // restoreFromMnemonic on webkit2gtk), `resetAppOwner` never resolves
-  // and the user sees the toggle silently do nothing.
+  // worker is hung (OPFS / lock contention), `resetAppOwner` never
+  // resolves and the user sees the toggle silently do nothing.
   // The page reload below kills the worker process anyway, so a
   // half-completed reset is harmless — the new tab boots clean.
   if (evolu) {

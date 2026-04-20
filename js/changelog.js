@@ -5,13 +5,18 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.21.2', date: '2026-04-20', title: 'Sync fix on Chrome for Android',
+    items: [
+      'Cross-device sync now works on Chrome for Android — the pre-flight check was wrongly gating on the SharedWorker API, which Evolu doesn\'t actually use (it uses dedicated Workers + BroadcastChannel + navigator.locks). Removing the spurious gate restores sync for any browser that has the real primitives.',
+      'Settings banner copy updated from "Sync unavailable in this build" to "Sync unavailable in this browser" — the old wording and "open the web version" link were leftovers from the retired Electron shell.',
+    ]
+  },
+  {
     version: '1.21.1', date: '2026-04-19', title: 'Knowledge Base setup polish',
     items: [
-      'getbased-agent-stack is now live on PyPI — one command (pipx install "getbased-agent-stack[full]") stands up the RAG server, the browser dashboard, and the MCP adapter.',
-      'Settings → Knowledge Base → External server rewritten into a 3-step setup flow: install → run both services → paste bearer here. Points at the dashboard\'s one-click login URL and its show/copy key — no more copy-pasting from the terminal.',
-      'Button renamed from "Save & Test" to "Save + connect". Endpoint URL helper simplified to a one-liner about the /query suffix.',
-      'OpenClaw added as a documented MCP client (6 total: Claude Desktop, Claude Code, Cursor, Cline, Hermes, OpenClaw). The dashboard generates paste-ready config for each.',
-      'Docs refresh: new Knowledge Base Grounding section in AI Chat, Custom API provider now listed correctly across Settings + AI Chat + providers guide, Interpretive Lens one-click-login section added.',
+      'One-command install for the external Knowledge Base server (pipx) — Settings → Knowledge Base → External server walks you through it in 3 steps.',
+      'OpenClaw added as a supported MCP client.',
+      'Docs refreshed for accuracy across Settings, AI Chat, and the providers guide.',
     ]
   },
   {

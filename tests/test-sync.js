@@ -106,6 +106,19 @@ return (async function() {
   assert('main.js imports initSync', mainSrc.includes("initSync") && mainSrc.includes("from './sync.js'"));
   assert('main.js calls initSync()', mainSrc.includes('await initSync()'));
 
+  // getSyncBlocker must NOT check SharedWorker — Evolu uses dedicated
+  // Workers + BroadcastChannel + navigator.locks, not the SharedWorker
+  // API. A SharedWorker gate wrongly blocked sync on Chrome for Android.
+  assert('getSyncBlocker is exported', syncSrc.includes('export function getSyncBlocker'));
+  assert('getSyncBlocker does not gate on SharedWorker', !/getSyncBlocker[\s\S]*?SharedWorker/.test(syncSrc),
+    'Evolu does not use the SharedWorker API — gating on it blocks Chrome for Android unnecessarily');
+  assert('getSyncBlocker still gates on navigator.locks', /getSyncBlocker[\s\S]*?navigator\.locks/.test(syncSrc));
+  assert('getSyncBlocker still gates on OPFS (navigator.storage.getDirectory)',
+    /getSyncBlocker[\s\S]*?navigator\.storage\.getDirectory/.test(syncSrc));
+  assert('getSyncBlocker still gates on crypto.subtle', /getSyncBlocker[\s\S]*?crypto\?\.subtle/.test(syncSrc));
+  assert('Settings banner copy updated to "in this browser"',
+    settingsSrc.includes('Sync unavailable in this browser') && !settingsSrc.includes('Sync unavailable in this build'));
+
   // ═══════════════════════════════════════
   // 8. PUSH/PULL LOGIC
   // ═══════════════════════════════════════
@@ -125,10 +138,10 @@ return (async function() {
   assert('pushAllProfiles pushes all profiles on first enable', syncSrc.includes('async function pushAllProfiles'));
   assert('disableSync clears _appOwner', syncSrc.includes('_appOwner = null'));
   // disableSync intentionally NO LONGER waits for in-flight ops or awaits
-  // Evolu reset — both introduced hang risks on webkit2gtk (Evolu worker
-  // stuck on OPFS / SharedWorker locks). The page reload below kills the
-  // worker process anyway. The persisted SYNC_STORAGE_KEY flips before
-  // any await so a hard refresh always sees sync as off.
+  // Evolu reset — both introduced hang risks (Evolu worker stuck on OPFS
+  // or a Web Lock). The page reload below kills the worker process
+  // anyway. The persisted SYNC_STORAGE_KEY flips before any await so a
+  // hard refresh always sees sync as off.
   assert('disableSync flips SYNC_STORAGE_KEY before any await',
     /localStorage\.setItem\(SYNC_STORAGE_KEY,\s*['"]false['"]\)[\s\S]{0,200}_syncEnabled = false/.test(syncSrc));
   assert('disableSync does not block on Evolu reset (fire-and-forget)',
