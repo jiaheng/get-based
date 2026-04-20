@@ -5,6 +5,12 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.21.9', date: '2026-04-20', title: 'chat.js refactor',
+    items: [
+      'Internal refactor — image-attachment handling and conversation-thread management extracted from chat.js into their own modules (chat-images.js, chat-threads.js). chat.js shrinks from 3400 lines to 2800; no behavior change expected.',
+    ]
+  },
+  {
     version: '1.21.8', date: '2026-04-20', title: 'Internal doc trim',
     items: [
       'Internal architecture doc (CLAUDE.md) trimmed from 18 KB to 13 KB — regrouped the 47-module roster by concern (core, data pipeline, AI, views, chat, sync, knowledge base) and removed per-function enumerations that duplicated what\'s readable in the source. No user-facing change.',

@@ -129,9 +129,19 @@ return (async function() {
   assert('Ollama image normalization', apiSrc.includes('ollamaMsg.images = images'));
 
   const chatSrc = await fetchWithRetry('js/chat.js');
+  // Image-attachment flow was extracted to js/chat-images.js in v1.21.9.
+  // chat.js keeps the image-utils import for send-time helpers
+  // (buildVisionContent / formatImageBlock) and consumes the pending
+  // queue via chat-images.js.
+  const chatImagesSrc = await fetchWithRetry('js/chat-images.js');
   assert('Chat imports supportsVision', chatSrc.includes('supportsVision'));
-  assert('Chat imports image-utils', chatSrc.includes("from './image-utils.js'"));
-  assert('Pending attachments variable', chatSrc.includes('_pendingAttachments'));
+  assert('chat.js imports image-utils for send-time helpers', chatSrc.includes("from './image-utils.js'"));
+  assert('chat.js imports from chat-images for pending-queue access',
+    chatSrc.includes("from './chat-images.js'") && chatSrc.includes('getPendingAttachments'));
+  assert('Pending attachments variable lives in chat-images.js',
+    chatImagesSrc.includes('_pendingAttachments'));
+  assert('chat-images.js imports isValidImageType + resizeImage',
+    chatImagesSrc.includes('isValidImageType') && chatImagesSrc.includes('resizeImage'));
   assert('Image badge in renderChatMessages', chatSrc.includes('chat-image-badge'));
   assert('buildVisionContent used in sendChatMessage', chatSrc.includes('buildVisionContent(imageBlocks'));
 
