@@ -45,8 +45,6 @@ function updateSyncStatus(partial) {
   for (const fn of _syncStatusListeners) fn(_syncStatus);
 }
 
-export function getSyncStatus() { return { ..._syncStatus }; }
-
 export function subscribeSyncStatus(fn) {
   _syncStatusListeners.add(fn);
   return () => _syncStatusListeners.delete(fn);
@@ -974,7 +972,6 @@ Object.assign(window, {
   revokeMessengerToken,
   _syncDiag,
   _forcePull,
-  getSyncStatus,
   renderSyncIndicator,
   updateSyncIndicator,
   toggleSyncDetail,

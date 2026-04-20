@@ -1,7 +1,7 @@
 // api.js — AI provider management, API calls (OpenRouter, Venice, Routstr, PPQ, Local, Custom)
 
 import { getModelPricing } from './schema.js';
-import { isDebugMode, showNotification } from './utils.js';
+import { isDebugMode } from './utils.js';
 import { getCachedKey, updateKeyCache, encryptedSetItem } from './crypto.js';
 
 // ═══════════════════════════════════════════════
@@ -864,10 +864,6 @@ export async function fetchRoutstrModels() {
     return models;
   } catch (e) { return []; }
 }
-export function getRoutstrPricing(modelId) {
-  let cached = {}; try { cached = JSON.parse(localStorage.getItem('labcharts-routstr-pricing') || '{}'); } catch(e) {}
-  return cached[modelId] || null;
-}
 export async function validateRoutstrKey(key) {
   // Routstr uses Cashu tokens or session keys — format check, then save optimistically.
   // Models endpoint is public (no auth), so we can't validate keys via model fetch.
@@ -924,46 +920,6 @@ export async function getRoutstrBalance() {
     if (json.balance != null) return { sats: Math.floor(json.balance / 1000), msats: json.balance, totalRequests: json.total_requests || 0, totalSpent: json.total_spent || 0 };
     return null;
   } catch { return null; }
-}
-export async function createRoutstrLightningInvoice(amountSats) {
-  const key = getRoutstrKey();
-  if (!key) throw new Error('No Routstr key');
-  const res = await fetch(_requireNodeUrl() + '/v1/balance/lightning/invoice', {
-    method: 'POST',
-    headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ amount_sats: amountSats, purpose: 'topup', api_key: key })
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => null);
-    const detail = err?.detail;
-    const msg = typeof detail === 'string' ? detail : Array.isArray(detail) ? detail.map(d => d.msg || JSON.stringify(d)).join('; ') : err?.message;
-    throw new Error(msg || 'Invoice creation failed: ' + res.status);
-  }
-  return res.json(); // { invoice_id, bolt11, amount_sats, expires_at, payment_hash }
-}
-export async function checkRoutstrInvoiceStatus(invoiceId) {
-  const key = getRoutstrKey();
-  const res = await fetch(_requireNodeUrl() + '/v1/balance/lightning/invoice/' + encodeURIComponent(invoiceId) + '/status', {
-    headers: key ? { 'Authorization': 'Bearer ' + key } : {}
-  });
-  if (!res.ok) return null;
-  return res.json(); // { status: 'pending'|'paid'|'expired', ... }
-}
-export async function topupRoutstrCashu(cashuToken) {
-  const key = getRoutstrKey();
-  if (!key) throw new Error('No Routstr key');
-  const res = await fetch(_requireNodeUrl() + '/v1/balance/topup', {
-    method: 'POST',
-    headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ cashu_token: cashuToken })
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => null);
-    const detail = err?.detail;
-    const msg = typeof detail === 'string' ? detail : Array.isArray(detail) ? detail.map(d => d.msg || JSON.stringify(d)).join('; ') : err?.message;
-    throw new Error(msg || 'Cashu topup failed: ' + res.status);
-  }
-  return res.json(); // { balance, amount_added, currency }
 }
 
 // ═══════════════════════════════════════════════
@@ -1058,10 +1014,6 @@ export async function fetchPpqModels(key) {
     }
     return models;
   } catch (e) { return []; }
-}
-export function getPpqPricing(modelId) {
-  let cached = {}; try { cached = JSON.parse(localStorage.getItem('labcharts-ppq-pricing') || '{}'); } catch(e) {}
-  return cached[modelId] || null;
 }
 export async function validatePpqKey(key) {
   try {
@@ -1193,8 +1145,8 @@ Object.assign(window, {
   getOpenRouterBalance,
   getVeniceBalance,
   fetchVeniceModels, fetchOpenRouterModels, getOpenRouterPricing,
-  fetchRoutstrModels, getRoutstrPricing, createRoutstrAccount, getRoutstrBalance, createRoutstrLightningInvoice, checkRoutstrInvoiceStatus, topupRoutstrCashu,
-  fetchPpqModels, getPpqPricing, createPpqAccount, getPpqBalance, createPpqTopup, checkPpqTopupStatus,
+  fetchRoutstrModels, createRoutstrAccount, getRoutstrBalance,
+  fetchPpqModels, createPpqAccount, getPpqBalance, createPpqTopup, checkPpqTopupStatus,
   generatePKCE, startOpenRouterOAuth, exchangeOpenRouterCode,
   deduplicateModels,
   isRecommendedModel,

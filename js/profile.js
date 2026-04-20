@@ -469,46 +469,6 @@ export function getLocationCache() { try { return JSON.parse(localStorage.getIte
 export function setLocationCache(key, lat) { var c = getLocationCache(); c[key] = lat; try { localStorage.setItem('labcharts-location-cache', JSON.stringify(c)); } catch(e) {} }
 export function latitudeToBand(lat) { var a = Math.abs(lat); if (a < 25) return 0; if (a < 40) return 1; if (a < 50) return 2; if (a < 60) return 3; return 4; }
 
-var _locationDebounceTimer = null;
-export function updateLocationLat() {
-  const country = (document.getElementById('loc-country') || {}).value || '';
-  const zip = (document.getElementById('loc-zip') || {}).value || '';
-  setProfileLocation(state.currentProfile, country, zip);
-  const el = document.getElementById('loc-lat-display');
-  if (!el) return;
-  const ct = country.trim(), zt = zip.trim();
-  if (!ct) { el.textContent = ''; return; }
-
-  // Check AI cache first (most accurate)
-  var cacheKey = (ct + '|' + zt).toLowerCase();
-  var cached = getLocationCache()[cacheKey];
-  if (cached !== undefined) {
-    var band = latitudeToBand(cached);
-    el.style.color = 'var(--green)';
-    el.textContent = '\u2713 ' + Math.abs(Math.round(cached)) + '\u00b0' + (cached >= 0 ? 'N' : 'S') + ' \u2014 ' + LATITUDE_BANDS[band];
-    return;
-  }
-
-  // Hardcoded fallback (instant)
-  var lat = getLatitudeFromLocation();
-  if (lat) {
-    el.style.color = 'var(--green)';
-    el.textContent = '\u2713 ' + lat;
-  } else if (window.hasAIProvider()) {
-    el.style.color = 'var(--text-muted)';
-    el.textContent = 'Detecting\u2026';
-  } else {
-    el.style.color = 'var(--text-muted)';
-    el.textContent = 'Country not recognized \u2014 try the full name';
-  }
-
-  // Debounced AI refinement
-  if (_locationDebounceTimer) clearTimeout(_locationDebounceTimer);
-  if (window.hasAIProvider()) {
-    _locationDebounceTimer = setTimeout(function() { detectLatitudeWithAI(ct, zt); }, 1500);
-  }
-}
-
 export async function detectLatitudeWithAI(country, zip) {
   var cacheKey = (country + '|' + zip).toLowerCase();
   if (getLocationCache()[cacheKey] !== undefined) return;

@@ -1,6 +1,6 @@
 // pii.js — PII obfuscation (Ollama + regex), diff viewer
 
-import { isDebugMode, showNotification, escapeHTML } from './utils.js';
+import { showNotification, escapeHTML } from './utils.js';
 import { getOllamaPIIModel, getOllamaPIIUrl } from './api.js';
 import { getCachedKey, updateKeyCache, encryptedSetItem } from './crypto.js';
 import { state } from './state.js';
