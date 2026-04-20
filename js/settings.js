@@ -358,15 +358,14 @@ function renderSyncSection() {
   const enabled = isSyncEnabled();
   const relay = getSyncRelay();
   const blocker = getSyncBlocker();
-  // Banner appears in place of the toggle when the underlying webview can't
-  // run Evolu (typically Tauri-on-Linux missing navigator.storage / OPFS).
-  // Lets the user see "this is broken and here's why" instead of clicking a
-  // dead toggle and waiting 30s for a cryptic timeout toast.
+  // Banner appears in place of the toggle when the browser is missing a
+  // primitive Evolu needs (Web Locks, StorageManager, OPFS, or WebCrypto).
+  // Lets the user see "this is broken and here's why" instead of clicking
+  // a dead toggle and waiting 30s for a cryptic timeout toast.
   const blockerBanner = blocker ? `
     <div style="margin-bottom:16px;padding:10px 12px;border:1px solid #fbbf24;background:rgba(251,191,36,0.08);border-radius:6px;color:#fbbf24;font-size:12px;line-height:1.45">
-      <strong>Sync unavailable in this build.</strong><br>
-      ${escapeHTML(blocker)}<br>
-      <a href="https://app.getbased.health" target="_blank" rel="noopener" style="color:#fbbf24;text-decoration:underline">Open the web version</a> to sync across devices. Any AI provider API keys you set there (PPQ, OpenRouter, Venice, etc.) will need to be pasted back into Settings → AI on this desktop app.
+      <strong>Sync unavailable in this browser.</strong><br>
+      ${escapeHTML(blocker)}
     </div>` : '';
   return `
     ${blockerBanner}

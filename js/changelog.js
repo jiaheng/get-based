@@ -5,6 +5,13 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.21.2', date: '2026-04-20', title: 'Sync fix on Chrome for Android',
+    items: [
+      'Cross-device sync now works on Chrome for Android — the pre-flight check was wrongly gating on the SharedWorker API, which Evolu doesn\'t actually use (it uses dedicated Workers + BroadcastChannel + navigator.locks). Removing the spurious gate restores sync for any browser that has the real primitives.',
+      'Settings banner copy updated from "Sync unavailable in this build" to "Sync unavailable in this browser" — the old wording and "open the web version" link were leftovers from the retired Electron shell.',
+    ]
+  },
+  {
     version: '1.21.1', date: '2026-04-19', title: 'Knowledge Base setup polish',
     items: [
       'getbased-agent-stack is now live on PyPI — one command (pipx install "getbased-agent-stack[full]") stands up the RAG server, the browser dashboard, and the MCP adapter.',
