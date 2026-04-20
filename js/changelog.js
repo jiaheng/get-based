@@ -5,6 +5,14 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.21.5', date: '2026-04-20', title: 'Security hardening',
+    items: [
+      'Attribute-safe HTML escaping — <code>escapeHTML()</code> now encodes all five HTML-special chars including both quote styles. Closes 31+ attribute-breakout sites across supplements, context cards, client list, chat, views, cycle, EMF, PDF import, and provider panels that were previously vulnerable to self-XSS via user-authored strings containing a bare double quote.',
+      'Tightened Vercel API proxy allowlist — blocks SSRF into private (10/8, 172.16/12, 192.168/16), loopback, link-local, and cloud-metadata IP ranges. Public HTTPS endpoints still pass so Custom API and decentralized Routstr nodes keep working.',
+      'New markdown.js test suite (34 assertions) — pins the XSS surface for every streamed AI response. Previously zero dedicated coverage.',
+    ]
+  },
+  {
     version: '1.21.4', date: '2026-04-20', title: 'Per-library embedding model',
     items: [
       'New libraries in the on-device Knowledge Base can pick from four embedding models — MiniLM (fast, small), BGE-small (balanced English), Multilingual-E5 (100+ languages), and BGE-base (best English quality).',

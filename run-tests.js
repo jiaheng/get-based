@@ -49,7 +49,8 @@ const TEST_FILES = [
   'tests/test-data-pipeline.js',
   'tests/test-calculated-markers.js',
   'tests/test-lens-parsers.js',
-  'tests/test-lens-local-worker.js'
+  'tests/test-lens-local-worker.js',
+  'tests/test-markdown.js'
 ];
 
 const PORT = process.env.PORT || 8000;
