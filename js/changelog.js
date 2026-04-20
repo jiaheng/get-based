@@ -5,98 +5,79 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
-    version: '1.21.9', date: '2026-04-20', title: 'chat.js refactor',
+    version: '1.21.7–9', date: '2026-04-20', title: 'Code hygiene',
     items: [
-      'Internal refactor — image-attachment handling and conversation-thread management extracted from chat.js into their own modules (chat-images.js, chat-threads.js). chat.js shrinks from 3400 lines to 2800; no behavior change expected.',
-    ]
-  },
-  {
-    version: '1.21.8', date: '2026-04-20', title: 'Internal doc trim',
-    items: [
-      'Internal architecture doc (CLAUDE.md) trimmed from 18 KB to 13 KB — regrouped the 47-module roster by concern (core, data pipeline, AI, views, chat, sync, knowledge base) and removed per-function enumerations that duplicated what\'s readable in the source. No user-facing change.',
-    ]
-  },
-  {
-    version: '1.21.7', date: '2026-04-20', title: 'Dead-code cleanup',
-    items: [
-      'Removed ~140 lines of unreachable code — five unused Routstr/PPQ wallet helpers, four stale lens-library aliases, and a handful of debug/migration helpers with zero callers. No user-visible change; faster loads and a smaller codebase to reason about.',
-      'Dropped 19 unused imports across the module tree. Makes it easier to see what each file actually depends on.',
+      'Dead code removed, internal architecture doc trimmed, chat panel split into smaller modules. No user-visible change.',
     ]
   },
   {
     version: '1.21.6', date: '2026-04-20', title: 'Docs accuracy sweep',
     items: [
-      'README provider table now lists all 6 AI providers (Custom API was missing from the table, though it\'s been supported since v1.16.1).',
-      'Agent Access + Personal Agents guides updated to lead with the one-command <code>curl | bash</code> installer and the <code>--include-deps</code> pipx flag — without that flag, the MCP / rag / dashboard binaries weren\'t exposed on PATH.',
-      'Electron-era framing removed from helper docstrings and test comments now that the Electron shell has been retired.',
-      'Stale Python-path references (`lens/src/lens/store.py`) in the in-browser worker updated to point at the current `getbased-rag` location.',
+      'Custom API added to the provider list (it\'s been supported since v1.16.1 — the table just missed it).',
+      'Personal-agents and Agent Access setup guides updated to the one-command installer.',
     ]
   },
   {
     version: '1.21.5', date: '2026-04-20', title: 'Security hardening',
     items: [
-      'Attribute-safe HTML escaping — <code>escapeHTML()</code> now encodes all five HTML-special chars including both quote styles. Closes 31+ attribute-breakout sites across supplements, context cards, client list, chat, views, cycle, EMF, PDF import, and provider panels that were previously vulnerable to self-XSS via user-authored strings containing a bare double quote.',
-      'Tightened Vercel API proxy allowlist — blocks SSRF into private (10/8, 172.16/12, 192.168/16), loopback, link-local, and cloud-metadata IP ranges. Public HTTPS endpoints still pass so Custom API and decentralized Routstr nodes keep working.',
-      'New markdown.js test suite (34 assertions) — pins the XSS surface for every streamed AI response. Previously zero dedicated coverage.',
+      'Attribute-safe HTML escaping across every user-authored field — closes a class of self-XSS when strings contained a bare double quote.',
+      'Tightened the Vercel AI proxy so it can\'t be abused to reach private networks or cloud-metadata services.',
+      'New tests covering the markdown renderer (every streamed AI response passes through it).',
     ]
   },
   {
     version: '1.21.4', date: '2026-04-20', title: 'Per-library embedding model',
     items: [
-      'New libraries in the on-device Knowledge Base can pick from four embedding models — MiniLM (fast, small), BGE-small (balanced English), Multilingual-E5 (100+ languages), and BGE-base (best English quality).',
-      'Hardware-matched recommendation — the library-creation dialog benchmarks your device on first load and pre-selects the strongest model your hardware can run smoothly.',
-      'Model is locked at library creation — switching would mean re-indexing every document, so the choice is made upfront. Existing libraries continue on MiniLM; no forced migration.',
+      'Pick from four embedding models when you create a new on-device Knowledge Base library — MiniLM (fast, small), BGE-small (balanced English), Multilingual-E5 (100+ languages), or BGE-base (best English quality).',
+      'getbased benchmarks your hardware on first load and pre-selects the strongest model your device can run smoothly.',
+      'The model is locked at creation — switching would mean re-indexing every document, so the choice is made upfront. Existing libraries continue on MiniLM with no forced migration.',
     ]
   },
   {
     version: '1.21.3', date: '2026-04-20', title: 'One-command Knowledge Base setup',
     items: [
-      'External server setup collapsed from 4 steps to 1 terminal command — <code>curl -sSL https://getbased.health/install.sh | bash</code> installs the agent stack, starts the services, prints a one-click dashboard login URL.',
-      'Honest security footer in the setup panel: review the script before running, verify against the published SHA256, and a link to the public source on GitHub.',
-      'Linux-only for now (macOS and Windows install the package but can\'t auto-start the services). Explicitly noted in the panel so Mac users aren\'t left guessing.',
+      'External server setup is now a single terminal command: <code>curl -sSL https://getbased.health/install.sh | bash</code> (Linux). Installs the agent stack, starts the services, prints a one-click dashboard login URL.',
+      '"Cautious?" footer with commands to review or verify the script before running — source is public, SHA256 is published.',
+      'Linux-only for now. macOS and Windows install the package but can\'t auto-start services; the panel says so explicitly instead of silently leaving them stuck.',
     ]
   },
   {
     version: '1.21.2', date: '2026-04-20', title: 'Sync fix on Chrome for Android',
     items: [
-      'Cross-device sync now works on Chrome for Android — the pre-flight check was wrongly gating on the SharedWorker API, which Evolu doesn\'t actually use (it uses dedicated Workers + BroadcastChannel + navigator.locks). Removing the spurious gate restores sync for any browser that has the real primitives.',
-      'Settings banner copy updated from "Sync unavailable in this build" to "Sync unavailable in this browser" — the old wording and "open the web version" link were leftovers from the retired Electron shell.',
+      'Cross-device sync now works on Chrome for Android — a pre-flight check was wrongly blocking it.',
+      'Updated stale Settings copy that still mentioned the retired Electron build.',
     ]
   },
   {
     version: '1.21.1', date: '2026-04-19', title: 'Knowledge Base setup polish',
     items: [
-      'One-command install for the external Knowledge Base server (pipx) — Settings → Knowledge Base → External server walks you through it in 3 steps.',
-      'OpenClaw added as a supported MCP client.',
-      'Docs refreshed for accuracy across Settings, AI Chat, and the providers guide.',
+      'Simpler external-server setup flow in Settings → Knowledge Base.',
+      'OpenClaw joins the list of supported MCP clients.',
     ]
   },
   {
     version: '1.21.0', date: '2026-04-18', title: 'Knowledge Base libraries',
     items: [
-      'Multi-library support — keep research papers, clinical guides, and personal notes in separate collections and switch between them from Settings.',
-      'WebGPU embedder — 3-10× faster retrieval on modern browsers. Transparent fallback to WASM when unavailable or pathologically slow (auto-detected via startup benchmark).',
-      'Document parsers: PDF, Word, Markdown, plain text, and ZIP archives (expanded inline).',
-      'Better retrieval variety — results span multiple documents instead of piling up on one.',
-      'Inline drop-zone under Settings → AI → Knowledge Base — add, preview, and remove files in one place.',
-      'Background ingest — a progress pill tracks indexing from anywhere in the app, so you can close Settings and keep working during long runs.',
-      'Cancel button on the pill — stops at the next excerpt and keeps what\'s already indexed (no lost work on a wrong-file bailout).',
+      'Multiple libraries — keep research papers, clinical guides, and personal notes in separate collections, switch between them from Settings.',
+      'Faster retrieval on modern browsers (up to 3–10×), with a transparent fallback on older ones.',
+      'More document types supported: PDF, Word, Markdown, plain text, and ZIP archives.',
+      'Background indexing with cancel — close Settings and keep working while long runs process, stop early without losing what\'s already indexed.',
     ]
   },
   {
-    version: '1.20.1', date: '2026-04-16', title: 'Bug Fixes',
+    version: '1.20.1', date: '2026-04-16', title: 'Bug fixes',
     items: [
-      'Custom API key now works after page reload — previously the encrypted blob was sent as the Bearer token, breaking requests until the key was re-entered (#124)',
-      'Context cards (diet, sleep, stress, exercise, light, love, environment, diagnoses) now update on screen immediately after saving, no reload needed (#123)',
-      'Closed SSRF bypass on the legacy /proxy dev-server route — the same-origin guard from #119 now covers both /api/* and /proxy (#119 follow-up)',
+      'Custom API key now works after page reload (#124).',
+      'Context cards (diet, sleep, stress, and the rest) update on screen immediately after saving — no reload needed (#123).',
+      'Closed a same-origin bypass on the dev-server proxy route (#119 follow-up).',
     ]
   },
   {
     version: '1.20.0', date: '2026-04-15', title: 'Custom Knowledge Source',
     items: [
-      'Connect a RAG knowledge endpoint to your Interpretive Lens — the AI grounds its analysis in your own research, clinical guides, or documents',
-      'Works across chat, multi-persona discussions, and the focus card',
-      'Bugfixes: GPT-5/o-series support in Custom API (#114), Custom API settings now persist across backup + sync (#116), dev-server origin guard hardened (#119)',
+      'Connect your own RAG knowledge endpoint to the Interpretive Lens — the AI grounds its analysis in research, clinical guides, or documents you provide.',
+      'Works across chat, multi-persona discussions, and the focus card.',
+      'Bug fixes: GPT-5 / o-series support in Custom API (#114), Custom API settings now persist across backup + sync (#116).',
     ]
   },
   {
