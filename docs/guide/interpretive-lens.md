@@ -54,9 +54,11 @@ There are two backends to choose from in **Settings → AI → Knowledge Base**:
 
 ### On this device (in-browser)
 
-Runs entirely in your browser. First use downloads a small AI model (~100 MB) and then works offline. Drop your documents (PDF, Word, Markdown, plain text, or ZIP archives) into the settings panel — they're indexed locally in your browser's storage. Multiple libraries are supported so you can keep research papers, clinical guides, and personal notes in separate collections.
+Runs entirely in your browser. First use downloads an embedding model (22–110 MB depending on your pick) and then works offline. Drop your documents (PDF, Word, Markdown, plain text, or ZIP archives) into the settings panel — they're indexed locally in your browser's storage. Multiple libraries are supported so you can keep research papers, clinical guides, and personal notes in separate collections.
 
 Good for: typical use — a few dozen to a few hundred documents. No install, no server, no external dependencies.
+
+**Model choice per library.** When you create a new library, a small dialog shows four embedding models side by side — MiniLM (22 MB, fast), BGE-small-en (33 MB, better English retrieval), Multilingual-E5 (40 MB, 100+ languages), and BGE-base-en (110 MB, highest English quality). getbased benchmarks your device on first load and pre-selects the strongest model that runs smoothly on your hardware. The model is **locked at library creation** — switching later would mean re-indexing every document, so the decision is made upfront. Existing libraries from before v1.21.4 continue to use MiniLM; no forced migration.
 
 **While indexing:** a small progress pill appears bottom-right. You can close Settings and keep using the app — indexing runs in the background and the pill tracks it from anywhere. Click **Cancel** on the pill to stop at the next excerpt; anything already indexed stays in the library, so a 3-minute run that you cancel early isn't wasted. Large batches (several hundred files) can take 10+ minutes on the in-browser engine; if that's your workflow, consider the external-server backend below.
 
