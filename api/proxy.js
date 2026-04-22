@@ -88,6 +88,13 @@ export default async function handler(req) {
     });
   }
 
+  // ─── Oura OAuth2 server-side flow ───────────────────────────────
+  // Client-secret-bearing requests — secret never reaches the browser.
+  // Single place in the codebase that reads OURA_CLIENT_SECRET.
+  if (payload.oura_token_exchange || payload.oura_token_refresh) {
+    return handleOuraTokenRequest(payload);
+  }
+
   const { url, headers, body, method: upstreamMethod } = payload;
 
   if (!url || !isAllowedUrl(url)) {
@@ -150,4 +157,61 @@ function corsHeaders() {
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
   };
+}
+
+// ─── Oura token handler ────────────────────────────────────────────
+// Payloads:
+//   { oura_token_exchange: { code, redirect_uri, client_id } }
+//   { oura_token_refresh:  { refresh_token, client_id } }
+// client_id is sent from the browser (public value) so the proxy stays
+// provider-agnostic — the secret is the only thing kept server-side.
+async function handleOuraTokenRequest(payload) {
+  const secret = typeof process !== 'undefined' ? process.env?.OURA_CLIENT_SECRET : undefined;
+  if (!secret) {
+    return new Response(JSON.stringify({ error: 'OURA_CLIENT_SECRET not configured on this deployment' }), {
+      status: 500, headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+    });
+  }
+
+  let form;
+  if (payload.oura_token_exchange) {
+    const { code, redirect_uri, client_id } = payload.oura_token_exchange;
+    if (!code || !redirect_uri || !client_id) {
+      return new Response(JSON.stringify({ error: 'oura_token_exchange requires code, redirect_uri, client_id' }), {
+        status: 400, headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+      });
+    }
+    form = new URLSearchParams({
+      grant_type: 'authorization_code',
+      code, redirect_uri, client_id, client_secret: secret,
+    });
+  } else {
+    const { refresh_token, client_id } = payload.oura_token_refresh;
+    if (!refresh_token || !client_id) {
+      return new Response(JSON.stringify({ error: 'oura_token_refresh requires refresh_token, client_id' }), {
+        status: 400, headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+      });
+    }
+    form = new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token, client_id, client_secret: secret,
+    });
+  }
+
+  try {
+    const res = await fetch('https://api.ouraring.com/oauth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: form.toString(),
+    });
+    const body = await res.text();
+    return new Response(body, {
+      status: res.status,
+      headers: { ...corsHeaders(), 'Content-Type': res.headers.get('content-type') || 'application/json' },
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: 'Token endpoint unreachable: ' + e.message }), {
+      status: 502, headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+    });
+  }
 }

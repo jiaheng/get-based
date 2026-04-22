@@ -46,8 +46,20 @@ export const ADAPTERS = [
   {
     id: 'oura',
     displayName: 'Oura',
-    authType: 'pat',
-    authDocsUrl: 'https://cloud.ouraring.com/personal-access-tokens',
+    authType: 'oauth2',
+    // Oura's developer portal doesn't offer PKCE — this is the server-side
+    // flow with the client_secret held server-side (Vercel env var, read only
+    // by /api/proxy). Browser never sees the secret. See wearables-oura-auth.js.
+    oauth: {
+      clientId: '8bb386cb-1b6e-4ab8-b852-ff47662667f6',
+      // Must match the URIs registered in the Oura developer portal, verbatim.
+      redirectUris: [
+        'https://app.getbased.health/',
+        'https://getbased.health/app',
+        'http://localhost:8000/app',
+      ],
+      scopes: ['personal', 'daily', 'heartrate', 'session'],
+    },
     apiHost: 'api.ouraring.com',
     metrics: {
       hrv_rmssd:       { endpoint: 'v2/usercollection/sleep',           field: 'average_hrv' },

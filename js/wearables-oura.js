@@ -1,14 +1,13 @@
-// wearables-oura.js — Oura Personal Access Token adapter
+// wearables-oura.js — Oura API data-layer (OAuth2 server-side flow)
 //
 // Pure data-layer: talks to Oura's /v2/usercollection/* endpoints via the
 // /api/proxy path (Oura does not set permissive CORS, so browser-direct
 // won't work in production). Returns canonical L1 rows — no Oura field
 // names cross the boundary.
 //
-// The adapter registry in wearable-adapters.js describes WHICH endpoint
-// maps to WHICH canonical id, but Oura's pagination + multi-session-per-
-// day semantics mean the fetcher has more logic than a simple loop. That
-// logic lives here, isolated to this vendor.
+// The accessToken arg is opaque here — this module doesn't know whether it
+// came from OAuth2 or from an older PAT. Token refresh happens one layer up
+// in wearables-connect.js via `withFreshToken`. See wearables-oura-auth.js.
 
 import { isDebugMode } from './utils.js';
 
@@ -19,7 +18,7 @@ const PROXY_URL = '/api/proxy';
 // Transport
 // ─────────────────────────────────────────────────────────
 
-async function ouraGET(path, pat, params = {}) {
+async function ouraGET(path, accessToken, params = {}) {
   const qs = new URLSearchParams(params).toString();
   const url = `${OURA_API}/${path.replace(/^\//, '')}${qs ? '?' + qs : ''}`;
   const res = await fetch(PROXY_URL, {
@@ -28,7 +27,7 @@ async function ouraGET(path, pat, params = {}) {
     body: JSON.stringify({
       url,
       method: 'GET',
-      headers: { 'Authorization': `Bearer ${pat}` },
+      headers: { 'Authorization': `Bearer ${accessToken}` },
     }),
   });
   if (!res.ok) {
@@ -44,13 +43,13 @@ async function ouraGET(path, pat, params = {}) {
 
 // Collect every page of a paginated collection endpoint. Oura returns
 // `{ data: [...], next_token }` — we loop until next_token is null/empty.
-async function ouraCollect(path, pat, params) {
+async function ouraCollect(path, accessToken, params) {
   const all = [];
   let nextToken = null;
   let pages = 0;
   do {
     const p = nextToken ? { ...params, next_token: nextToken } : params;
-    const page = await ouraGET(path, pat, p);
+    const page = await ouraGET(path, accessToken, p);
     if (Array.isArray(page?.data)) all.push(...page.data);
     nextToken = page?.next_token || null;
     pages++;
@@ -60,13 +59,12 @@ async function ouraCollect(path, pat, params) {
 }
 
 // ─────────────────────────────────────────────────────────
-// Auth verify
+// Account info (replaces the PAT-era verifyOuraPAT)
 // ─────────────────────────────────────────────────────────
 
-export async function verifyOuraPAT(pat) {
-  if (!pat || pat.length < 8) return { ok: false, error: 'Token looks too short' };
+export async function fetchOuraPersonalInfo(accessToken) {
   try {
-    const info = await ouraGET('v2/usercollection/personal_info', pat);
+    const info = await ouraGET('v2/usercollection/personal_info', accessToken);
     return {
       ok: true,
       account: {
@@ -111,14 +109,14 @@ function meanOrNull(arr) {
 // Returns canonical L1 rows for the inclusive date range [startDate, endDate].
 // Each row is keyed by date; missing metrics are null (not omitted) so consumers
 // can see "no spo2 today" vs "spo2 not yet fetched."
-export async function fetchOuraDailyRange(pat, startDate, endDate) {
+export async function fetchOuraDailyRange(accessToken, startDate, endDate) {
   const params = { start_date: startDate, end_date: endDate };
   // Fetch collections in parallel — independent endpoints.
   const [sleepSessions, dailySleep, dailyReadiness, dailySpo2] = await Promise.all([
-    ouraCollect('v2/usercollection/sleep',           pat, params).catch(e => { logDebug('sleep', e); return []; }),
-    ouraCollect('v2/usercollection/daily_sleep',     pat, params).catch(e => { logDebug('daily_sleep', e); return []; }),
-    ouraCollect('v2/usercollection/daily_readiness', pat, params).catch(e => { logDebug('daily_readiness', e); return []; }),
-    ouraCollect('v2/usercollection/daily_spo2',      pat, params).catch(e => { logDebug('daily_spo2', e); return []; }),
+    ouraCollect('v2/usercollection/sleep',           accessToken, params).catch(e => { logDebug('sleep', e); return []; }),
+    ouraCollect('v2/usercollection/daily_sleep',     accessToken, params).catch(e => { logDebug('daily_sleep', e); return []; }),
+    ouraCollect('v2/usercollection/daily_readiness', accessToken, params).catch(e => { logDebug('daily_readiness', e); return []; }),
+    ouraCollect('v2/usercollection/daily_spo2',      accessToken, params).catch(e => { logDebug('daily_spo2', e); return []; }),
   ]);
 
   const sleepByDay = bestSessionPerDay(sleepSessions);

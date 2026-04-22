@@ -13,6 +13,7 @@ return (async function() {
   const store = await import('../js/wearables-store.js');
   const summary = await import('../js/wearables-summary.js');
   const labCtx = await import('../js/lab-context.js');
+  const oauth = await import('../js/wearables-oura-auth.js');
 
   // ═══════════════════════════════════════
   // 1. Registry shape
@@ -21,13 +22,20 @@ return (async function() {
 
   assert('ADAPTERS is array', Array.isArray(reg.ADAPTERS));
   assert('Has Oura adapter', reg.ADAPTERS.some(a => a.id === 'oura'));
+  const ouraAdapter = reg.adapterById('oura');
+  assert('Oura authType is oauth2', ouraAdapter?.authType === 'oauth2');
+  assert('Oura has oauth.clientId',
+    typeof ouraAdapter?.oauth?.clientId === 'string' && ouraAdapter.oauth.clientId.length > 10);
+  assert('Oura has redirect URIs registered', Array.isArray(ouraAdapter?.oauth?.redirectUris) && ouraAdapter.oauth.redirectUris.length > 0);
+  assert('Oura redirect URIs include localhost for dev',
+    ouraAdapter.oauth.redirectUris.some(u => u.startsWith('http://localhost')));
+  assert('Oura scopes include personal', ouraAdapter?.oauth?.scopes?.includes('personal'));
   assert('CANONICAL_METRICS has hrv_rmssd', !!reg.CANONICAL_METRICS.hrv_rmssd);
   assert('CANONICAL_METRICS has rhr', !!reg.CANONICAL_METRICS.rhr);
   assert('DEFAULT_METRIC_ORDER is array', Array.isArray(reg.DEFAULT_METRIC_ORDER));
   assert('Default order contains 4 core metrics', reg.DEFAULT_METRIC_ORDER.length >= 4);
   const oura = reg.adapterById('oura');
   assert('adapterById(oura) found', oura?.id === 'oura');
-  assert('Oura has authType pat', oura?.authType === 'pat');
   assert('Oura supports hrv_rmssd', reg.adapterSupportsMetric('oura', 'hrv_rmssd'));
   assert('Oura does not support bogus metric', !reg.adapterSupportsMetric('oura', 'bogus'));
   const ouraMetrics = reg.metricsForSources(['oura']);
@@ -173,9 +181,60 @@ return (async function() {
   assert('Re-enable toggle', labCtx.isWearableContextEnabled() === true);
 
   // ═══════════════════════════════════════
-  // 6. Window exports for render handlers
+  // 6. OAuth2 helpers (authorize URL, state CSRF)
   // ═══════════════════════════════════════
-  console.log('%c 6. Window Exports ', 'font-weight:bold;color:#f59e0b');
+  console.log('%c 6. OAuth2 Helpers ', 'font-weight:bold;color:#f59e0b');
+
+  const clientId = ouraAdapter.oauth.clientId;
+  const redirectUri = ouraAdapter.oauth.redirectUris[0];
+
+  // buildAuthorizeUrl produces a well-formed URL with required params
+  const authUrl = oauth.buildAuthorizeUrl({
+    clientId, redirectUri, scopes: ['personal', 'daily'], state: 'abc123',
+  });
+  const authParsed = new URL(authUrl);
+  assert('Authorize URL goes to cloud.ouraring.com', authParsed.hostname === 'cloud.ouraring.com');
+  assert('Authorize URL path is /oauth/authorize', authParsed.pathname === '/oauth/authorize');
+  assert('Authorize URL has client_id', authParsed.searchParams.get('client_id') === clientId);
+  assert('Authorize URL has redirect_uri', authParsed.searchParams.get('redirect_uri') === redirectUri);
+  assert('Authorize URL is server-side flow (response_type=code)', authParsed.searchParams.get('response_type') === 'code');
+  assert('Authorize URL carries state param', authParsed.searchParams.get('state') === 'abc123');
+  assert('Authorize URL has scope list space-joined', authParsed.searchParams.get('scope') === 'personal daily');
+
+  // pickRedirectUri prefers the one that matches current origin+path
+  const fakeLoc = { origin: 'http://localhost:8000', pathname: '/app' };
+  const picked = oauth.pickRedirectUri(ouraAdapter.oauth.redirectUris, fakeLoc);
+  assert('pickRedirectUri returns localhost URI when on localhost', picked === 'http://localhost:8000/app');
+
+  // completeOAuthCallback rejects when state is missing in sessionStorage
+  sessionStorage.removeItem('oura-oauth-pending');
+  const noPending = await oauth.completeOAuthCallback(new URLSearchParams('code=X&state=Y'));
+  assert('Callback w/ no pending state rejected', noPending.ok === false && /pending/i.test(noPending.error));
+
+  // completeOAuthCallback rejects on state mismatch (CSRF guard)
+  sessionStorage.setItem('oura-oauth-pending', JSON.stringify({
+    state: 'correct-state', redirectUri, startedAt: Date.now(), clientId,
+  }));
+  const badState = await oauth.completeOAuthCallback(new URLSearchParams('code=X&state=wrong-state'));
+  assert('Callback w/ state mismatch rejected (CSRF guard)', badState.ok === false && /state/i.test(badState.error));
+  assert('State consumed even on failure', sessionStorage.getItem('oura-oauth-pending') === null);
+
+  // isOuraCallback recognises a pending Oura flow
+  sessionStorage.setItem('oura-oauth-pending', JSON.stringify({
+    state: 'xyz', redirectUri, startedAt: Date.now(), clientId,
+  }));
+  assert('isOuraCallback true when state matches pending', oauth.isOuraCallback(new URLSearchParams('code=X&state=xyz')));
+  assert('isOuraCallback false when state absent', !oauth.isOuraCallback(new URLSearchParams('code=X')));
+  assert('isOuraCallback false when pending missing', (sessionStorage.removeItem('oura-oauth-pending'), !oauth.isOuraCallback(new URLSearchParams('code=X&state=xyz'))));
+
+  // DEFAULT_OURA_SCOPES sanity
+  assert('DEFAULT_OURA_SCOPES includes personal+daily+heartrate+session',
+    ['personal', 'daily', 'heartrate', 'session'].every(s => oauth.DEFAULT_OURA_SCOPES.includes(s)));
+
+  // ═══════════════════════════════════════
+  // 7. Window exports for render handlers
+  // ═══════════════════════════════════════
+  console.log('%c 7. Window Exports ', 'font-weight:bold;color:#f59e0b');
   assert('window.renderWearableStrip exists', typeof window.renderWearableStrip === 'function');
   assert('window.renderWearablesSettingsSection exists', typeof window.renderWearablesSettingsSection === 'function');
   assert('window.handleWearableConnect exists', typeof window.handleWearableConnect === 'function');

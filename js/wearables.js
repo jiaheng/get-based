@@ -18,7 +18,7 @@
 import { escapeHTML, showNotification, showConfirmDialog } from './utils.js';
 import { state } from './state.js';
 import { ADAPTERS, adapterById, canonicalMetric, metricsForSources } from './wearable-adapters.js';
-import { connectWearable, backfillWearable, disconnectWearable, syncNow, listConnectedSources, getConnection } from './wearables-connect.js';
+import { beginConnectOAuth, backfillWearable, disconnectWearable, syncNow, listConnectedSources, getConnection } from './wearables-connect.js';
 import { syncWearableSummary } from './wearables-summary.js';
 import { getActiveProfileId } from './profile.js';
 
@@ -331,25 +331,21 @@ function renderAdapterCard(adapter, isConnected) {
 }
 
 function renderAuthBlock(adapter, conn) {
-  if (adapter.authType === 'pat') return renderPATBlock(adapter, conn);
-  if (adapter.authType === 'oauth') return `<p class="wearable-adapter-note">OAuth flow — ships in a follow-up.</p>`;
+  if (adapter.authType === 'oauth2') return renderOAuthBlock(adapter, conn);
+  if (adapter.authType === 'pat') return `<p class="wearable-adapter-note">PAT flow is deprecated — this adapter should be upgraded to OAuth2.</p>`;
   if (adapter.authType === 'file-import') return `<p class="wearable-adapter-note">File import — ships in a follow-up.</p>`;
   return '';
 }
 
-function renderPATBlock(adapter, conn) {
-  const docsLink = adapter.authDocsUrl
-    ? `<a href="${escapeHTML(adapter.authDocsUrl)}" target="_blank" rel="noopener">Create a Personal Access Token ↗</a>`
-    : '';
-
-  if (!conn) {
+function renderOAuthBlock(adapter, conn) {
+  if (!conn || conn.needsReauth) {
+    const reauthNote = conn?.needsReauth
+      ? `<p class="wearable-adapter-hint" style="color:var(--red)">Your ${escapeHTML(adapter.displayName)} token was revoked or expired beyond refresh. Reconnect to resume data pulls.</p>`
+      : `<p class="wearable-adapter-hint">Clicking <strong>Connect</strong> sends you to ${escapeHTML(adapter.displayName)} to authorise getbased — you'll be redirected back automatically.</p>`;
     return `<div class="wearable-adapter-body">
-      <p class="wearable-adapter-hint">${docsLink}</p>
-      <input type="password" class="settings-input wearable-adapter-input"
-        id="wearable-pat-${escapeHTML(adapter.id)}"
-        placeholder="Paste your ${escapeHTML(adapter.displayName)} Personal Access Token" autocomplete="off"/>
+      ${reauthNote}
       <div class="wearable-adapter-actions">
-        <button class="ctx-btn-option ctx-btn-primary" onclick="handleWearableConnect('${escapeHTML(adapter.id)}')">Save &amp; test</button>
+        <button class="ctx-btn-option ctx-btn-primary" onclick="handleWearableConnect('${escapeHTML(adapter.id)}')">${conn?.needsReauth ? 'Reconnect' : 'Connect'} ${escapeHTML(adapter.displayName)}</button>
       </div>
     </div>`;
   }
@@ -368,19 +364,10 @@ function renderPATBlock(adapter, conn) {
   </div>`;
 }
 
-async function handleWearableConnect(adapterId) {
-  const input = document.getElementById(`wearable-pat-${adapterId}`);
-  const credential = input?.value?.trim();
-  if (!credential) { showNotification?.('Paste a token first', 'info'); return; }
+function handleWearableConnect(adapterId) {
   try {
-    showNotification?.(`Verifying ${adapterId}…`, 'info', 2000);
-    await connectWearable(adapterId, credential);
-    showNotification?.(`${adapterId} connected — backfilling 90 days…`, 'info', 3000);
-    const bf = await backfillWearable(adapterId);
-    await syncWearableSummary(getActiveProfileId(), listConnectedSources());
-    showNotification?.(`${adapterId} backfilled ${bf.rows} days`, 'success');
-    refreshSettingsWearables();
-    if (window.navigate) window.navigate('dashboard');
+    beginConnectOAuth(adapterId);
+    // beginOAuth navigates away — nothing else to do here.
   } catch (e) {
     showNotification?.(`Connect failed: ${e.message}`, 'error', 5000);
   }

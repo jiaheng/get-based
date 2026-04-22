@@ -24,7 +24,7 @@ for (const fn of _emfFns) {
 import './pdf-import.js';
 import { ensureSNPTable, ensureHaplogroupTable } from './dna.js';
 import './wearables.js';
-import { initWearableScheduler } from './wearables-connect.js';
+import { initWearableScheduler, handleOAuthCallbackOnLoad } from './wearables-connect.js';
 import './export.js';
 import './chat.js';
 import './image-utils.js';
@@ -56,10 +56,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Scheduled wearable sync (only fires when a source is connected)
   initWearableScheduler();
 
+  // Handle Oura OAuth2 callback first — it's distinguishable by presence of a
+  // pending state entry in sessionStorage. If handled, consume the URL params
+  // so the OpenRouter path below doesn't double-process the same code.
+  const ouraHandled = await handleOAuthCallbackOnLoad();
+
   // Handle OpenRouter OAuth callback (?code=...)
   const urlParams = new URLSearchParams(window.location.search);
   const oauthCode = urlParams.get('code');
-  if (oauthCode) {
+  if (!ouraHandled && oauthCode) {
     history.replaceState(null, '', window.location.pathname);
     try {
       const key = await exchangeOpenRouterCode(oauthCode);
