@@ -169,9 +169,10 @@ export const ADAPTERS = [
     authDocsUrl: 'https://developer.withings.com/oauth2/',
     beta: true,
     oauth: {
-      // TODO: replace with the Client ID from your Withings developer portal.
-      // Requires WITHINGS_CLIENT_SECRET env var on Vercel + local dev-server.
-      clientId: 'REPLACE_WITH_WITHINGS_CLIENT_ID',
+      // Withings developer portal Client ID. Public value — ships in the
+      // bundle. The matching client_secret lives only in WITHINGS_CLIENT_SECRET
+      // (Vercel env + local .env.local).
+      clientId: 'a91db99c24c9b52cea01993ad2bd67bb1515921b09d0a3c04d40a7dc1d1b748a',
       redirectUris: [
         'https://app.getbased.health/',
         'https://getbased.health/app',
