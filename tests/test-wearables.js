@@ -426,6 +426,54 @@ return (async function() {
   assert('fetchUltrahumanDailyRange exists', typeof uh.fetchUltrahumanDailyRange === 'function');
   assert('verifyUltrahumanPAT exists', typeof uh.verifyUltrahumanPAT === 'function');
 
+  // ═══════════════════════════════════════
+  // 14. Apple Health XML parser
+  // ═══════════════════════════════════════
+  console.log('%c 14. Apple Health XML ', 'font-weight:bold;color:#f59e0b');
+  const ah = await import('../js/wearables-apple-health.js');
+  const fixtureXml = await fetch('/tests/spike-fixtures/apple-health-sample.xml').then(r => r.text());
+  const ahRows = ah.parseAppleHealthXml(fixtureXml);
+  assert('Apple Health parser returned 2 canonical day rows (2026-04-20, 2026-04-21)',
+    ahRows.length === 2);
+  assert('Apple rows sorted ascending by date',
+    ahRows[0].date === '2026-04-20' && ahRows[1].date === '2026-04-21');
+  const day1 = ahRows.find(r => r.date === '2026-04-20');
+  const day2 = ahRows.find(r => r.date === '2026-04-21');
+
+  // RHR aggregator is MIN (protects against a 3rd-party app injecting 85 bpm)
+  assert('RHR uses min-per-day aggregator (ignores 85bpm 3rd-party outlier, keeps 58)',
+    day1.rhr === 58);
+  // HRV SDNN is mean of 42.5 + 48.5 = 45.5
+  assert('HRV SDNN aggregates as mean-per-day (42.5 & 48.5 → 45.5)',
+    day1.hrv_sdnn === 45.5);
+  // Steps is sum-per-day (320 + 2100 + 5430 = 7850)
+  assert('Steps sum multiple sources per day (320+2100+5430=7850)',
+    day1.steps === 7850);
+  // SpO2 mean of 97 + 95 = 96
+  assert('SpO2 mean-per-day aggregator (97+95 → 96)',
+    day1.spo2_avg === 96);
+  // Day 2 has single readings
+  assert('Day 2 RHR populated (single reading → 56)', day2.rhr === 56);
+  assert('Day 2 HRV SDNN populated (single → 51)', day2.hrv_sdnn === 51);
+
+  // Records we explicitly don't map must NOT end up in canonical rows —
+  // HeartRate (real-time) and BodyMass aren't in our Apple Health mapping yet.
+  assert('Unmapped HeartRate record does not leak into canonical rows',
+    day1.hrv_rmssd === null && day2.hrv_rmssd === null);
+  assert('Body temp delta correctly dropped (no baseline yet, absolute temp unusable)',
+    day1.body_temp_delta === null);
+
+  // Source tag is apple_health so the L1 IDB + multi-source badge paths pick
+  // it up as a distinct vendor alongside Oura/WHOOP.
+  assert('Canonical row carries source: apple_health', day1.source === 'apple_health');
+
+  // Unit-normalisation guard — a record with a bogus unit string must be
+  // dropped rather than silently stored in the wrong scale.
+  const hostileXml = '<?xml version="1.0"?><HealthData><Record type="HKQuantityTypeIdentifierStepCount" unit="furlongs" startDate="2026-04-20 00:00:00 +0000" value="12"/></HealthData>';
+  const hostileRows = ah.parseAppleHealthXml(hostileXml);
+  assert('Hostile unit ("furlongs" for steps) is refused, not ingested',
+    hostileRows.length === 0 || hostileRows[0].steps === null);
+
   // Formatter-unification guard: a value with unit '%' must render the SAME
   // way in the strip card and the detail modal. Catches the v1.22.2 divergence
   // where `formatValue(97, '%')` returned "97" but the modal's inline formatV

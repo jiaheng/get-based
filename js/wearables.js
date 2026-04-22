@@ -521,7 +521,7 @@ function renderAuthBlock(adapter, conn) {
   }
   if (adapter.authType === 'pat') return renderPATBlock(adapter, conn);
   if (adapter.authType === 'file-import') {
-    if (adapter.id === 'apple_health') return renderComingSoonBlock(adapter, 'Drop your Apple Health export.zip here — XML parser lands in the next beta.');
+    if (adapter.id === 'apple_health') return renderAppleHealthBlock(adapter, conn);
     return `<p class="wearable-adapter-note">File import — ships in a follow-up.</p>`;
   }
   return '';
@@ -532,6 +532,38 @@ function renderComingSoonBlock(adapter, msg) {
   return `<div class="wearable-adapter-body">
     <p class="wearable-adapter-hint">${escapeHTML(msg)}</p>
     ${docs ? `<p class="wearable-adapter-hint" style="font-size:11px;opacity:0.8">${docs}</p>` : ''}
+  </div>`;
+}
+
+function renderAppleHealthBlock(adapter, conn) {
+  if (conn?.lastSyncAt) {
+    const when = new Date(conn.lastSyncAt).toLocaleString();
+    const fileName = conn.fileName ? escapeHTML(conn.fileName) : 'export';
+    return `<div class="wearable-adapter-body">
+      <div class="wearable-adapter-identity">Imported from ${fileName}</div>
+      <div class="wearable-adapter-meta">Last import: ${escapeHTML(when)} · ${conn.coverageDays ?? '?'} days</div>
+      <div class="wearable-adapter-actions">
+        <button class="ctx-btn-option" onclick="document.getElementById('apple-health-file-input').click()">Re-import new export</button>
+        <button class="ctx-btn-option ctx-btn-danger" onclick="handleWearableDisconnect('${escapeHTML(adapter.id)}')">Remove data</button>
+      </div>
+      <input type="file" id="apple-health-file-input" accept=".zip,.xml,application/zip,application/xml" style="display:none" onchange="handleAppleHealthFilePick(this)">
+    </div>`;
+  }
+  return `<div class="wearable-adapter-body">
+    <p class="wearable-adapter-hint">Export from iPhone: Health app → your profile photo (top right) → <b>Export All Health Data</b>. Drop the resulting <code>export.zip</code> here (or the <code>export.xml</code> inside). Parsing happens in your browser — nothing uploads.</p>
+    <div class="apple-health-dropzone"
+         ondragover="event.preventDefault();this.classList.add('drag-over')"
+         ondragleave="this.classList.remove('drag-over')"
+         ondrop="event.preventDefault();this.classList.remove('drag-over');handleAppleHealthDrop(event)"
+         onclick="document.getElementById('apple-health-file-input').click()">
+      <div class="apple-health-dropzone-icon">📂</div>
+      <div class="apple-health-dropzone-text">Drop <code>export.zip</code> or <code>export.xml</code> here — or click to pick a file</div>
+    </div>
+    <div id="apple-health-progress" class="apple-health-progress" style="display:none">
+      <div class="apple-health-progress-bar"><div class="apple-health-progress-fill"></div></div>
+      <div class="apple-health-progress-text"></div>
+    </div>
+    <input type="file" id="apple-health-file-input" accept=".zip,.xml,application/zip,application/xml" style="display:none" onchange="handleAppleHealthFilePick(this)">
   </div>`;
 }
 
@@ -597,6 +629,39 @@ function handleWearableConnect(adapterId) {
     // beginOAuth navigates away — nothing else to do here.
   } catch (e) {
     showNotification?.(`Connect failed: ${e.message}`, 'error', 5000);
+  }
+}
+
+function handleAppleHealthDrop(e) {
+  const file = e.dataTransfer?.files?.[0];
+  if (file) importAppleHealthFlow(file);
+}
+
+function handleAppleHealthFilePick(input) {
+  const file = input.files?.[0];
+  if (file) importAppleHealthFlow(file);
+  input.value = ''; // so picking the same file twice re-triggers
+}
+
+async function importAppleHealthFlow(file) {
+  const { importAppleHealthFile } = await import('./wearables-apple-health.js');
+  const bar = document.querySelector('.apple-health-progress-fill');
+  const wrap = document.getElementById('apple-health-progress');
+  const text = document.querySelector('.apple-health-progress-text');
+  if (wrap) wrap.style.display = 'block';
+  try {
+    const res = await importAppleHealthFile(file, ({ stage, pct, rows, startDate, endDate }) => {
+      if (bar) bar.style.width = (pct ?? 0) + '%';
+      if (text) text.textContent = stage === 'done'
+        ? `${rows} days imported (${startDate} – ${endDate})`
+        : `${stage}… ${pct ?? 0}%`;
+    });
+    showNotification?.(`Apple Health imported — ${res.rows} days`, 'success', 3000);
+    refreshSettingsWearables();
+    if (window.navigate) window.navigate('dashboard');
+  } catch (e) {
+    showNotification?.(`Apple Health import failed: ${e.message}`, 'error', 6000);
+    if (text) text.textContent = `Failed: ${e.message}`;
   }
 }
 
@@ -666,4 +731,6 @@ Object.assign(window, {
   handleWearableSyncNow,
   handleWearableBackfill,
   handleWearableDisconnect,
+  handleAppleHealthDrop,
+  handleAppleHealthFilePick,
 });

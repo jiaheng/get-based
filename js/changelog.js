@@ -5,6 +5,14 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.23.1', date: '2026-04-22', title: 'Apple Health import is live (BETA)',
+    items: [
+      'Drop your Apple Health <code>export.zip</code> (or raw <code>export.xml</code>) on the Integrations tab. The XML parser runs entirely in your browser — no upload, no third-party service. Currently ingests HRV (SDNN), resting heart rate, steps, and SpO₂; more metrics next pass.',
+      'Multi-source support is live: connect Apple Health alongside Oura/WHOOP and the strip automatically picks the source with the most-recent non-null value per metric. "via Apple Health" / "via Oura" badges on each card show which is driving each reading.',
+      'Aggregation rules per metric: HRV → mean, resting HR → min (protects against third-party-app outliers), steps → sum across sources, SpO₂ → mean. Bogus-unit records are refused rather than stored in the wrong scale.',
+    ]
+  },
+  {
     version: '1.23.0', date: '2026-04-22', title: 'Multi-vendor wearables (BETA) — Ultrahuman, WHOOP, Apple Health, Withings',
     items: [
       'New <b>Integrations</b> tab in Settings — Wearables and Agent Access moved out of the Data tab, which was getting crowded with unrelated sections.',
