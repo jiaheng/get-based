@@ -8,6 +8,7 @@ import { getActiveData, filterDatesByRange, destroyAllCharts, getEffectiveRange,
 import { profileStorageKey } from './profile.js';
 import { createLineChart, getMarkerDescription, getNotesForChart, getSupplementsForChart, refBandPlugin, noteAnnotationPlugin, supplementBarPlugin } from './charts.js';
 import { renderSupplementsSection } from './supplements.js';
+import { renderWearableStrip } from './wearables.js';
 import { renderGeneticsSection } from './dna.js';
 import { renderMenstrualCycleSection } from './cycle.js';
 import { renderProfileContextCards, renderInterpretiveLensSection, loadContextHealthDots, closeSuggestionsOnClickOutside } from './context-cards.js';
@@ -117,6 +118,9 @@ export function showDashboard(data) {
 
   // ── 6. Supplements & Medications ──
   html += renderSupplementsSection();
+
+  // ── 6b. Wearable strip (Oura) — mock-only in this PR, real data pipeline in follow-up ──
+  html += renderWearableStrip();
 
   // ── 7. Key Trends ──
   const filteredData = filterDatesByRange(data);

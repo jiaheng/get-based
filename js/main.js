@@ -23,6 +23,7 @@ for (const fn of _emfFns) {
 }
 import './pdf-import.js';
 import { ensureSNPTable, ensureHaplogroupTable } from './dna.js';
+import './wearables.js';
 import './export.js';
 import './chat.js';
 import './image-utils.js';
