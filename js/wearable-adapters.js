@@ -182,11 +182,11 @@ export const ADAPTERS = [
     authDocsUrl: 'https://dev.fitbit.com/build/reference/web-api/',
     beta: true,
     oauth: {
-      // Fitbit PKCE — public client, no client_secret. Paste the Client ID
-      // from dev.fitbit.com → Register an App here (application type: Personal
-      // for dev, Server for production). Redirect URIs below must match what
-      // you register there, character-for-character.
-      clientId: 'REPLACE_WITH_FITBIT_CLIENT_ID',
+      // Fitbit Web API Client ID (public value — PKCE flow, no client_secret).
+      // Registered at dev.fitbit.com as OAuth 2.0 Application Type = Client
+      // (public PKCE). Redirect URIs below must match what's registered there,
+      // character-for-character.
+      clientId: '23VBN8',
       redirectUris: [
         'https://app.getbased.health/',
         'https://getbased.health/app',
