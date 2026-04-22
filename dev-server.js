@@ -332,8 +332,14 @@ const server = http.createServer((req, res) => {
         const parsedUrl = new URL(targetUrl);
         const mod = parsedUrl.protocol === 'https:' ? https : http;
         const fetchMethod = (upMethod || 'POST').toUpperCase();
+        // Caller-provided headers win. We fall back to application/json ONLY
+        // if the caller didn't supply a Content-Type — otherwise Fitbit / any
+        // form-urlencoded token endpoint breaks (it gets our form body tagged
+        // as JSON and can't parse the `client_id` out). Matches the spread
+        // order already used in api/proxy.js.
         const reqHeaders = { ...fwdHeaders };
-        if (fetchMethod !== 'GET') reqHeaders['Content-Type'] = 'application/json';
+        const hasCT = Object.keys(reqHeaders).some(k => k.toLowerCase() === 'content-type');
+        if (fetchMethod !== 'GET' && !hasCT) reqHeaders['Content-Type'] = 'application/json';
         const proxyReq = mod.request(targetUrl, { method: fetchMethod, headers: reqHeaders }, (proxyRes) => {
           const ct = proxyRes.headers['content-type'] || 'application/json';
           res.writeHead(proxyRes.statusCode, { 'Content-Type': ct, 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' });
