@@ -203,20 +203,34 @@ function sparklineSVG(series, baseline, worseWhen) {
 function renderCard(metricId, canon, metric, showSourceBadge) {
   const deltaCls = deltaClassFor(metric.latest, metric.baseline, canon.worseWhen);
   const deltaText = formatDelta(metric.latest, metric.baseline);
-  const subLabel = canon.sub ? `<span class="wearable-metric-sub">${escapeHTML(canon.sub)}</span>` : '';
+  // Space-prefix the sub so screen readers hear "HRV RMSSD" not "HRVRMSSD".
+  // Visual spacing is still margin-left via .wearable-metric-sub CSS.
+  const subLabel = canon.sub ? ` <span class="wearable-metric-sub">${escapeHTML(canon.sub)}</span>` : '';
   const unitLabel = canon.unit ? `<span class="wearable-unit">${escapeHTML(canon.unit)}</span>` : '';
   const baselineUnit = canon.unit ? ' ' + escapeHTML(canon.unit) : '';
   const trendCls = trendClassFor(metric.trend30d, canon.worseWhen);
   const adapter = adapterById(metric.primarySource);
+  // Source badge is interactive when >1 wearable is connected — click it to
+  // open a small picker that overrides the primary source for this metric.
+  // Without the override, the summary picker auto-picks by most-recent
+  // non-null value, which can feel arbitrary when two sources report similar
+  // freshness. The override is per-metric, persisted in importedData.
   const sourceBadge = (showSourceBadge && adapter)
-    ? `<span class="wearable-source-badge">via ${escapeHTML(adapter.displayName)}</span>` : '';
-  return `<div class="wearable-card" onclick="openWearableDetail('${escapeHTML(metricId)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openWearableDetail('${escapeHTML(metricId)}')}" role="button" tabindex="0" aria-label="Open ${escapeHTML(canon.label)} detail">
+    ? `<button type="button" class="wearable-source-badge wearable-source-badge-btn" onclick="event.stopPropagation();chooseWearableSource('${escapeHTML(metricId)}',event)" title="Click to switch source for this metric">via ${escapeHTML(adapter.displayName)}</button>` : '';
+  // Build a meaningful aria-label: value + unit + trend direction + metric
+  // name so screen readers can read the card at a glance without entering it.
+  const valueRead = formatValue(metric.latest, canon.unit);
+  const trendRead = trendLabel(metric.trend30d);
+  const canonRead = canon.sub ? `${canon.label} ${canon.sub}` : canon.label;
+  const deltaRead = deltaText.replace('↑', 'up').replace('↓', 'down').replace('→', 'flat at');
+  const ariaLabel = `${canonRead} ${valueRead}${canon.unit ? ' ' + canon.unit : ''}, ${deltaRead} vs baseline, ${trendRead} — open detail`;
+  return `<div class="wearable-card" onclick="openWearableDetail('${escapeHTML(metricId)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openWearableDetail('${escapeHTML(metricId)}')}" role="button" tabindex="0" aria-label="${escapeHTML(ariaLabel)}">
     <div class="wearable-card-top">
       <span class="wearable-metric-name">${escapeHTML(canon.label)}${subLabel}</span>
       <span class="wearable-delta ${deltaCls}">${deltaText}</span>
     </div>
     <div class="wearable-value-row">
-      <span class="wearable-value">${formatValue(metric.latest, canon.unit)}</span>${unitLabel}
+      <span class="wearable-value">${valueRead}</span>${unitLabel}
       <span class="wearable-baseline">baseline ${escapeHTML(String(metric.baseline))}${baselineUnit}</span>
     </div>
     ${sparklineSVG(metric.weekly, metric.baseline, canon.worseWhen)}
@@ -248,17 +262,25 @@ export function renderWearableStrip() {
     /* mock flag: summary === MOCK_SUMMARY — avoid import cycle by comparing a sentinel */
     summary === MOCK_SUMMARY;
 
+  // Footer caveat is source-aware: only show the Oura HRV note if Oura is
+  // actually the primary source driving the HRV card. Otherwise it looks like
+  // a generic disclaimer that doesn't apply to the user's current wearable.
+  const hrvPrimary = summary.metrics?.hrv_rmssd?.primarySource;
+  const footerNote = hrvPrimary === 'oura'
+    ? 'Deep HRV (SDNN · pNN50 · HF/LF) needs an ECG chest strap — Oura provides RMSSD only.'
+    : '';
+
   let html = `<section class="wearable-strip" id="wearable-strip">
-    <div class="wearable-strip-header" onclick="toggleWearableStrip()">
+    <div class="wearable-strip-header" role="button" tabindex="0" aria-expanded="${!collapsed}" onclick="toggleWearableStrip()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleWearableStrip()}">
       <div class="wearable-strip-title">
-        <span class="wearable-strip-icon">⌬</span>
-        <span>Wearable <span class="wearable-source-label">${escapeHTML(sourceLabel)}${coverageLabel}</span></span>
+        <span class="wearable-strip-icon" aria-hidden="true">⌬</span>
+        <span>Wearables: <span class="wearable-source-label">${escapeHTML(sourceLabel)}${coverageLabel}</span></span>
         ${isMock ? '<span class="wearable-strip-demo-pill">demo data</span>' : ''}
       </div>
       <div class="wearable-strip-meta">
         <span>last synced ${formatAgo(lastSyncAt)}</span>
-        <a href="#" class="wearable-strip-sync" onclick="event.stopPropagation();syncWearableNow();return false">Sync now</a>
-        <span class="wearable-collapse-arrow${collapsed ? ' collapsed' : ''}">▾</span>
+        <button type="button" class="wearable-strip-sync" onclick="event.stopPropagation();syncWearableNow();return false">Sync now</button>
+        <span class="wearable-collapse-arrow${collapsed ? ' collapsed' : ''}" aria-hidden="true">▾</span>
       </div>
     </div>
     <div class="wearable-card-grid${collapsed ? ' hidden' : ''}">`;
@@ -271,11 +293,13 @@ export function renderWearableStrip() {
     html += renderCard(metricId, canon, metric, showSourceBadges);
   }
 
-  html += `</div>
-    <div class="wearable-strip-footer${collapsed ? ' hidden' : ''}">
-      <span class="wearable-strip-footer-note">Deep HRV (SDNN · pNN50 · HF/LF) needs an ECG chest strap — Oura provides RMSSD only.</span>
-    </div>
-  </section>`;
+  html += `</div>`;
+  if (footerNote) {
+    html += `<div class="wearable-strip-footer${collapsed ? ' hidden' : ''}">
+      <span class="wearable-strip-footer-note">${escapeHTML(footerNote)}</span>
+    </div>`;
+  }
+  html += `</section>`;
   return html;
 }
 
@@ -298,7 +322,13 @@ function toggleWearableStrip() {
 // DETAIL MODAL — 90d daily chart + stats for a single metric
 // ─────────────────────────────────────────────────────────
 
+// Monotonic op token — fast successive clicks on different cards shouldn't
+// land mismatched data in the modal. Each call grabs a new token; any work
+// that resolves with a stale token aborts before touching the DOM.
+let _detailOp = 0;
+
 async function openWearableDetail(metricId) {
+  const op = ++_detailOp;
   const canon = canonicalMetric(metricId);
   const summary = state.importedData?.wearableSummary;
   const m = summary?.metrics?.[metricId];
@@ -317,6 +347,7 @@ async function openWearableDetail(metricId) {
   let rows = [];
   try { rows = await getDailyRange(profileId, m.primarySource, startDate, endDate); }
   catch (e) { showNotification?.(`Couldn't read local history: ${e.message}`, 'error', 4000); return; }
+  if (op !== _detailOp) return;  // superseded by a later click — bail
 
   const series = rows
     .map(r => ({ date: r.date, v: r[metricId] }))
@@ -335,6 +366,8 @@ async function openWearableDetail(metricId) {
 
   modal.innerHTML = buildWearableDetailHtml(canon, m, series, metricId);
   overlay.classList.add('show');
+  // Move focus to the close button so keyboard users land inside the modal.
+  modal.querySelector('.modal-close')?.focus?.();
 
   const canvas = document.getElementById('chart-modal');
   if (canvas && typeof window.Chart !== 'undefined' && series.length > 0) {
@@ -347,7 +380,7 @@ function buildWearableDetailHtml(canon, m, series, metricId) {
   const sourceName = adapter?.displayName || m.primarySource;
   const unit = canon.unit || '';
   const unitSpaced = unit ? ' ' + escapeHTML(unit) : '';
-  const subLabel = canon.sub ? `<span style="opacity:0.6;font-size:0.7em;margin-left:6px;font-weight:normal">${escapeHTML(canon.sub)}</span>` : '';
+  const subLabel = canon.sub ? ` <span style="opacity:0.6;font-size:0.7em;margin-left:6px;font-weight:normal">${escapeHTML(canon.sub)}</span>` : '';
   const formatV = v => formatValue(v, unit);
 
   // Trend copy mirrors the strip card so users get consistent language.
@@ -461,6 +494,86 @@ function renderWearableChart(canvas, canon, m, series) {
   });
 }
 
+// Per-metric primary-source override picker. Reads connected sources that
+// actually have data for this metric and lets the user pick one. The summary
+// pipeline respects `state.importedData.wearablePrimaryOverride[metricId]`.
+async function chooseWearableSource(metricId, event) {
+  const canon = canonicalMetric(metricId);
+  if (!canon) return;
+  const connected = listConnectedSources();
+  const connectedIds = Object.keys(connected);
+  if (connectedIds.length < 2) return;
+
+  // Find sources that map this canonical metric in their adapter registry —
+  // no point offering WHOOP as a source for `weight` (it doesn't do scales).
+  const eligible = connectedIds.filter(sid => {
+    const a = adapterById(sid);
+    return !!a?.metrics?.[metricId];
+  });
+  if (eligible.length < 2) {
+    showNotification?.(`Only one connected wearable provides ${canon.label}`, 'info', 2500);
+    return;
+  }
+
+  // Close any existing picker, then build + position a new one near the click.
+  document.querySelectorAll('.wearable-source-picker').forEach(el => el.remove());
+  const current = state.importedData?.wearablePrimaryOverride?.[metricId]
+    || state.importedData?.wearableSummary?.metrics?.[metricId]?.primarySource
+    || eligible[0];
+  const picker = document.createElement('div');
+  picker.className = 'wearable-source-picker';
+  picker.innerHTML = `
+    <div class="wearable-source-picker-head">${escapeHTML(canon.label)} source</div>
+    ${eligible.map(sid => {
+      const a = adapterById(sid);
+      const selected = sid === current;
+      return `<button type="button" class="wearable-source-picker-item${selected ? ' selected' : ''}" data-source="${escapeHTML(sid)}">
+        <span>${escapeHTML(a?.displayName || sid)}</span>
+        ${selected ? '<span class="wearable-source-picker-check">✓</span>' : ''}
+      </button>`;
+    }).join('')}
+    <button type="button" class="wearable-source-picker-item wearable-source-picker-auto" data-source="">
+      <span>Auto (most recent)</span>
+      ${!state.importedData?.wearablePrimaryOverride?.[metricId] ? '<span class="wearable-source-picker-check">✓</span>' : ''}
+    </button>
+  `;
+  const rect = event.target.getBoundingClientRect();
+  picker.style.position = 'fixed';
+  picker.style.top = `${rect.bottom + 4}px`;
+  picker.style.left = `${Math.max(8, rect.left - 60)}px`;
+  picker.style.zIndex = '10000';
+  document.body.appendChild(picker);
+
+  // Wire clicks — pick a source, persist override, re-render strip.
+  picker.querySelectorAll('[data-source]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const sid = btn.dataset.source;
+      if (!state.importedData.wearablePrimaryOverride) state.importedData.wearablePrimaryOverride = {};
+      if (!sid) delete state.importedData.wearablePrimaryOverride[metricId];
+      else state.importedData.wearablePrimaryOverride[metricId] = sid;
+      const { saveImportedData } = await import('./data.js');
+      await saveImportedData();
+      await syncWearableSummary(getActiveProfileId(), listConnectedSources());
+      picker.remove();
+      if (window.navigate) window.navigate('dashboard');
+    });
+  });
+
+  // Dismiss on outside click / Escape.
+  setTimeout(() => {
+    const dismiss = (e) => {
+      if (picker.contains(e.target)) return;
+      picker.remove();
+      document.removeEventListener('click', dismiss);
+      document.removeEventListener('keydown', onKey);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') { picker.remove(); document.removeEventListener('keydown', onKey); document.removeEventListener('click', dismiss); } };
+    document.addEventListener('click', dismiss);
+    document.addEventListener('keydown', onKey);
+  }, 0);
+}
+
 async function syncWearableNow() {
   const sources = Object.keys(listConnectedSources());
   if (sources.length === 0) {
@@ -518,7 +631,7 @@ function renderAuthBlock(adapter, conn) {
     // URL. The first real beta tester only lands once the maintainer pastes
     // the ID + sets the provider's env var on Vercel.
     if (adapter.oauth?.clientId?.startsWith('REPLACE_WITH_')) {
-      return renderComingSoonBlock(adapter, `${adapter.displayName} OAuth is registered but needs maintainer to paste the Client ID and set ${adapter.id.toUpperCase()}_CLIENT_SECRET. Ping the maintainer to unlock.`);
+      return renderComingSoonBlock(adapter, `${adapter.displayName} support is in progress — we’re waiting on partner credentials. Check back soon or watch the changelog.`);
     }
     return renderOAuthBlock(adapter, conn);
   }
@@ -594,7 +707,7 @@ function renderOAuthBlock(adapter, conn) {
     <div class="wearable-adapter-meta">Last sync: ${escapeHTML(when)}</div>
     <div class="wearable-adapter-actions">
       <button class="ctx-btn-option" onclick="handleWearableSyncNow('${escapeHTML(adapter.id)}')">Sync now</button>
-      <button class="ctx-btn-option" onclick="handleWearableBackfill('${escapeHTML(adapter.id)}')">Re-backfill 90d</button>
+      <button class="ctx-btn-option" onclick="handleWearableBackfill('${escapeHTML(adapter.id)}')">Re-sync last 90 days</button>
       <button class="ctx-btn-option ctx-btn-danger" onclick="handleWearableDisconnect('${escapeHTML(adapter.id)}')">Disconnect</button>
     </div>
   </div>`;
@@ -684,6 +797,7 @@ Object.assign(window, {
   toggleWearableStrip,
   openWearableDetail,
   syncWearableNow,
+  chooseWearableSource,
   hasWearableSummary,
   renderWearablesSettingsSection,
   handleWearableConnect,

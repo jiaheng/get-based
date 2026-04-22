@@ -176,22 +176,24 @@ function normalizeTokenResponse(body) {
 // Refresh middleware — same contract as Oura's withFreshToken
 // ─────────────────────────────────────────────────────────
 
-export async function withFreshToken(connection, clientId, refreshedWrite) {
+export async function withFreshToken(connection, clientId, refreshedWrite, readLatest) {
   const needsRefresh = !connection.accessToken || !connection.expiresAt || (connection.expiresAt - Date.now()) < REFRESH_LEAD_MS;
   if (!needsRefresh) return connection;
 
   const run = async () => {
-    if (!connection.refreshToken) {
+    const latest = (readLatest?.() ?? connection);
+    if (latest.expiresAt && (latest.expiresAt - Date.now()) >= REFRESH_LEAD_MS) return latest;
+    if (!latest.refreshToken) {
       const e = new Error('No refresh token stored — user must reconnect');
       e.code = 'needs-reauth'; throw e;
     }
-    const fresh = await refreshTokens({ clientId, refreshToken: connection.refreshToken });
+    const fresh = await refreshTokens({ clientId, refreshToken: latest.refreshToken });
     const updated = {
-      ...connection,
+      ...latest,
       accessToken: fresh.accessToken,
-      refreshToken: fresh.refreshToken || connection.refreshToken,
+      refreshToken: fresh.refreshToken || latest.refreshToken,
       expiresAt: fresh.expiresAt,
-      scope: fresh.scope || connection.scope,
+      scope: fresh.scope || latest.scope,
     };
     await refreshedWrite(updated);
     return updated;

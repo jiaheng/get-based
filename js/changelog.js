@@ -5,6 +5,19 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.24.1', date: '2026-04-22', title: 'Audit pass — a11y, security, Fitbit rate limits, source picker',
+    items: [
+      '<b>Fitbit backfill 90× faster and no longer 429s</b>. Switched to Fitbit\'s date-range endpoints — one request per metric per backfill instead of one per day. Fitbit\'s 150-req/hour limit used to kill the first connect within minutes.',
+      '<b>Pick which wearable drives each metric</b>. When you have more than one connected (Oura + Fitbit, say), click the tiny "via Oura" / "via Fitbit" badge on any card and choose. Defaults to most-recent-data, but now you can pin it to whichever you trust more for that specific reading.',
+      'Source-aware footer caveat. The "Deep HRV needs an ECG chest strap — Oura provides RMSSD only" note now only shows when Oura is actually driving your HRV card.',
+      'Accessibility: every strip card now has a screen-reader-friendly label ("HRV RMSSD 39 ms, up 20% vs baseline, rising 30d — open detail"). The strip header and Sync now button are keyboard-activatable. Detail modal focus moves to the close button on open.',
+      'Proxy hardening: <code>/api/proxy</code> now reflects CORS only to our own origins (app.getbased.health, getbased.health, localhost:8000 in dev) instead of <code>*</code>. Local dev-server gained the same SSRF allowlist the production edge function always had.',
+      'Cross-tab auth race fixed. When two tabs tried to refresh tokens at the same time, the losing tab could end up with an invalidated refresh_token and hit a spurious "needs reconnection" toast. Now each tab re-reads the latest connection inside the lock and skips if another tab already refreshed.',
+      'Profile-swap guard. Starting an OAuth flow in profile A and returning in profile B no longer lands the connection in the wrong profile; we surface a clear "switch back and retry" message.',
+      'Polish: "Re-backfill 90d" → "Re-sync last 90 days". "Ping the maintainer to unlock" → "{vendor} support is in progress — we\'re waiting on partner credentials". Card headings hear "HRV RMSSD" instead of "HRVRMSSD".',
+    ]
+  },
+  {
     version: '1.24.0', date: '2026-04-22', title: 'Fitbit integration (BETA) — 6 wearable vendors supported',
     items: [
       '<b>Fitbit</b> joins the integrations list. OAuth 2.0 with PKCE — public client, no server-held secret. Pulls HRV RMSSD, resting heart rate, steps, sleep efficiency (0-100 proxy for Fitbit\'s in-app Sleep Score, which isn\'t exposed via API), SpO₂ average, skin temperature delta, and body weight from log entries.',

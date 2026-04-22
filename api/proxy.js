@@ -71,14 +71,14 @@ export default async function handler(req) {
   if (req.method === 'OPTIONS') {
     return new Response(null, {
       status: 204,
-      headers: corsHeaders(),
+      headers: corsHeaders(req),
     });
   }
 
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed. Use POST with {url, headers, body?, method?}' }), {
       status: 405,
-      headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+      headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
     });
   }
 
@@ -88,7 +88,7 @@ export default async function handler(req) {
   } catch {
     return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
       status: 400,
-      headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+      headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
     });
   }
 
@@ -96,7 +96,7 @@ export default async function handler(req) {
   // Client-secret-bearing requests — secret never reaches the browser.
   // Single place in the codebase that reads OURA_CLIENT_SECRET.
   if (payload.oura_token_exchange || payload.oura_token_refresh) {
-    return handleOuraTokenRequest(payload);
+    return handleOuraTokenRequest(payload, req);
   }
 
   // ─── Withings OAuth2 server-side flow ───────────────────────────
@@ -104,14 +104,14 @@ export default async function handler(req) {
   // `action=requesttoken` / `requesttoken2` in the form body alongside the
   // grant params; single place that reads WITHINGS_CLIENT_SECRET.
   if (payload.withings_token_exchange || payload.withings_token_refresh) {
-    return handleWithingsTokenRequest(payload);
+    return handleWithingsTokenRequest(payload, req);
   }
 
   // ─── Ultrahuman OAuth2 server-side flow ─────────────────────────
   // Confidential client (has client_secret). Token endpoint at
   // partner.ultrahuman.com/api/partners/oauth/token.
   if (payload.ultrahuman_token_exchange || payload.ultrahuman_token_refresh) {
-    return handleUltrahumanTokenRequest(payload);
+    return handleUltrahumanTokenRequest(payload, req);
   }
 
   const { url, headers, body, method: upstreamMethod } = payload;
@@ -119,7 +119,7 @@ export default async function handler(req) {
   if (!url || !isAllowedUrl(url)) {
     return new Response(JSON.stringify({ error: 'URL not allowed' }), {
       status: 403,
-      headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+      headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
     });
   }
 
@@ -146,7 +146,7 @@ export default async function handler(req) {
       return new Response(responseBody, {
         status: upstreamRes.status,
         headers: {
-          ...corsHeaders(),
+          ...corsHeaders(req),
           'Content-Type': contentType || 'application/json',
         },
       });
@@ -156,7 +156,7 @@ export default async function handler(req) {
     return new Response(upstreamRes.body, {
       status: upstreamRes.status,
       headers: {
-        ...corsHeaders(),
+        ...corsHeaders(req),
         'Content-Type': contentType,
         'Cache-Control': 'no-cache',
         'Connection': 'keep-alive',
@@ -165,17 +165,34 @@ export default async function handler(req) {
   } catch (e) {
     return new Response(JSON.stringify({ error: `Upstream error: ${e.message}` }), {
       status: 502,
-      headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+      headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
     });
   }
 }
 
-function corsHeaders() {
-  return {
-    'Access-Control-Allow-Origin': '*',
+// Origins permitted to call /api/proxy. Lock to our production surfaces +
+// localhost:8000 dev. Previously we returned `Access-Control-Allow-Origin: *`
+// which let any page on the internet use our proxy as an authenticated-request
+// relay; now the browser enforces the allowlist via CORS.
+const ALLOWED_CALLER_ORIGINS = [
+  'https://app.getbased.health',
+  'https://getbased.health',
+  'http://localhost:8000',
+];
+
+function corsHeaders(req) {
+  // Reflect the caller's Origin if and only if it's in the allowlist. Any
+  // other origin gets no Allow-Origin header at all, which causes the browser
+  // to block the response (effective 403 client-side).
+  const origin = req?.headers?.get?.('origin') || '';
+  const allow = ALLOWED_CALLER_ORIGINS.includes(origin) ? origin : '';
+  const h = {
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
+    'Vary': 'Origin',
   };
+  if (allow) h['Access-Control-Allow-Origin'] = allow;
+  return h;
 }
 
 // ─── Oura token handler ────────────────────────────────────────────
@@ -184,11 +201,11 @@ function corsHeaders() {
 //   { oura_token_refresh:  { refresh_token, client_id } }
 // client_id is sent from the browser (public value) so the proxy stays
 // provider-agnostic — the secret is the only thing kept server-side.
-async function handleOuraTokenRequest(payload) {
+async function handleOuraTokenRequest(payload, req) {
   const secret = typeof process !== 'undefined' ? process.env?.OURA_CLIENT_SECRET : undefined;
   if (!secret) {
     return new Response(JSON.stringify({ error: 'OURA_CLIENT_SECRET not configured on this deployment' }), {
-      status: 500, headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+      status: 500, headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
     });
   }
 
@@ -197,7 +214,7 @@ async function handleOuraTokenRequest(payload) {
     const { code, redirect_uri, client_id } = payload.oura_token_exchange;
     if (!code || !redirect_uri || !client_id) {
       return new Response(JSON.stringify({ error: 'oura_token_exchange requires code, redirect_uri, client_id' }), {
-        status: 400, headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+        status: 400, headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
       });
     }
     form = new URLSearchParams({
@@ -208,7 +225,7 @@ async function handleOuraTokenRequest(payload) {
     const { refresh_token, client_id } = payload.oura_token_refresh;
     if (!refresh_token || !client_id) {
       return new Response(JSON.stringify({ error: 'oura_token_refresh requires refresh_token, client_id' }), {
-        status: 400, headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+        status: 400, headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
       });
     }
     form = new URLSearchParams({
@@ -226,11 +243,11 @@ async function handleOuraTokenRequest(payload) {
     const body = await res.text();
     return new Response(body, {
       status: res.status,
-      headers: { ...corsHeaders(), 'Content-Type': res.headers.get('content-type') || 'application/json' },
+      headers: { ...corsHeaders(req), 'Content-Type': res.headers.get('content-type') || 'application/json' },
     });
   } catch (e) {
     return new Response(JSON.stringify({ error: 'Token endpoint unreachable: ' + e.message }), {
-      status: 502, headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+      status: 502, headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
     });
   }
 }
@@ -241,11 +258,11 @@ async function handleOuraTokenRequest(payload) {
 //   { withings_token_refresh:  { refresh_token, client_id } }
 // Withings's token endpoint is POST wbsapi.withings.net/v2/oauth2 with an
 // `action=requesttoken` (or `requesttoken2` for refresh) in the body.
-async function handleWithingsTokenRequest(payload) {
+async function handleWithingsTokenRequest(payload, req) {
   const secret = typeof process !== 'undefined' ? process.env?.WITHINGS_CLIENT_SECRET : undefined;
   if (!secret) {
     return new Response(JSON.stringify({ error: 'WITHINGS_CLIENT_SECRET not configured on this deployment' }), {
-      status: 500, headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+      status: 500, headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
     });
   }
 
@@ -254,7 +271,7 @@ async function handleWithingsTokenRequest(payload) {
     const { code, redirect_uri, client_id } = payload.withings_token_exchange;
     if (!code || !redirect_uri || !client_id) {
       return new Response(JSON.stringify({ error: 'withings_token_exchange requires code, redirect_uri, client_id' }), {
-        status: 400, headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+        status: 400, headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
       });
     }
     form = new URLSearchParams({
@@ -267,7 +284,7 @@ async function handleWithingsTokenRequest(payload) {
     const { refresh_token, client_id } = payload.withings_token_refresh;
     if (!refresh_token || !client_id) {
       return new Response(JSON.stringify({ error: 'withings_token_refresh requires refresh_token, client_id' }), {
-        status: 400, headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+        status: 400, headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
       });
     }
     form = new URLSearchParams({
@@ -287,21 +304,21 @@ async function handleWithingsTokenRequest(payload) {
     const body = await res.text();
     return new Response(body, {
       status: res.status,
-      headers: { ...corsHeaders(), 'Content-Type': res.headers.get('content-type') || 'application/json' },
+      headers: { ...corsHeaders(req), 'Content-Type': res.headers.get('content-type') || 'application/json' },
     });
   } catch (e) {
     return new Response(JSON.stringify({ error: 'Withings token endpoint unreachable: ' + e.message }), {
-      status: 502, headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+      status: 502, headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
     });
   }
 }
 
 // ─── Ultrahuman token handler ──────────────────────────────────────
-async function handleUltrahumanTokenRequest(payload) {
+async function handleUltrahumanTokenRequest(payload, req) {
   const secret = typeof process !== 'undefined' ? process.env?.ULTRAHUMAN_CLIENT_SECRET : undefined;
   if (!secret) {
     return new Response(JSON.stringify({ error: 'ULTRAHUMAN_CLIENT_SECRET not configured on this deployment' }), {
-      status: 500, headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+      status: 500, headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
     });
   }
 
@@ -310,7 +327,7 @@ async function handleUltrahumanTokenRequest(payload) {
     const { code, redirect_uri, client_id } = payload.ultrahuman_token_exchange;
     if (!code || !redirect_uri || !client_id) {
       return new Response(JSON.stringify({ error: 'ultrahuman_token_exchange requires code, redirect_uri, client_id' }), {
-        status: 400, headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+        status: 400, headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
       });
     }
     form = new URLSearchParams({
@@ -321,7 +338,7 @@ async function handleUltrahumanTokenRequest(payload) {
     const { refresh_token, client_id } = payload.ultrahuman_token_refresh;
     if (!refresh_token || !client_id) {
       return new Response(JSON.stringify({ error: 'ultrahuman_token_refresh requires refresh_token, client_id' }), {
-        status: 400, headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+        status: 400, headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
       });
     }
     form = new URLSearchParams({
@@ -339,11 +356,11 @@ async function handleUltrahumanTokenRequest(payload) {
     const body = await res.text();
     return new Response(body, {
       status: res.status,
-      headers: { ...corsHeaders(), 'Content-Type': res.headers.get('content-type') || 'application/json' },
+      headers: { ...corsHeaders(req), 'Content-Type': res.headers.get('content-type') || 'application/json' },
     });
   } catch (e) {
     return new Response(JSON.stringify({ error: 'Ultrahuman token endpoint unreachable: ' + e.message }), {
-      status: 502, headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+      status: 502, headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
     });
   }
 }

@@ -73,6 +73,7 @@ export function beginOAuth({ clientId, registeredUris, scopes = DEFAULT_OURA_SCO
   const redirectUri = pickRedirectUri(registeredUris);
   sessionStorage.setItem(STATE_KEY, JSON.stringify({
     state, redirectUri, startedAt: Date.now(), clientId,
+    profileId: window._labState?.currentProfile || null,
   }));
   const url = buildAuthorizeUrl({ clientId, redirectUri, scopes, state });
   window.location.href = url;
@@ -134,6 +135,7 @@ export async function completeOAuthCallback(urlParams) {
     ok: true,
     tokens: normalizeTokenResponse(body),
     redirectUri: pending.redirectUri,
+    profileId: pending.profileId,
   };
 }
 
@@ -185,7 +187,7 @@ function normalizeTokenResponse(body) {
 // Serialised per-tab so two concurrent API calls don't both try to refresh
 // the same (single-use) refresh token. Across tabs we rely on the connection
 // record being updated in importedData and picked up on next read.
-export async function withFreshToken(connection, clientId, refreshedWrite) {
+export async function withFreshToken(connection, clientId, refreshedWrite, readLatest) {
   const needsRefresh = !connection.accessToken || !connection.expiresAt || (connection.expiresAt - Date.now()) < REFRESH_LEAD_MS;
   if (!needsRefresh) return connection;
 
@@ -193,19 +195,24 @@ export async function withFreshToken(connection, clientId, refreshedWrite) {
   // tabs refresh, Oura rotates the refresh token and the older tab 401s on
   // next call and recovers by reading the newly-stored connection).
   const run = async () => {
-    if (!connection.refreshToken) {
+    // Re-read latest connection inside the lock — cross-tab race guard. If
+    // another tab already refreshed while we waited for the lock, use ITS
+    // rotated refresh_token; ours (captured pre-lock) is now invalidated.
+    const latest = (readLatest?.() ?? connection);
+    if (latest.expiresAt && (latest.expiresAt - Date.now()) >= REFRESH_LEAD_MS) return latest;
+    if (!latest.refreshToken) {
       const e = new Error('No refresh token stored — user must reconnect');
       e.code = 'needs-reauth';
       throw e;
     }
-    const fresh = await refreshTokens({ clientId, refreshToken: connection.refreshToken });
+    const fresh = await refreshTokens({ clientId, refreshToken: latest.refreshToken });
     // Oura rotates refresh tokens on refresh — persist both.
     const updated = {
-      ...connection,
+      ...latest,
       accessToken: fresh.accessToken,
-      refreshToken: fresh.refreshToken || connection.refreshToken,
+      refreshToken: fresh.refreshToken || latest.refreshToken,
       expiresAt: fresh.expiresAt,
-      scope: fresh.scope || connection.scope,
+      scope: fresh.scope || latest.scope,
     };
     await refreshedWrite(updated);
     return updated;

@@ -563,6 +563,77 @@ return (async function() {
   assert('fetchFitbitDailyRange exists', typeof fitbitFetcher.fetchFitbitDailyRange === 'function');
   assert('fetchFitbitPersonalInfo exists', typeof fitbitFetcher.fetchFitbitPersonalInfo === 'function');
 
+  // ═══════════════════════════════════════
+  // 17. Multi-source primary-source override (post-audit fix)
+  // ═══════════════════════════════════════
+  console.log('%c 17. Primary-Source Override ', 'font-weight:bold;color:#f59e0b');
+  const baseRow = (src, date, metrics) => ({ source: src, date, ...metrics });
+  const rowsBySource = {
+    oura:   [baseRow('oura',   '2026-04-22', { hrv_rmssd: 40, steps: 0 })],
+    fitbit: [baseRow('fitbit', '2026-04-22', { hrv_rmssd: 45, steps: 8200 })],
+  };
+  const connectedSources = {
+    oura:   { connectedSince: '2026-01-01', lastSyncAt: Date.now() },
+    fitbit: { connectedSince: '2026-02-01', lastSyncAt: Date.now() },
+  };
+
+  // Auto-pick: insertion order (oura first) wins on ties. Document the existing
+  // behaviour so regressions in the picker are caught.
+  const autoSummary = summary.computeWearableSummary(rowsBySource, connectedSources);
+  assert('Auto picker: tied dates → insertion-order-first (oura) wins hrv_rmssd',
+    autoSummary.metrics.hrv_rmssd?.primarySource === 'oura');
+
+  // Override: force Fitbit for HRV even though Oura would auto-win
+  const overrideSummary = summary.computeWearableSummary(rowsBySource, connectedSources, { hrv_rmssd: 'fitbit' });
+  assert('Override: primaryOverride.hrv_rmssd=fitbit flips primarySource',
+    overrideSummary.metrics.hrv_rmssd?.primarySource === 'fitbit');
+  assert('Override: derived latest value comes from the overridden source',
+    overrideSummary.metrics.hrv_rmssd?.latest === 45);
+
+  // Bad override: force Ultrahuman (not in rowsBySource) → fall back to auto
+  const badOverrideSummary = summary.computeWearableSummary(rowsBySource, connectedSources, { hrv_rmssd: 'ultrahuman' });
+  assert('Override: unknown source silently falls back to auto picker',
+    badOverrideSummary.metrics.hrv_rmssd?.primarySource === 'oura');
+
+  // Override with no data in that source → also falls back
+  const rowsWithEmptyFitbit = {
+    oura:   [baseRow('oura', '2026-04-22', { hrv_rmssd: 40 })],
+    fitbit: [baseRow('fitbit', '2026-04-22', { hrv_rmssd: null })],
+  };
+  const emptyOverrideSummary = summary.computeWearableSummary(rowsWithEmptyFitbit, connectedSources, { hrv_rmssd: 'fitbit' });
+  assert('Override: source has no non-null samples → auto fallback',
+    emptyOverrideSummary.metrics.hrv_rmssd?.primarySource === 'oura');
+
+  // ═══════════════════════════════════════
+  // 18. withFreshToken re-reads connection inside lock (cross-tab race guard)
+  // ═══════════════════════════════════════
+  console.log('%c 18. Auth Race Guard ', 'font-weight:bold;color:#f59e0b');
+  // Stale connection: expired 10 min ago. readLatest() returns a fresh one
+  // that another tab already refreshed. Expected: function returns the fresh
+  // connection without calling refreshTokens (which would fail on the stale
+  // refreshToken).
+  const staleConn = {
+    accessToken: 'stale-at', refreshToken: 'stale-rt',
+    expiresAt: Date.now() - 10 * 60 * 1000,  // expired
+  };
+  const freshConn = {
+    accessToken: 'fresh-at', refreshToken: 'fresh-rt',
+    expiresAt: Date.now() + 60 * 60 * 1000,  // valid for 1h
+  };
+  let refreshCalled = false;
+  // Temporarily stub refreshTokens to detect if it's (incorrectly) called.
+  const origFetch = window.fetch;
+  window.fetch = async () => { refreshCalled = true; return { ok: false, status: 400, json: async () => ({ error: 'shouldnt-run' }) }; };
+  try {
+    const result = await oauth.withFreshToken(staleConn, 'test-client', async () => {}, () => freshConn);
+    assert('withFreshToken: returns fresh connection from readLatest without hitting token endpoint',
+      result.accessToken === 'fresh-at' && !refreshCalled);
+  } catch (e) {
+    assert('withFreshToken: no throw when another tab already refreshed', false, e.message);
+  } finally {
+    window.fetch = origFetch;
+  }
+
   // Formatter-unification guard: a value with unit '%' must render the SAME
   // way in the strip card and the detail modal. Catches the v1.22.2 divergence
   // where `formatValue(97, '%')` returned "97" but the modal's inline formatV

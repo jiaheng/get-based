@@ -37,6 +37,52 @@ if (fs.existsSync(ENV_LOCAL)) {
   console.log(`Loaded .env.local (${Object.keys(process.env).filter(k => k.endsWith('_CLIENT_SECRET')).length} secrets visible)`);
 }
 
+// ─── Proxy SSRF guard — mirrors api/proxy.js ALLOWED_ORIGINS + _isBlockedHost
+// Keep in sync with api/proxy.js when adding new vendor hosts.
+const _PROXY_ALLOWED_ORIGINS = [
+  'https://openrouter.ai/',
+  'https://api.venice.ai/',
+  'https://api.routstr.com/',
+  'https://api.ppq.ai/',
+  'https://api.ouraring.com/',
+  'https://api.prod.whoop.com/',
+  'https://partner.ultrahuman.com/',
+  'https://wbsapi.withings.net/',
+  'https://api.fitbit.com/',
+];
+function _proxyHostBlocked(host) {
+  if (!host) return true;
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]') return true;
+  if (host.endsWith('.local') || host.endsWith('.localhost')) return true;
+  if (host === '168.63.129.16') return true;
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (!m) return false;
+  for (let i = 1; i <= 4; i++) {
+    const octet = m[i];
+    if (octet.length > 1 && octet[0] === '0') return true;
+    const n = +octet;
+    if (n > 255) return true;
+  }
+  const a = +m[1], b = +m[2];
+  if (a === 10) return true;
+  if (a === 127) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;
+  if (a === 0) return true;
+  return false;
+}
+function _isAllowedProxyUrl(url) {
+  if (_PROXY_ALLOWED_ORIGINS.some(o => url.startsWith(o))) return true;
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'https:') return false;
+    if (_proxyHostBlocked(u.hostname)) return false;
+    return true;
+  } catch { return false; }
+}
+
 const MIME = {
   '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript',
   '.mjs': 'text/javascript', '.json': 'application/json', '.svg': 'image/svg+xml',
@@ -329,6 +375,10 @@ const server = http.createServer((req, res) => {
 
         const { url: targetUrl, headers: fwdHeaders, body: fwdBody, method: upMethod } = payload;
         if (!targetUrl) { res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }); res.end('{"error":"missing url"}'); return; }
+        if (!_isAllowedProxyUrl(targetUrl)) {
+          res.writeHead(403, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+          res.end('{"error":"URL not allowed"}'); return;
+        }
         const parsedUrl = new URL(targetUrl);
         const mod = parsedUrl.protocol === 'https:' ? https : http;
         const fetchMethod = (upMethod || 'POST').toUpperCase();

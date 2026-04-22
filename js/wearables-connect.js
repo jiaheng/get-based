@@ -153,6 +153,17 @@ export async function handleOAuthCallbackOnLoad() {
     return true;
   }
 
+  // If the user swapped profile mid-OAuth, the auth module stored the
+  // initiating profileId in sessionStorage; honour it so the connection
+  // doesn't land in the wrong profile's data. We can't retroactively switch
+  // the active profile here (would kick the whole UI around), so refuse the
+  // connect and ask the user to switch back first.
+  const activeProfile = getActiveProfileId();
+  if (result.profileId && result.profileId !== activeProfile) {
+    showNotification?.(`${disp.displayName} was connected for a different profile — switch back to that profile and retry.`, 'error', 6000);
+    return true;
+  }
+
   const info = await disp.fetchAccountInfo(result.tokens.accessToken);
   saveConnection(adapterId, {
     accessToken: result.tokens.accessToken,
@@ -165,14 +176,21 @@ export async function handleOAuthCallbackOnLoad() {
   });
   showNotification?.(`${disp.displayName} connected — backfilling 90 days in background…`, 'info', 4000);
   if (window.navigate) window.navigate('dashboard');
+  // Snapshot active profile now so the background IIFE writes into the same
+  // profile even if the user swaps profiles during the backfill.
+  const profileAtConnect = getActiveProfileId();
   (async () => {
     try {
       const bf = await backfillWearable(adapterId);
-      await syncWearableSummary(getActiveProfileId(), listConnectedSources());
+      // Only persist the summary if the user hasn't swapped profiles out from
+      // under us. Summary is tied to a specific profile's L1 IDB.
+      if (getActiveProfileId() === profileAtConnect) {
+        await syncWearableSummary(profileAtConnect, listConnectedSources());
+      }
       showNotification?.(`${disp.displayName} backfilled ${bf.rows} days`, 'success');
       if (window.navigate) window.navigate('dashboard');
     } catch (e) {
-      showNotification?.(`Backfill failed: ${e.message}`, 'error', 5000);
+      showNotification?.(`${disp.displayName} backfill failed: ${e.message}`, 'error', 5000);
     }
   })();
   return true;
@@ -199,7 +217,7 @@ async function callWithRefresh(adapter, fetcher) {
 
   conn = await wft(conn, adapter.oauth.clientId, async (updated) => {
     saveConnection(adapter.id, updated);
-  }).catch(async e => {
+  }, () => getConnection(adapter.id)).catch(async e => {
     if (e?.code === 'needs-reauth' || e?.status === 400 || e?.status === 401) {
       saveConnection(adapter.id, { ...conn, needsReauth: true });
       const wrap = new Error('Reconnect required'); wrap.code = 'needs-reauth'; throw wrap;
@@ -212,7 +230,7 @@ async function callWithRefresh(adapter, fetcher) {
   } catch (e) {
     if (e?.status !== 401) throw e;
     const forced = { ...conn, expiresAt: 0 };
-    const refreshed = await wft(forced, adapter.oauth.clientId, async (u) => saveConnection(adapter.id, u));
+    const refreshed = await wft(forced, adapter.oauth.clientId, async (u) => saveConnection(adapter.id, u), () => getConnection(adapter.id));
     return fetcher(refreshed.accessToken);
   }
 }
@@ -322,15 +340,16 @@ export async function syncNow(adapterId) {
     await syncWearableSummary(profileId, listConnectedSources());
     return res;
   } catch (e) {
+    const displayName = adapterById(adapterId)?.displayName || adapterId;
     if (e?.code === 'needs-reauth') {
-      showNotification?.('Oura needs reconnection — open Settings → Wearables', 'error', 5000);
+      showNotification?.(`${displayName} needs reconnection — open Settings → Integrations`, 'error', 5000);
     } else if (e?.status === 401 || e?.status === 403) {
       const conn = getConnection(adapterId);
       if (conn) saveConnection(adapterId, { ...conn, needsReauth: true });
-      showNotification?.(`${adapterId} token rejected — reconnect`, 'error');
+      showNotification?.(`${displayName} token rejected — reconnect`, 'error');
     } else {
       if (isDebugMode?.()) console.warn(`[wearables] syncNow ${adapterId} failed:`, e.message);
-      showNotification?.(`Sync failed: ${e.message}`, 'error', 4000);
+      showNotification?.(`${displayName} sync failed: ${e.message}`, 'error', 4000);
     }
     throw e;
   }

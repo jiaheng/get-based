@@ -145,7 +145,10 @@ function deriveMetric(rowsByDate, metricId, primarySource) {
 
 // rowsBySource: { [sourceId]: rowsSortedAsc[] }  — each row has canonical metric fields
 // connectedSources: { [sourceId]: { connectedSince, lastSyncAt } }
-export function computeWearableSummary(rowsBySource, connectedSources) {
+// primaryOverride:  { [metricId]: sourceId }  — user-set forced primary. Takes
+//                   precedence over the auto-picker. Missing entries fall
+//                   back to most-recent-non-null-date heuristic.
+export function computeWearableSummary(rowsBySource, connectedSources, primaryOverride = {}) {
   const sources = {};
   const pickedPrimary = {}; // metricId → sourceId
 
@@ -157,17 +160,33 @@ export function computeWearableSummary(rowsBySource, connectedSources) {
     };
   }
 
-  // Pick primary source per metric: currently simple — whichever adapter has
-  // the most recent non-null value for that metric. Future: user override.
+  // Primary-source selection:
+  //   1. user override wins if present AND that source has ANY data for this
+  //      metric (if override source has zero samples for the metric, fall
+  //      through to the auto-picker so a broken override doesn't blank the
+  //      card)
+  //   2. otherwise pick source with the most recent non-null value; ties
+  //      resolved deterministically by insertion order of rowsBySource
   const metrics = {};
   for (const metricId of METRICS_FOR_SUMMARY) {
     let bestSrc = null, bestDate = '';
-    for (const [sid, rows] of Object.entries(rowsBySource)) {
-      for (let i = rows.length - 1; i >= 0; i--) {
-        const v = rows[i]?.[metricId];
-        if (typeof v === 'number' && isFinite(v)) {
-          if (rows[i].date > bestDate) { bestDate = rows[i].date; bestSrc = sid; }
-          break;
+    // Override check: does the override source have ANY non-null sample?
+    const overrideSrc = primaryOverride[metricId];
+    if (overrideSrc && rowsBySource[overrideSrc]) {
+      const overRows = rowsBySource[overrideSrc];
+      for (let i = overRows.length - 1; i >= 0; i--) {
+        const v = overRows[i]?.[metricId];
+        if (typeof v === 'number' && isFinite(v)) { bestSrc = overrideSrc; break; }
+      }
+    }
+    if (!bestSrc) {
+      for (const [sid, rows] of Object.entries(rowsBySource)) {
+        for (let i = rows.length - 1; i >= 0; i--) {
+          const v = rows[i]?.[metricId];
+          if (typeof v === 'number' && isFinite(v)) {
+            if (rows[i].date > bestDate) { bestDate = rows[i].date; bestSrc = sid; }
+            break;
+          }
         }
       }
     }
@@ -300,7 +319,8 @@ export async function syncWearableSummary(profileId, connectedSources) {
     catch (e) { if (isDebugMode?.()) console.warn(`[wearable-summary] L1 read failed for ${sid}:`, e.message); rowsBySource[sid] = []; }
   }
 
-  const newSummary = computeWearableSummary(rowsBySource, connectedSources);
+  const primaryOverride = state.importedData?.wearablePrimaryOverride || {};
+  const newSummary = computeWearableSummary(rowsBySource, connectedSources, primaryOverride);
   const old = state.importedData?.wearableSummary || null;
   const gate = shouldWriteL2(newSummary, old);
 
