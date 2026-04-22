@@ -10,7 +10,10 @@ import { adapterById } from './wearable-adapters.js';
 import { upsertDailyBatch, clearSource, setMeta, getMeta, countSource } from './wearables-store.js';
 import { syncWearableSummary } from './wearables-summary.js';
 import { fetchOuraDailyRange, fetchOuraPersonalInfo, daysAgoIso, isoDay } from './wearables-oura.js';
-import { beginOAuth, completeOAuthCallback, isOuraCallback, withFreshToken, DEFAULT_OURA_SCOPES } from './wearables-oura-auth.js';
+import { beginOAuth as beginOuraOAuth, completeOAuthCallback as completeOuraCallback, isOuraCallback, withFreshToken as ouraWithFreshToken, DEFAULT_OURA_SCOPES } from './wearables-oura-auth.js';
+import { fetchWhoopDailyRange, fetchWhoopPersonalInfo } from './wearables-whoop.js';
+import { beginOAuth as beginWhoopOAuth, completeOAuthCallback as completeWhoopCallback, isWhoopCallback, withFreshToken as whoopWithFreshToken, DEFAULT_WHOOP_SCOPES } from './wearables-whoop-auth.js';
+import { fetchUltrahumanDailyRange, verifyUltrahumanPAT } from './wearables-ultrahuman.js';
 import { getActiveProfileId } from './profile.js';
 import { isDebugMode, showNotification } from './utils.js';
 
@@ -68,32 +71,58 @@ export function beginConnectOAuth(adapterId) {
   const adapter = adapterById(adapterId);
   if (!adapter) throw new Error(`Unknown adapter: ${adapterId}`);
   if (adapter.authType !== 'oauth2') throw new Error(`Adapter ${adapterId} is not OAuth2`);
-  if (adapter.id !== 'oura') throw new Error(`Unsupported OAuth adapter: ${adapter.id}`);
-
-  beginOAuth({
+  const kick = OAUTH_DISPATCH[adapter.id]?.begin;
+  if (!kick) throw new Error(`Unsupported OAuth adapter: ${adapter.id}`);
+  kick({
     clientId: adapter.oauth.clientId,
     registeredUris: adapter.oauth.redirectUris,
-    scopes: adapter.oauth.scopes || DEFAULT_OURA_SCOPES,
+    scopes: adapter.oauth.scopes,
   });
 }
 
+// Per-adapter OAuth wiring table. Keeps the orchestrator out of vendor-specific
+// branch logic — new adapters register here once and flow through generically.
+const OAUTH_DISPATCH = {
+  oura: {
+    begin: (args) => beginOuraOAuth({ ...args, scopes: args.scopes || DEFAULT_OURA_SCOPES }),
+    isCallback: isOuraCallback,
+    complete: completeOuraCallback,
+    withFreshToken: ouraWithFreshToken,
+    fetchAccountInfo: fetchOuraPersonalInfo,
+    fetchRange: fetchOuraDailyRange,
+    displayName: 'Oura',
+  },
+  whoop: {
+    begin: (args) => beginWhoopOAuth({ ...args, scopes: args.scopes || DEFAULT_WHOOP_SCOPES }),
+    isCallback: isWhoopCallback,
+    complete: completeWhoopCallback,
+    withFreshToken: whoopWithFreshToken,
+    fetchAccountInfo: fetchWhoopPersonalInfo,
+    fetchRange: fetchWhoopDailyRange,
+    displayName: 'WHOOP',
+  },
+};
+
 // Called from main.js on page load. Returns true if a callback was handled.
+// Dispatches to the right vendor based on which pending sessionStorage entry
+// matches the incoming ?state= — lets multiple OAuth providers coexist.
 export async function handleOAuthCallbackOnLoad() {
   const urlParams = new URLSearchParams(window.location.search);
-  if (!isOuraCallback(urlParams)) return false;
+  // Find the first registered adapter whose callback-matcher recognises this URL.
+  const adapterId = Object.keys(OAUTH_DISPATCH).find(id => OAUTH_DISPATCH[id].isCallback(urlParams));
+  if (!adapterId) return false;
 
-  const result = await completeOAuthCallback(urlParams);
-  // Clean the URL regardless of success so the code doesn't stay in history.
+  const disp = OAUTH_DISPATCH[adapterId];
+  const result = await disp.complete(urlParams);
   window.history.replaceState(null, '', window.location.pathname);
 
   if (!result.ok) {
-    showNotification?.(`Oura connection failed: ${result.error}`, 'error', 5000);
+    showNotification?.(`${disp.displayName} connection failed: ${result.error}`, 'error', 5000);
     return true;
   }
 
-  // Fetch account identity so the settings panel can show "connected as <email>".
-  const info = await fetchOuraPersonalInfo(result.tokens.accessToken);
-  saveConnection('oura', {
+  const info = await disp.fetchAccountInfo(result.tokens.accessToken);
+  saveConnection(adapterId, {
     accessToken: result.tokens.accessToken,
     refreshToken: result.tokens.refreshToken,
     expiresAt: result.tokens.expiresAt,
@@ -102,23 +131,53 @@ export async function handleOAuthCallbackOnLoad() {
     account: info.ok ? info.account : null,
     lastSyncAt: 0,
   });
-  showNotification?.('Oura connected — backfilling 90 days in background…', 'info', 4000);
-  // Navigate now so the user sees the dashboard (with the just-connected header
-  // in settings + mock strip) instead of staring at a blank page for 30-60s
-  // while 90 days of Oura data paginates through. Backfill fires-and-forgets;
-  // the strip re-renders when syncWearableSummary updates state.importedData.
+  showNotification?.(`${disp.displayName} connected — backfilling 90 days in background…`, 'info', 4000);
   if (window.navigate) window.navigate('dashboard');
   (async () => {
     try {
-      const bf = await backfillWearable('oura');
+      const bf = await backfillWearable(adapterId);
       await syncWearableSummary(getActiveProfileId(), listConnectedSources());
-      showNotification?.(`Oura backfilled ${bf.rows} days`, 'success');
+      showNotification?.(`${disp.displayName} backfilled ${bf.rows} days`, 'success');
       if (window.navigate) window.navigate('dashboard');
     } catch (e) {
       showNotification?.(`Backfill failed: ${e.message}`, 'error', 5000);
     }
   })();
   return true;
+}
+
+// ─────────────────────────────────────────────────────────
+// PAT (Personal Access Token) flow — Ultrahuman
+// ─────────────────────────────────────────────────────────
+
+export async function connectWithPAT(adapterId, { accessToken, email }) {
+  const adapter = adapterById(adapterId);
+  if (!adapter) throw new Error(`Unknown adapter: ${adapterId}`);
+  if (adapter.authType !== 'pat') throw new Error(`Adapter ${adapterId} is not PAT`);
+  if (adapterId !== 'ultrahuman') throw new Error(`Unsupported PAT adapter: ${adapterId}`);
+
+  const verify = await verifyUltrahumanPAT(accessToken, email);
+  if (!verify.ok) {
+    const e = new Error(verify.error || 'PAT verification failed');
+    e.status = verify.status; throw e;
+  }
+  saveConnection(adapterId, {
+    accessToken,
+    email,                           // PAT flow needs email in every call
+    connectedAt: new Date().toISOString(),
+    account: verify.account,
+    lastSyncAt: 0,
+  });
+  (async () => {
+    try {
+      const bf = await backfillWearable(adapterId);
+      await syncWearableSummary(getActiveProfileId(), listConnectedSources());
+      showNotification?.(`${adapter.displayName} backfilled ${bf.rows} days`, 'success');
+      if (window.navigate) window.navigate('dashboard');
+    } catch (e) {
+      showNotification?.(`Backfill failed: ${e.message}`, 'error', 5000);
+    }
+  })();
 }
 
 // ─────────────────────────────────────────────────────────
@@ -132,14 +191,28 @@ async function callWithRefresh(adapter, fetcher) {
   let conn = getConnection(adapter.id);
   if (!conn) throw new Error(`Not connected: ${adapter.id}`);
 
-  conn = await withFreshToken(conn, adapter.oauth.clientId, async (updated) => {
+  // PAT adapters have no refresh ceremony — just call straight through.
+  if (adapter.authType === 'pat') {
+    try { return await fetcher(conn.accessToken); }
+    catch (e) {
+      if (e?.status === 401 || e?.status === 403) {
+        saveConnection(adapter.id, { ...conn, needsReauth: true });
+        const wrap = new Error('Reconnect required'); wrap.code = 'needs-reauth'; throw wrap;
+      }
+      throw e;
+    }
+  }
+
+  const disp = OAUTH_DISPATCH[adapter.id];
+  if (!disp) throw new Error(`No auth dispatch for ${adapter.id}`);
+  const wft = disp.withFreshToken;
+
+  conn = await wft(conn, adapter.oauth.clientId, async (updated) => {
     saveConnection(adapter.id, updated);
   }).catch(async e => {
     if (e?.code === 'needs-reauth' || e?.status === 400 || e?.status === 401) {
       saveConnection(adapter.id, { ...conn, needsReauth: true });
-      const wrap = new Error('Reconnect required');
-      wrap.code = 'needs-reauth';
-      throw wrap;
+      const wrap = new Error('Reconnect required'); wrap.code = 'needs-reauth'; throw wrap;
     }
     throw e;
   });
@@ -148,9 +221,8 @@ async function callWithRefresh(adapter, fetcher) {
     return await fetcher(conn.accessToken);
   } catch (e) {
     if (e?.status !== 401) throw e;
-    // Forced refresh + one retry.
     const forced = { ...conn, expiresAt: 0 };
-    const refreshed = await withFreshToken(forced, adapter.oauth.clientId, async (u) => saveConnection(adapter.id, u));
+    const refreshed = await wft(forced, adapter.oauth.clientId, async (u) => saveConnection(adapter.id, u));
     return fetcher(refreshed.accessToken);
   }
 }
@@ -158,6 +230,13 @@ async function callWithRefresh(adapter, fetcher) {
 async function fetchRange(adapter, startDate, endDate) {
   if (adapter.id === 'oura') {
     return callWithRefresh(adapter, (token) => fetchOuraDailyRange(token, startDate, endDate));
+  }
+  if (adapter.id === 'whoop') {
+    return callWithRefresh(adapter, (token) => fetchWhoopDailyRange(token, startDate, endDate));
+  }
+  if (adapter.id === 'ultrahuman') {
+    const conn = getConnection(adapter.id);
+    return callWithRefresh(adapter, (token) => fetchUltrahumanDailyRange(token, conn?.email, startDate, endDate));
   }
   return [];
 }

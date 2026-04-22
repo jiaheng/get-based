@@ -5,6 +5,18 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.23.0', date: '2026-04-22', title: 'Multi-vendor wearables (BETA) — Ultrahuman, WHOOP, Apple Health, Withings',
+    items: [
+      'New <b>Integrations</b> tab in Settings — Wearables and Agent Access moved out of the Data tab, which was getting crowded with unrelated sections.',
+      '<b>Ultrahuman (BETA)</b> — paste a Personal Access Token from their partner portal and get HRV, RHR, sleep, recovery, steps, body temp delta, and glucose (for CGM users). No OAuth redirect, no proxy secret; token stays in your browser.',
+      '<b>WHOOP (BETA)</b> — OAuth2 with PKCE (no client secret in the browser). Brings HRV, RHR, sleep performance, recovery score, and WHOOP-native <b>strain</b> (0–21 Borg scale) as a new canonical metric.',
+      '<b>Apple Health (BETA, scaffold)</b> — file-import adapter for <code>export.zip</code>. Registry + UI in place; the streaming XML parser lands in the next beta.',
+      '<b>Withings (BETA, scaffold)</b> — OAuth2 entry registered for scales / BP cuffs / Scanwatch. Brings weight, systolic, and diastolic as new canonicals. Interactive flow lands in the next beta.',
+      'Multi-source support under the hood: when you connect more than one wearable the strip cards show a "via &lt;vendor&gt;" badge and auto-pick the most-recent non-null source per metric. A per-metric manual override picker lands alongside Withings.',
+      'All four new adapters are labeled BETA until a real tester validates them end-to-end. <a href="https://github.com/elkimek/get-based/issues" target="_blank" rel="noopener">Please report what you see</a> — response shapes and scope strings from these vendors are only as accurate as their docs (which have been known to lie — Oura\'s <code>spo2Daily</code> turned out to be <code>spo2</code>).',
+    ]
+  },
+  {
     version: '1.22.3', date: '2026-04-22', title: 'Wearables a11y + consistent number formatting',
     items: [
       'Wearable cards are now keyboard-activatable — tab to a card, press Enter or Space to open the detail view.',

@@ -364,6 +364,67 @@ return (async function() {
   assert('window.handleWearableDisconnect exists', typeof window.handleWearableDisconnect === 'function');
   assert('window.syncWearableNow exists', typeof window.syncWearableNow === 'function');
   assert('window.openWearableDetail exists', typeof window.openWearableDetail === 'function');
+  assert('window.handleWearablePATConnect exists (Ultrahuman etc.)', typeof window.handleWearablePATConnect === 'function');
+
+  // ═══════════════════════════════════════
+  // 11. Phase-3 multi-vendor adapter registry
+  // ═══════════════════════════════════════
+  console.log('%c 11. Multi-Vendor ', 'font-weight:bold;color:#f59e0b');
+  for (const vid of ['whoop', 'ultrahuman', 'apple_health', 'withings']) {
+    const v = reg.adapterById(vid);
+    assert(`Adapter ${vid} registered`, !!v);
+    assert(`Adapter ${vid} carries beta flag`, v?.beta === true);
+  }
+  assert('WHOOP uses OAuth2 with PKCE',
+    reg.adapterById('whoop')?.authType === 'oauth2' && reg.adapterById('whoop')?.oauth?.pkce === true);
+  assert('Ultrahuman uses PAT auth', reg.adapterById('ultrahuman')?.authType === 'pat');
+  assert('Apple Health uses file-import auth', reg.adapterById('apple_health')?.authType === 'file-import');
+  assert('Withings uses OAuth2 server-side (no PKCE)',
+    reg.adapterById('withings')?.authType === 'oauth2' && reg.adapterById('withings')?.oauth?.pkce === false);
+  assert('WHOOP maps strain metric (WHOOP-native)',
+    reg.adapterById('whoop')?.metrics?.strain != null);
+  assert('Apple Health maps hrv_sdnn (deep HRV that footer hints about)',
+    reg.adapterById('apple_health')?.metrics?.hrv_sdnn != null);
+  assert('Withings maps weight + BP pair',
+    reg.adapterById('withings')?.metrics?.weight != null &&
+    reg.adapterById('withings')?.metrics?.bp_systolic != null &&
+    reg.adapterById('withings')?.metrics?.bp_diastolic != null);
+
+  // New canonicals the Phase-3 adapters introduced
+  for (const mid of ['hrv_sdnn', 'strain', 'weight', 'bp_systolic', 'bp_diastolic']) {
+    assert(`CANONICAL_METRICS now has ${mid}`, !!reg.CANONICAL_METRICS[mid]);
+  }
+
+  // ═══════════════════════════════════════
+  // 12. WHOOP PKCE auth module
+  // ═══════════════════════════════════════
+  console.log('%c 12. WHOOP PKCE ', 'font-weight:bold;color:#f59e0b');
+  const whoopAuth = await import('../js/wearables-whoop-auth.js');
+  assert('WHOOP DEFAULT_WHOOP_SCOPES includes read:recovery',
+    whoopAuth.DEFAULT_WHOOP_SCOPES.includes('read:recovery'));
+  assert('WHOOP scopes include offline (for refresh_token)',
+    whoopAuth.DEFAULT_WHOOP_SCOPES.includes('offline'));
+  const whoopAuthUrl = await whoopAuth.buildAuthorizeUrl({
+    clientId: 'test-client', redirectUri: 'http://localhost:8000/app',
+    scopes: whoopAuth.DEFAULT_WHOOP_SCOPES, state: 'test-state',
+    codeVerifier: 'Dm4l9H2NqE8yP5Rb7w3a6Z1K0VxYcOjG4FiU_n-tBXs',
+  });
+  assert('WHOOP authorize URL hits api.prod.whoop.com',
+    whoopAuthUrl.includes('api.prod.whoop.com/oauth/oauth2/auth'));
+  assert('WHOOP authorize URL carries code_challenge',
+    /code_challenge=[A-Za-z0-9_-]+/.test(whoopAuthUrl));
+  assert('WHOOP authorize URL declares S256 method',
+    whoopAuthUrl.includes('code_challenge_method=S256'));
+  assert('WHOOP authorize URL does NOT leak code_verifier',
+    !whoopAuthUrl.includes('code_verifier='));
+
+  // ═══════════════════════════════════════
+  // 13. Ultrahuman PAT fetcher shape
+  // ═══════════════════════════════════════
+  console.log('%c 13. Ultrahuman PAT ', 'font-weight:bold;color:#f59e0b');
+  const uh = await import('../js/wearables-ultrahuman.js');
+  assert('fetchUltrahumanDailyRange exists', typeof uh.fetchUltrahumanDailyRange === 'function');
+  assert('verifyUltrahumanPAT exists', typeof uh.verifyUltrahumanPAT === 'function');
 
   // Formatter-unification guard: a value with unit '%' must render the SAME
   // way in the strip card and the detail modal. Catches the v1.22.2 divergence

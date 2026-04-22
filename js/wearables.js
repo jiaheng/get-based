@@ -18,7 +18,7 @@
 import { escapeHTML, showNotification, showConfirmDialog } from './utils.js';
 import { state } from './state.js';
 import { ADAPTERS, adapterById, canonicalMetric, metricsForSources } from './wearable-adapters.js';
-import { beginConnectOAuth, backfillWearable, disconnectWearable, syncNow, listConnectedSources, getConnection } from './wearables-connect.js';
+import { beginConnectOAuth, backfillWearable, disconnectWearable, syncNow, listConnectedSources, getConnection, connectWithPAT } from './wearables-connect.js';
 import { syncWearableSummary } from './wearables-summary.js';
 import { getActiveProfileId } from './profile.js';
 import { getDailyRange } from './wearables-store.js';
@@ -496,12 +496,15 @@ function renderAdapterCard(adapter, isConnected) {
     : conn?.needsReauth
       ? `<span class="wearable-adapter-chip wearable-adapter-chip-bad">needs reconnection</span>`
       : `<span class="wearable-adapter-chip wearable-adapter-chip-ok">connected</span>`;
+  const betaBadge = adapter.beta
+    ? `<span class="wearable-adapter-chip wearable-adapter-chip-beta" title="Beta — shape may change; please report issues">BETA</span>`
+    : '';
 
   const authBlock = renderAuthBlock(adapter, conn);
 
   return `<div class="wearable-adapter-card" data-adapter="${escapeHTML(adapter.id)}">
     <div class="wearable-adapter-header">
-      <div class="wearable-adapter-name">${escapeHTML(adapter.displayName)}</div>
+      <div class="wearable-adapter-name">${escapeHTML(adapter.displayName)} ${betaBadge}</div>
       ${statusChip}
     </div>
     ${authBlock}
@@ -509,10 +512,56 @@ function renderAdapterCard(adapter, isConnected) {
 }
 
 function renderAuthBlock(adapter, conn) {
-  if (adapter.authType === 'oauth2') return renderOAuthBlock(adapter, conn);
-  if (adapter.authType === 'pat') return `<p class="wearable-adapter-note">PAT flow is deprecated — this adapter should be upgraded to OAuth2.</p>`;
-  if (adapter.authType === 'file-import') return `<p class="wearable-adapter-note">File import — ships in a follow-up.</p>`;
+  if (adapter.authType === 'oauth2') {
+    // WHOOP + Oura both go through the OAuth block; Withings is scaffolded but
+    // the interactive implementation lands in a follow-up — surface a clear
+    // "Coming soon" so testers know to wait.
+    if (adapter.id === 'withings') return renderComingSoonBlock(adapter, 'OAuth2 flow coming in the next beta — follow the tester thread to get a call when it ships.');
+    return renderOAuthBlock(adapter, conn);
+  }
+  if (adapter.authType === 'pat') return renderPATBlock(adapter, conn);
+  if (adapter.authType === 'file-import') {
+    if (adapter.id === 'apple_health') return renderComingSoonBlock(adapter, 'Drop your Apple Health export.zip here — XML parser lands in the next beta.');
+    return `<p class="wearable-adapter-note">File import — ships in a follow-up.</p>`;
+  }
   return '';
+}
+
+function renderComingSoonBlock(adapter, msg) {
+  const docs = adapter.authDocsUrl ? `<a href="${escapeHTML(adapter.authDocsUrl)}" target="_blank" rel="noopener">Provider docs</a>` : '';
+  return `<div class="wearable-adapter-body">
+    <p class="wearable-adapter-hint">${escapeHTML(msg)}</p>
+    ${docs ? `<p class="wearable-adapter-hint" style="font-size:11px;opacity:0.8">${docs}</p>` : ''}
+  </div>`;
+}
+
+function renderPATBlock(adapter, conn) {
+  if (!conn || conn.needsReauth) {
+    const hint = conn?.needsReauth
+      ? `<p class="wearable-adapter-hint" style="color:var(--red)">Your ${escapeHTML(adapter.displayName)} token was rejected. Generate a new PAT and paste it below to reconnect.</p>`
+      : `<p class="wearable-adapter-hint">Paste a Personal Access Token from <a href="${escapeHTML(adapter.authDocsUrl || '#')}" target="_blank" rel="noopener">${escapeHTML(adapter.displayName)}'s partner portal</a>. The token stays in your browser — no server storage, no OAuth redirect.</p>`;
+    return `<div class="wearable-adapter-body">
+      ${hint}
+      <div class="wearable-adapter-actions" style="flex-direction:column;gap:8px;align-items:stretch">
+        <input type="email" id="wearable-pat-email-${escapeHTML(adapter.id)}" placeholder="Account email (required by Ultrahuman API)" style="padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg-primary);color:var(--text-primary);font-size:13px">
+        <input type="password" id="wearable-pat-token-${escapeHTML(adapter.id)}" placeholder="Personal Access Token" style="padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:ui-monospace,monospace">
+        <button class="ctx-btn-option ctx-btn-primary" onclick="handleWearablePATConnect('${escapeHTML(adapter.id)}')">${conn?.needsReauth ? 'Reconnect' : 'Connect'} ${escapeHTML(adapter.displayName)}</button>
+      </div>
+    </div>`;
+  }
+
+  const acct = conn.account || {};
+  const when = conn.lastSyncAt ? new Date(conn.lastSyncAt).toLocaleString() : 'never';
+  const identity = acct.email ? escapeHTML(acct.email) : '(token verified)';
+  return `<div class="wearable-adapter-body">
+    <div class="wearable-adapter-identity">${identity}</div>
+    <div class="wearable-adapter-meta">Last sync: ${escapeHTML(when)}</div>
+    <div class="wearable-adapter-actions">
+      <button class="ctx-btn-option" onclick="handleWearableSyncNow('${escapeHTML(adapter.id)}')">Sync now</button>
+      <button class="ctx-btn-option" onclick="handleWearableBackfill('${escapeHTML(adapter.id)}')">Re-backfill 90d</button>
+      <button class="ctx-btn-option ctx-btn-danger" onclick="handleWearableDisconnect('${escapeHTML(adapter.id)}')">Disconnect</button>
+    </div>
+  </div>`;
 }
 
 function renderOAuthBlock(adapter, conn) {
@@ -546,6 +595,23 @@ function handleWearableConnect(adapterId) {
   try {
     beginConnectOAuth(adapterId);
     // beginOAuth navigates away — nothing else to do here.
+  } catch (e) {
+    showNotification?.(`Connect failed: ${e.message}`, 'error', 5000);
+  }
+}
+
+async function handleWearablePATConnect(adapterId) {
+  const emailEl = document.getElementById(`wearable-pat-email-${adapterId}`);
+  const tokenEl = document.getElementById(`wearable-pat-token-${adapterId}`);
+  const email = emailEl?.value?.trim();
+  const token = tokenEl?.value?.trim();
+  if (!token) { showNotification?.('Paste your Personal Access Token first', 'error', 3000); return; }
+  if (!email) { showNotification?.('Ultrahuman requires the account email alongside the PAT', 'error', 3000); return; }
+  try {
+    showNotification?.(`Verifying token…`, 'info', 2000);
+    await connectWithPAT(adapterId, { accessToken: token, email });
+    showNotification?.(`Connected — backfilling…`, 'success', 3000);
+    refreshSettingsWearables();
   } catch (e) {
     showNotification?.(`Connect failed: ${e.message}`, 'error', 5000);
   }
@@ -596,6 +662,7 @@ Object.assign(window, {
   hasWearableSummary,
   renderWearablesSettingsSection,
   handleWearableConnect,
+  handleWearablePATConnect,
   handleWearableSyncNow,
   handleWearableBackfill,
   handleWearableDisconnect,
