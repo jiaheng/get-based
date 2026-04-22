@@ -12,6 +12,7 @@ const ALLOWED_ORIGINS = [
   'https://api.venice.ai/',
   'https://api.routstr.com/',
   'https://api.ppq.ai/',
+  'https://api.ouraring.com/',
 ];
 
 /// Block literal IPs in private / reserved / cloud-metadata ranges so

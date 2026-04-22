@@ -407,6 +407,12 @@ function _buildLabContextInner({ skipGroupFilter } = {}) {
     }
   }
 
+  // ── 8b. Wearables ──
+  if (isWearableContextEnabled()) {
+    const wearableCtx = buildWearableContext(state.importedData);
+    if (wearableCtx) ctx += `[section:wearables]\n${wearableCtx}\n[/section:wearables]\n\n`;
+  }
+
   // ── 9. Menstrual Cycle (female only) ──
   const mc = state.importedData.menstrualCycle;
   if (mc && state.profileSex === 'female') {
@@ -742,11 +748,85 @@ function _formatLensChunks(result) {
   return lines.join('\n');
 }
 
+// ═══════════════════════════════════════════════
+// WEARABLE CONTEXT (L2 summary + recent anomalies)
+// ═══════════════════════════════════════════════
+
+// Default ON when wearables are connected — opposite of the group-filter default
+// (which is OFF). Users turn OFF via Settings → AI → "Include wearable data".
+export function isWearableContextEnabled() {
+  const v = localStorage.getItem('labcharts-ai-ctx-wearables');
+  return v !== 'off';
+}
+export function setWearableContextEnabled(on) {
+  localStorage.setItem('labcharts-ai-ctx-wearables', on ? 'on' : 'off');
+}
+
+const METRIC_LABELS = {
+  hrv_rmssd: 'HRV (RMSSD)',
+  rhr: 'Resting HR',
+  sleep_score: 'Sleep score',
+  readiness_score: 'Readiness score',
+  spo2_avg: 'SpO₂',
+  body_temp_delta: 'Body temp Δ',
+  glucose_avg: 'Glucose avg',
+};
+const METRIC_UNITS = { hrv_rmssd: 'ms', rhr: 'bpm', sleep_score: '', readiness_score: '', spo2_avg: '%', body_temp_delta: '°C', glucose_avg: 'mg/dL' };
+
+// Builds ~200-token summary of wearable state. Shape is deliberately terse so
+// it can be included in every prompt without blowing context budget.
+export function buildWearableContext(importedData) {
+  const summary = importedData?.wearableSummary;
+  if (!summary || !summary.sources || Object.keys(summary.sources).length === 0) return '';
+  if (!summary.metrics || Object.keys(summary.metrics).length === 0) return '';
+
+  const sourceNames = Object.keys(summary.sources);
+  const maxCov = Math.max(0, ...sourceNames.map(s => summary.sources[s].coverageDays || 0));
+  const lines = [`## Wearables (${sourceNames.join(' + ')}, ${maxCov}d coverage)`];
+
+  for (const [mid, m] of Object.entries(summary.metrics)) {
+    const label = METRIC_LABELS[mid] || mid;
+    const unit = METRIC_UNITS[mid] ?? '';
+    const deltaPct = m.baseline ? ((m.latest - m.baseline) / m.baseline * 100) : 0;
+    const arrow = deltaPct > 0.5 ? '↑' : deltaPct < -0.5 ? '↓' : '→';
+    const deltaLabel = `${arrow}${Math.abs(deltaPct).toFixed(0)}%`;
+    const unitStr = unit ? ' ' + unit : '';
+    lines.push(`${label}: ${m.latest}${unitStr} latest · baseline ${m.baseline} · ${deltaLabel} · ${m.trend30d} 30d`);
+  }
+
+  // Compact weekly series for the 4 core metrics (if present) — lets the AI see shape without per-day noise.
+  const weeklySeriesLines = [];
+  for (const mid of ['hrv_rmssd', 'rhr', 'sleep_score', 'readiness_score']) {
+    const w = summary.metrics[mid]?.weekly;
+    if (w && w.length >= 2) weeklySeriesLines.push(`  ${METRIC_LABELS[mid]}: ${w.slice(-6).join('→')}`);
+  }
+  if (weeklySeriesLines.length > 0) {
+    lines.push('Weekly trend (last 6w):');
+    lines.push(...weeklySeriesLines);
+  }
+
+  // Recent wearable anomalies from changeHistory (last 5, most recent first).
+  const hist = importedData?.changeHistory || [];
+  const wearableEvents = hist.filter(e => e?.type === 'wearable').slice(-5).reverse();
+  if (wearableEvents.length > 0) {
+    lines.push('Recent anomalies:');
+    for (const e of wearableEvents) {
+      const when = e.ts ? new Date(e.ts).toISOString().slice(0, 10) : '';
+      lines.push(`  - ${when}: ${e.message || (e.kind + ' ' + (e.metricId || ''))}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
 Object.assign(window, {
   buildLabContext,
   invalidateLabContextCache,
   getContextSummary,
   isGroupInAIContext,
   setGroupInAIContext,
+  isWearableContextEnabled,
+  setWearableContextEnabled,
+  buildWearableContext,
   injectLensChunks,
 });

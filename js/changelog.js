@@ -5,6 +5,18 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.22.0', date: '2026-04-22', title: 'Wearables integration — Oura',
+    items: [
+      'Connect your Oura ring in Settings → Data → Wearables with a Personal Access Token (no OAuth, no backend). getbased pulls 90 days of sleep, readiness, resting HR, and HRV (RMSSD).',
+      'New dashboard strip sits just below the Focus Card: four metrics (HRV, Resting HR, Sleep, Readiness) with 12-week sparklines, baseline reference, and trend direction. Semantic colors — HRV down reads red, RHR up reads red.',
+      'Source-agnostic by design: adapter registry in <code>js/wearable-adapters.js</code> means WHOOP, Ultrahuman, and Apple Health XML slot in with one entry each. Canonical metrics so "HRV" means the same thing across vendors.',
+      'Storage separates concerns: raw daily rows stay local in IndexedDB per device (never syncs), a compact rolling summary + anomaly events ride Evolu sync so other devices and personal agents see the trend picture.',
+      'Sync writes are event-driven — big shifts, trend flips, week rollovers, plus a 14-day max silence — roughly 4–8 relay writes per month instead of one per day.',
+      'AI context: ~400 tokens of baselines + weekly trend + recent anomalies, added to every prompt by default. Toggle in Settings → AI.',
+      'Deep HRV (SDNN · pNN50 · HF/LF) needs an ECG chest strap — Oura provides RMSSD only. Flagged in the UI so the limit is visible up front.',
+    ]
+  },
+  {
     version: '1.21.7–9', date: '2026-04-20', title: 'Code hygiene',
     items: [
       'Dead code removed, internal architecture doc trimmed, chat panel split into smaller modules. No user-visible change.',

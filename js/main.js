@@ -24,6 +24,7 @@ for (const fn of _emfFns) {
 import './pdf-import.js';
 import { ensureSNPTable, ensureHaplogroupTable } from './dna.js';
 import './wearables.js';
+import { initWearableScheduler } from './wearables-connect.js';
 import './export.js';
 import './chat.js';
 import './image-utils.js';
@@ -51,6 +52,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   initBroadcastChannel();
   // Initialize folder backup (restore persisted handle, check permission)
   await initFolderBackup();
+
+  // Scheduled wearable sync (only fires when a source is connected)
+  initWearableScheduler();
 
   // Handle OpenRouter OAuth callback (?code=...)
   const urlParams = new URLSearchParams(window.location.search);

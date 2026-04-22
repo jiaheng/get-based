@@ -8,6 +8,7 @@ import { getAIProvider, isAIPaused, getOllamaPIIUrl, getOllamaPIIModel } from '.
 import { isOllamaPIIEnabled, setOllamaPIIEnabled, getOllamaConfig, checkOpenAICompatible } from './pii.js';
 import { renderEncryptionSection, renderBackupSection, loadBackupSnapshots } from './crypto.js';
 import { isSyncEnabled, enableSync, disableSync, getMnemonic, getMnemonicResolutionError, getSyncBlocker, restoreFromMnemonic, getSyncRelay, setSyncRelay, checkRelayConnection, isMessengerEnabled, getMessengerToken, generateMessengerToken, revokeMessengerToken, pushContextToGateway } from './sync.js';
+import { renderWearablesSettingsSection } from './wearables.js';
 import './provider-panels.js';
 
 
@@ -161,6 +162,12 @@ export function openSettingsModal(tab) {
 
       <div class="settings-section" id="messenger-section">
         ${renderMessengerSection()}
+      </div>
+
+      <div class="settings-group-title">Wearables</div>
+
+      <div class="settings-section" id="wearables-section">
+        ${renderWearablesSettingsSection()}
       </div>
 
       <div class="settings-group-title">Backup &amp; Restore</div>

@@ -15,8 +15,12 @@
 //                  weekly: number[]         // up to 12 weekly means (oldest → newest)
 //                } }
 
-import { escapeHTML } from './utils.js';
-import { adapterById, canonicalMetric, metricsForSources } from './wearable-adapters.js';
+import { escapeHTML, showNotification, showConfirmDialog } from './utils.js';
+import { state } from './state.js';
+import { ADAPTERS, adapterById, canonicalMetric, metricsForSources } from './wearable-adapters.js';
+import { connectWearable, backfillWearable, disconnectWearable, syncNow, listConnectedSources, getConnection } from './wearables-connect.js';
+import { syncWearableSummary } from './wearables-summary.js';
+import { getActiveProfileId } from './profile.js';
 
 // ─────────────────────────────────────────────────────────
 // MOCK SUMMARY — remove once the real L2 pipeline ships
@@ -71,22 +75,27 @@ const MOCK_SUMMARY = {
 // ─────────────────────────────────────────────────────────
 // L2 ACCESS — single source of truth for summary lookup
 // ─────────────────────────────────────────────────────────
-// Flipping the mock off is how we hide the strip today while API/IDB aren't
-// wired. Once L2 lives in importedData.wearableSummary, this function reads
-// from there and falls back to nothing.
-function isWearableStripVisible() {
+// Priority: real L2 in importedData → mock (if demo profile + mock not disabled).
+// Real data takes over as soon as the user connects any adapter.
+
+export function hasWearableSummary() {
+  return getWearableSummary() != null;
+}
+
+function isMockAllowed() {
   if (localStorage.getItem('wearables-mock-off') === '1') return false;
+  // Show mock only when no real connection exists — keeps the dashboard lively
+  // during onboarding / demo flows without shadowing real data.
+  const real = state.importedData?.wearableSummary;
+  if (real && real.sources && Object.keys(real.sources).length > 0) return false;
   return true;
 }
 
-export function hasWearableSummary() {
-  return isWearableStripVisible() && getWearableSummary() != null;
-}
-
 function getWearableSummary() {
-  if (!isWearableStripVisible()) return null;
-  // TODO: read state.importedData.wearableSummary once the write path ships.
-  return MOCK_SUMMARY;
+  const real = state.importedData?.wearableSummary;
+  if (real && real.sources && Object.keys(real.sources).length > 0) return real;
+  if (isMockAllowed()) return MOCK_SUMMARY;
+  return null;
 }
 
 // ─────────────────────────────────────────────────────────
@@ -274,8 +283,144 @@ function openWearableDetail(_metricId) {
   if (window.showNotification) window.showNotification('Detail view is scheduled for v1.1', 'info');
 }
 
-function syncWearableNow() {
-  if (window.showNotification) window.showNotification('Wearable sync stub — API wiring arrives in the next PR', 'info');
+async function syncWearableNow() {
+  const sources = Object.keys(listConnectedSources());
+  if (sources.length === 0) {
+    showNotification?.('Connect a wearable in Settings → Data first', 'info');
+    return;
+  }
+  try {
+    showNotification?.('Syncing wearables…', 'info', 1500);
+    for (const sid of sources) await syncNow(sid);
+    if (window.navigate) window.navigate('dashboard');
+    showNotification?.('Wearables synced', 'success', 2000);
+  } catch { /* per-source error already surfaced */ }
+}
+
+// ─────────────────────────────────────────────────────────
+// SETTINGS PANEL  (rendered into the Data tab in settings.js)
+// ─────────────────────────────────────────────────────────
+
+export function renderWearablesSettingsSection() {
+  const connected = listConnectedSources();
+  const cards = ADAPTERS.map(a => renderAdapterCard(a, !!connected[a.id])).join('');
+  return `<div class="settings-section-header">
+    <span class="settings-section-title">Wearable Integrations</span>
+    <span class="settings-section-hint">Data stays on this device; a compact summary + anomaly events sync to your other devices.</span>
+  </div>
+  <div class="wearables-adapter-grid">${cards}</div>`;
+}
+
+function renderAdapterCard(adapter, isConnected) {
+  const conn = isConnected ? getConnection(adapter.id) : null;
+  const statusChip = !isConnected
+    ? `<span class="wearable-adapter-chip wearable-adapter-chip-off">not connected</span>`
+    : conn?.needsReauth
+      ? `<span class="wearable-adapter-chip wearable-adapter-chip-bad">needs reconnection</span>`
+      : `<span class="wearable-adapter-chip wearable-adapter-chip-ok">connected</span>`;
+
+  const authBlock = renderAuthBlock(adapter, conn);
+
+  return `<div class="wearable-adapter-card" data-adapter="${escapeHTML(adapter.id)}">
+    <div class="wearable-adapter-header">
+      <div class="wearable-adapter-name">${escapeHTML(adapter.displayName)}</div>
+      ${statusChip}
+    </div>
+    ${authBlock}
+  </div>`;
+}
+
+function renderAuthBlock(adapter, conn) {
+  if (adapter.authType === 'pat') return renderPATBlock(adapter, conn);
+  if (adapter.authType === 'oauth') return `<p class="wearable-adapter-note">OAuth flow — ships in a follow-up.</p>`;
+  if (adapter.authType === 'file-import') return `<p class="wearable-adapter-note">File import — ships in a follow-up.</p>`;
+  return '';
+}
+
+function renderPATBlock(adapter, conn) {
+  const docsLink = adapter.authDocsUrl
+    ? `<a href="${escapeHTML(adapter.authDocsUrl)}" target="_blank" rel="noopener">Create a Personal Access Token ↗</a>`
+    : '';
+
+  if (!conn) {
+    return `<div class="wearable-adapter-body">
+      <p class="wearable-adapter-hint">${docsLink}</p>
+      <input type="password" class="settings-input wearable-adapter-input"
+        id="wearable-pat-${escapeHTML(adapter.id)}"
+        placeholder="Paste your ${escapeHTML(adapter.displayName)} Personal Access Token" autocomplete="off"/>
+      <div class="wearable-adapter-actions">
+        <button class="ctx-btn-option ctx-btn-primary" onclick="handleWearableConnect('${escapeHTML(adapter.id)}')">Save &amp; test</button>
+      </div>
+    </div>`;
+  }
+
+  const acct = conn.account || {};
+  const when = conn.lastSyncAt ? new Date(conn.lastSyncAt).toLocaleString() : 'never';
+  const identity = acct.email ? escapeHTML(acct.email) : '(account verified)';
+  return `<div class="wearable-adapter-body">
+    <div class="wearable-adapter-identity">${identity}</div>
+    <div class="wearable-adapter-meta">Last sync: ${escapeHTML(when)}</div>
+    <div class="wearable-adapter-actions">
+      <button class="ctx-btn-option" onclick="handleWearableSyncNow('${escapeHTML(adapter.id)}')">Sync now</button>
+      <button class="ctx-btn-option" onclick="handleWearableBackfill('${escapeHTML(adapter.id)}')">Re-backfill 90d</button>
+      <button class="ctx-btn-option ctx-btn-danger" onclick="handleWearableDisconnect('${escapeHTML(adapter.id)}')">Disconnect</button>
+    </div>
+  </div>`;
+}
+
+async function handleWearableConnect(adapterId) {
+  const input = document.getElementById(`wearable-pat-${adapterId}`);
+  const credential = input?.value?.trim();
+  if (!credential) { showNotification?.('Paste a token first', 'info'); return; }
+  try {
+    showNotification?.(`Verifying ${adapterId}…`, 'info', 2000);
+    await connectWearable(adapterId, credential);
+    showNotification?.(`${adapterId} connected — backfilling 90 days…`, 'info', 3000);
+    const bf = await backfillWearable(adapterId);
+    await syncWearableSummary(getActiveProfileId(), listConnectedSources());
+    showNotification?.(`${adapterId} backfilled ${bf.rows} days`, 'success');
+    refreshSettingsWearables();
+    if (window.navigate) window.navigate('dashboard');
+  } catch (e) {
+    showNotification?.(`Connect failed: ${e.message}`, 'error', 5000);
+  }
+}
+
+async function handleWearableSyncNow(adapterId) {
+  try {
+    showNotification?.(`Syncing ${adapterId}…`, 'info', 1500);
+    const res = await syncNow(adapterId);
+    showNotification?.(`${adapterId} synced (${res.rows ?? 0} new)`, 'success', 2500);
+    refreshSettingsWearables();
+    if (window.navigate) window.navigate('dashboard');
+  } catch { /* syncNow already notified */ }
+}
+
+async function handleWearableBackfill(adapterId) {
+  try {
+    showNotification?.(`Backfilling ${adapterId}…`, 'info', 2000);
+    const bf = await backfillWearable(adapterId);
+    await syncWearableSummary(getActiveProfileId(), listConnectedSources());
+    showNotification?.(`${adapterId} backfilled ${bf.rows} days`, 'success');
+    refreshSettingsWearables();
+    if (window.navigate) window.navigate('dashboard');
+  } catch (e) {
+    showNotification?.(`Backfill failed: ${e.message}`, 'error', 4000);
+  }
+}
+
+function handleWearableDisconnect(adapterId) {
+  showConfirmDialog(`Disconnect ${adapterId} and delete its local data?`, async () => {
+    await disconnectWearable(adapterId, { deleteData: true });
+    showNotification?.(`${adapterId} disconnected`, 'success');
+    refreshSettingsWearables();
+    if (window.navigate) window.navigate('dashboard');
+  });
+}
+
+function refreshSettingsWearables() {
+  const section = document.getElementById('wearables-section');
+  if (section) section.innerHTML = renderWearablesSettingsSection();
 }
 
 Object.assign(window, {
@@ -284,4 +429,9 @@ Object.assign(window, {
   openWearableDetail,
   syncWearableNow,
   hasWearableSummary,
+  renderWearablesSettingsSection,
+  handleWearableConnect,
+  handleWearableSyncNow,
+  handleWearableBackfill,
+  handleWearableDisconnect,
 });

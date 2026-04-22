@@ -29,6 +29,7 @@ const TEST_FILES = [
   'tests/test-integration-batch2.js',
   'tests/test-hardware.js',
   'tests/test-dna.js',
+  'tests/test-wearables.js',
   'tests/test-venice-e2ee.js',
   'tests/test-change-history.js',
   'tests/test-sync.js',
