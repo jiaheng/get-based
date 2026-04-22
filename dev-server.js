@@ -20,6 +20,23 @@ const SITE_DIR = process.env.SITE_DIR || path.join(ROOT, '..', 'get-based-site')
 const SITE_INDEX = path.join(SITE_DIR, 'index.html');
 const hasSite = fs.existsSync(SITE_INDEX);
 
+// Auto-load .env.local (gitignored) before anything else reads process.env.
+// Keeps OAuth client secrets out of shell history and out of git. Values
+// already set in the shell environment take precedence — env still wins.
+const ENV_LOCAL = path.join(ROOT, '.env.local');
+if (fs.existsSync(ENV_LOCAL)) {
+  for (const line of fs.readFileSync(ENV_LOCAL, 'utf8').split('\n')) {
+    const m = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*)\s*$/);
+    if (!m || line.trim().startsWith('#')) continue;
+    if (process.env[m[1]]) continue;       // shell export wins
+    let val = m[2];
+    if ((val.startsWith('"') && val.endsWith('"')) ||
+        (val.startsWith("'") && val.endsWith("'"))) val = val.slice(1, -1);
+    process.env[m[1]] = val;
+  }
+  console.log(`Loaded .env.local (${Object.keys(process.env).filter(k => k.endsWith('_CLIENT_SECRET')).length} secrets visible)`);
+}
+
 const MIME = {
   '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript',
   '.mjs': 'text/javascript', '.json': 'application/json', '.svg': 'image/svg+xml',
