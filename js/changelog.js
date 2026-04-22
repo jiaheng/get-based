@@ -5,6 +5,13 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.22.3', date: '2026-04-22', title: 'Wearables a11y + consistent number formatting',
+    items: [
+      'Wearable cards are now keyboard-activatable — tab to a card, press Enter or Space to open the detail view.',
+      'Numbers render identically on the strip and in the detail modal. Before, SpO₂ 97 showed as "97" on the card but "97.0" in the modal; same story for integer cardio-age or resilience levels.',
+    ]
+  },
+  {
     version: '1.22.2', date: '2026-04-22', title: 'Wearables detail view — click any card for the full 90-day chart',
     items: [
       'Click a wearable card to open a detail modal with a 90-day daily chart (Chart.js, time-axis), baseline reference line, and stats (latest, P25–P75 range, 7d/30d rolling averages, coverage).',

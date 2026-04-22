@@ -336,6 +336,14 @@ return (async function() {
   assert('Detail modal shows Coverage stat', /Coverage/.test(modalHtml));
   assert('Chart canvas mounted on modal', !!document.getElementById('chart-modal'));
   assert('Chart instance stored under state.chartInstances.modal', !!window._labState.chartInstances?.modal);
+  const modalChart = window._labState.chartInstances?.modal;
+  // Chart actually got 3 data points from the 3 upserted L1 rows (regression
+  // guard: if the time-axis adapter fails to parse ISO labels the chart either
+  // throws on build or quietly renders 0 points). Also confirms label/data
+  // array lengths stay in lockstep.
+  assert('Chart has 3 data points matching L1 row count', modalChart?.data?.datasets?.[0]?.data?.length === 3);
+  assert('Chart labels array has 3 entries', modalChart?.data?.labels?.length === 3);
+  assert('Chart x-axis is time type', modalChart?.options?.scales?.x?.type === 'time');
   window.closeModal();
   assert('closeModal clears modal chart instance', !window._labState.chartInstances?.modal);
 
@@ -356,6 +364,32 @@ return (async function() {
   assert('window.handleWearableDisconnect exists', typeof window.handleWearableDisconnect === 'function');
   assert('window.syncWearableNow exists', typeof window.syncWearableNow === 'function');
   assert('window.openWearableDetail exists', typeof window.openWearableDetail === 'function');
+
+  // Formatter-unification guard: a value with unit '%' must render the SAME
+  // way in the strip card and the detail modal. Catches the v1.22.2 divergence
+  // where `formatValue(97, '%')` returned "97" but the modal's inline formatV
+  // fell through to `.toFixed(1)` → "97.0".
+  const strip2 = {
+    sources: { oura: { connectedSince: '2026-01-01', lastSyncAt: Date.now(), coverageDays: 10 } },
+    metrics: {
+      spo2_avg: { primarySource: 'oura', latest: 97, latestDate: '2026-04-22', baseline: 96, baselineP25: 95, baselineP75: 98, rolling: { d7: 97, d30: 97, d90: 96 }, trend30d: 'flat', weekly: [96, 96, 97, 97, 97] },
+    },
+  };
+  window._labState.importedData.wearableSummary = strip2;
+  const stripSpo2Html = window.renderWearableStrip();
+  await store.upsertDailyBatch(TEST_PROFILE_DETAIL, [
+    { source: 'oura', date: '2026-04-22', spo2_avg: 97 },
+  ]);
+  await window.openWearableDetail('spo2_avg');
+  await new Promise(r => setTimeout(r, 60));
+  const modalSpo2Html = document.getElementById('detail-modal').innerHTML;
+  // Neither renderer should produce "97.0 %" — both should be "97 %".
+  assert('Strip renders SpO2 97 as integer (no .0)',
+    !/97\.0/.test(stripSpo2Html));
+  assert('Modal renders SpO2 97 as integer (no .0)',
+    !/97\.0/.test(modalSpo2Html));
+  window.closeModal();
+  delete window._labState.importedData.wearableSummary;
 
   console.log(`\nResults: ${pass} passed, ${fail} failed, ${pass + fail} total`);
 })();

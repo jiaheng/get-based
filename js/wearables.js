@@ -136,8 +136,16 @@ function formatDelta(latest, baseline) {
   return `${arrow} ${Math.abs(pct).toFixed(0)}%`;
 }
 
+// Single formatter used by both the strip card AND the detail modal so a
+// number renders identically in both places. Rules:
+//   null / non-finite  → "—"
+//   integer unit       → Math.round (ms, bpm, %, min, '' score, steps count)
+//   integer value      → Math.round (even for /5, yrs, °C, mg/dL — avoids "3.0")
+//   else               → toFixed(1)
 function formatValue(latest, unit) {
-  if (unit === 'ms' || unit === 'bpm' || unit === '%' || unit === '') return String(Math.round(latest));
+  if (latest == null || !isFinite(latest)) return '—';
+  const intUnits = ['ms', 'bpm', '%', 'min', ''];
+  if (intUnits.includes(unit) || Number.isInteger(latest)) return String(Math.round(latest));
   return latest.toFixed(1);
 }
 
@@ -202,7 +210,7 @@ function renderCard(metricId, canon, metric, showSourceBadge) {
   const adapter = adapterById(metric.primarySource);
   const sourceBadge = (showSourceBadge && adapter)
     ? `<span class="wearable-source-badge">via ${escapeHTML(adapter.displayName)}</span>` : '';
-  return `<div class="wearable-card" onclick="openWearableDetail('${escapeHTML(metricId)}')" role="button" tabindex="0">
+  return `<div class="wearable-card" onclick="openWearableDetail('${escapeHTML(metricId)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openWearableDetail('${escapeHTML(metricId)}')}" role="button" tabindex="0" aria-label="Open ${escapeHTML(canon.label)} detail">
     <div class="wearable-card-top">
       <span class="wearable-metric-name">${escapeHTML(canon.label)}${subLabel}</span>
       <span class="wearable-delta ${deltaCls}">${deltaText}</span>
@@ -340,7 +348,7 @@ function buildWearableDetailHtml(canon, m, series, metricId) {
   const unit = canon.unit || '';
   const unitSpaced = unit ? ' ' + escapeHTML(unit) : '';
   const subLabel = canon.sub ? `<span style="opacity:0.6;font-size:0.7em;margin-left:6px;font-weight:normal">${escapeHTML(canon.sub)}</span>` : '';
-  const formatV = v => (v == null || !isFinite(v)) ? '—' : (Number.isInteger(v) || unit === 'ms' || unit === 'bpm' || unit === 'min' || unit === '') ? String(Math.round(v)) : v.toFixed(1);
+  const formatV = v => formatValue(v, unit);
 
   // Trend copy mirrors the strip card so users get consistent language.
   const trendWord = m.trend30d === 'declining' ? 'declining'
@@ -394,7 +402,7 @@ function renderWearableChart(canvas, canon, m, series) {
   const pad = Math.max((ymax - ymin) * 0.08, 0.5);
 
   const unit = canon.unit || '';
-  const formatV = v => (v == null || !isFinite(v)) ? '—' : (Number.isInteger(v) || unit === 'ms' || unit === 'bpm' || unit === 'min' || unit === '') ? String(Math.round(v)) : v.toFixed(1);
+  const formatV = v => formatValue(v, unit);
 
   state.chartInstances['modal'] = new window.Chart(canvas, {
     type: 'line',
