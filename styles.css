@@ -4031,6 +4031,48 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
 }
 .wearable-strip-footer.hidden { display: none; }
 
+/* ── Wearable detail modal ── */
+.wearable-detail-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+.wearable-detail-stat {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.wearable-detail-stat-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.wearable-detail-stat-val {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.wearable-detail-stat-sub {
+  font-size: 11px;
+  color: var(--text-secondary);
+  opacity: 0.75;
+}
+.wearable-detail-empty {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: var(--bg-primary);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
 /* Settings — wearable adapter cards */
 .wearables-adapter-grid {
   display: grid; grid-template-columns: 1fr; gap: 12px; margin-top: 10px;

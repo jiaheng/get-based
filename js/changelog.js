@@ -5,6 +5,14 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.22.2', date: '2026-04-22', title: 'Wearables detail view — click any card for the full 90-day chart',
+    items: [
+      'Click a wearable card to open a detail modal with a 90-day daily chart (Chart.js, time-axis), baseline reference line, and stats (latest, P25–P75 range, 7d/30d rolling averages, coverage).',
+      'Added <b>Steps</b> as a 9th card (from <code>daily_activity.steps</code>) — raw movement counts that populate even while Oura Rest Mode suppresses the composite Activity score. If Activity shows all zeros, the detail modal now explains why.',
+      'Modal stats grid is auto-fit responsive, so it looks right on narrow phones and wide monitors alike.',
+    ]
+  },
+  {
     version: '1.22.1', date: '2026-04-22', title: 'Wearables polish — more cards + connection fixes',
     items: [
       'Strip now shows up to 8 cards — added Activity, Stress, Resilience, and Cardio Age alongside the original four. Auto-fit grid so any card count lays out evenly (ready for WHOOP / Apple Health next).',

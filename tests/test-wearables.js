@@ -243,12 +243,14 @@ return (async function() {
   assert('Oura adapter scope list matches DEFAULT_OURA_SCOPES',
     JSON.stringify([...ouraAdapter.oauth.scopes].sort()) === JSON.stringify([...oauth.DEFAULT_OURA_SCOPES].sort()));
 
-  // Extended canonical metrics (8 cards ship with the dashboard strip at v1.22)
-  for (const mid of ['activity_score','stress_high_min','resilience_level','cardio_age']) {
+  // Extended canonical metrics (9 cards ship with the dashboard strip at v1.22.2)
+  for (const mid of ['activity_score','steps','stress_high_min','resilience_level','cardio_age']) {
     assert(`CANONICAL_METRICS has ${mid}`, !!reg.CANONICAL_METRICS[mid]);
     assert(`Oura adapter maps ${mid}`, reg.adapterSupportsMetric('oura', mid));
   }
-  assert('DEFAULT_METRIC_ORDER is 8 metrics (4 core + 4 extended)', reg.DEFAULT_METRIC_ORDER.length === 8);
+  assert('DEFAULT_METRIC_ORDER is 9 metrics (4 core + 5 extended)', reg.DEFAULT_METRIC_ORDER.length === 9);
+  assert('Steps is mapped to the same endpoint as activity_score (both from daily_activity)',
+    reg.adapterById('oura').metrics.steps.endpoint === reg.adapterById('oura').metrics.activity_score.endpoint);
 
   // AI context labels derive from canonical registry — must handle every ordered
   // metric without falling back to raw ids.
@@ -306,6 +308,45 @@ return (async function() {
   delete window._labState.importedData.wearableSummary;
 
   // ═══════════════════════════════════════
+  // 9b. Detail modal
+  // ═══════════════════════════════════════
+  console.log('%c 9b. Detail Modal ', 'font-weight:bold;color:#f59e0b');
+  const detailSummary = {
+    sources: { oura: { connectedSince: '2026-01-01', lastSyncAt: Date.now(), coverageDays: 5 } },
+    metrics: {
+      hrv_rmssd: { primarySource: 'oura', latest: 42, latestDate: '2026-04-22', baseline: 40, baselineP25: 36, baselineP75: 44, rolling: { d7: 42, d30: 40, d90: 40 }, trend30d: 'rising', weekly: [38, 40, 42] },
+      activity_score: { primarySource: 'oura', latest: 0, latestDate: '2026-04-22', baseline: 0, baselineP25: 0, baselineP75: 0, rolling: { d7: 0, d30: 0, d90: 0 }, trend30d: 'flat', weekly: [0,0,0,0,0] },
+    },
+  };
+  window._labState.importedData.wearableSummary = detailSummary;
+  const TEST_PROFILE_DETAIL = window._labState.currentProfile || TEST_PROFILE;
+  await store.upsertDailyBatch(TEST_PROFILE_DETAIL, [
+    { source: 'oura', date: '2026-04-20', hrv_rmssd: 40, activity_score: 0 },
+    { source: 'oura', date: '2026-04-21', hrv_rmssd: 41, activity_score: 0 },
+    { source: 'oura', date: '2026-04-22', hrv_rmssd: 42, activity_score: 0 },
+  ]);
+
+  await window.openWearableDetail('hrv_rmssd');
+  await new Promise(r => setTimeout(r, 60));
+  assert('Detail modal opens on a valid metric', document.getElementById('modal-overlay').classList.contains('show'));
+  const modalHtml = document.getElementById('detail-modal').innerHTML;
+  assert('Detail modal includes metric label HRV', modalHtml.includes('HRV'));
+  assert('Detail modal shows latest value', /42/.test(modalHtml));
+  assert('Detail modal shows Baseline (90d) stat', /Baseline/.test(modalHtml));
+  assert('Detail modal shows Coverage stat', /Coverage/.test(modalHtml));
+  assert('Chart canvas mounted on modal', !!document.getElementById('chart-modal'));
+  assert('Chart instance stored under state.chartInstances.modal', !!window._labState.chartInstances?.modal);
+  window.closeModal();
+  assert('closeModal clears modal chart instance', !window._labState.chartInstances?.modal);
+
+  await window.openWearableDetail('activity_score');
+  await new Promise(r => setTimeout(r, 60));
+  assert('Rest-mode hint shown on all-zero activity score',
+    /Rest Mode/.test(document.getElementById('detail-modal').innerHTML));
+  window.closeModal();
+  delete window._labState.importedData.wearableSummary;
+
+  // ═══════════════════════════════════════
   // 10. Window exports for render handlers
   // ═══════════════════════════════════════
   console.log('%c 10. Window Exports ', 'font-weight:bold;color:#f59e0b');
@@ -314,6 +355,7 @@ return (async function() {
   assert('window.handleWearableConnect exists', typeof window.handleWearableConnect === 'function');
   assert('window.handleWearableDisconnect exists', typeof window.handleWearableDisconnect === 'function');
   assert('window.syncWearableNow exists', typeof window.syncWearableNow === 'function');
+  assert('window.openWearableDetail exists', typeof window.openWearableDetail === 'function');
 
   console.log(`\nResults: ${pass} passed, ${fail} failed, ${pass + fail} total`);
 })();

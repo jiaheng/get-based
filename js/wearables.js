@@ -21,6 +21,8 @@ import { ADAPTERS, adapterById, canonicalMetric, metricsForSources } from './wea
 import { beginConnectOAuth, backfillWearable, disconnectWearable, syncNow, listConnectedSources, getConnection } from './wearables-connect.js';
 import { syncWearableSummary } from './wearables-summary.js';
 import { getActiveProfileId } from './profile.js';
+import { getDailyRange } from './wearables-store.js';
+import { getChartColors } from './theme.js';
 
 // ─────────────────────────────────────────────────────────
 // MOCK SUMMARY — remove once the real L2 pipeline ships
@@ -284,8 +286,171 @@ function toggleWearableStrip() {
   localStorage.setItem('wearables-strip-collapsed', hidden ? '1' : '0');
 }
 
-function openWearableDetail(_metricId) {
-  if (window.showNotification) window.showNotification('Detail view is scheduled for v1.1', 'info');
+// ─────────────────────────────────────────────────────────
+// DETAIL MODAL — 90d daily chart + stats for a single metric
+// ─────────────────────────────────────────────────────────
+
+async function openWearableDetail(metricId) {
+  const canon = canonicalMetric(metricId);
+  const summary = state.importedData?.wearableSummary;
+  const m = summary?.metrics?.[metricId];
+  if (!canon || !m) {
+    showNotification?.('No data for this metric yet — run a sync first', 'info');
+    return;
+  }
+
+  // Pull last 90 days from L1 for whichever source is primary for this metric.
+  // Series may have gaps (ring not worn, feature off) — we plot what's there
+  // and label missing days via Chart.js spanGaps rather than forward-filling.
+  const profileId = getActiveProfileId();
+  const endDate = new Date().toISOString().slice(0, 10);
+  const start = new Date(); start.setUTCDate(start.getUTCDate() - 90);
+  const startDate = start.toISOString().slice(0, 10);
+  let rows = [];
+  try { rows = await getDailyRange(profileId, m.primarySource, startDate, endDate); }
+  catch (e) { showNotification?.(`Couldn't read local history: ${e.message}`, 'error', 4000); return; }
+
+  const series = rows
+    .map(r => ({ date: r.date, v: r[metricId] }))
+    .filter(p => typeof p.v === 'number' && isFinite(p.v))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const modal = document.getElementById('detail-modal');
+  const overlay = document.getElementById('modal-overlay');
+  if (!modal || !overlay) return;
+
+  // Destroy any previous chart on the shared modal canvas before swapping html.
+  if (state.chartInstances['modal']) {
+    state.chartInstances['modal'].destroy();
+    delete state.chartInstances['modal'];
+  }
+
+  modal.innerHTML = buildWearableDetailHtml(canon, m, series, metricId);
+  overlay.classList.add('show');
+
+  const canvas = document.getElementById('chart-modal');
+  if (canvas && typeof window.Chart !== 'undefined' && series.length > 0) {
+    renderWearableChart(canvas, canon, m, series);
+  }
+}
+
+function buildWearableDetailHtml(canon, m, series, metricId) {
+  const adapter = adapterById(m.primarySource);
+  const sourceName = adapter?.displayName || m.primarySource;
+  const unit = canon.unit || '';
+  const unitSpaced = unit ? ' ' + escapeHTML(unit) : '';
+  const subLabel = canon.sub ? `<span style="opacity:0.6;font-size:0.7em;margin-left:6px;font-weight:normal">${escapeHTML(canon.sub)}</span>` : '';
+  const formatV = v => (v == null || !isFinite(v)) ? '—' : (Number.isInteger(v) || unit === 'ms' || unit === 'bpm' || unit === 'min' || unit === '') ? String(Math.round(v)) : v.toFixed(1);
+
+  // Trend copy mirrors the strip card so users get consistent language.
+  const trendWord = m.trend30d === 'declining' ? 'declining'
+                   : m.trend30d === 'rising' ? 'rising'
+                   : m.trend30d === 'improving' ? 'improving'
+                   : 'flat';
+
+  const deltaPct = m.baseline && isFinite(m.baseline) ? ((m.latest - m.baseline) / m.baseline * 100) : null;
+  const deltaStr = deltaPct == null ? '—'
+                 : (deltaPct > 0.5 ? '↑' : deltaPct < -0.5 ? '↓' : '→') + ' ' + Math.abs(deltaPct).toFixed(0) + '%';
+
+  const statsCells = [
+    ['Latest',   `${formatV(m.latest)}${unitSpaced}`, m.latestDate || ''],
+    ['Baseline (90d)', `${formatV(m.baseline)}${unitSpaced}`, 'median'],
+    ['7-day avg', `${formatV(m.rolling?.d7)}${unitSpaced}`, ''],
+    ['30-day avg', `${formatV(m.rolling?.d30)}${unitSpaced}`, ''],
+    ['P25 – P75', `${formatV(m.baselineP25)} – ${formatV(m.baselineP75)}${unitSpaced}`, 'interquartile'],
+    ['Coverage', `${series.length}d`, `of last 90 days`],
+  ].map(([label, val, sub]) => `
+    <div class="wearable-detail-stat">
+      <div class="wearable-detail-stat-label">${escapeHTML(label)}</div>
+      <div class="wearable-detail-stat-val">${val}</div>
+      ${sub ? `<div class="wearable-detail-stat-sub">${escapeHTML(sub)}</div>` : ''}
+    </div>`).join('');
+
+  const emptyHint = series.length === 0
+    ? `<div class="wearable-detail-empty">No daily samples for this metric in the last 90 days. Either the source adapter lacks the scope, the feature is off on the device, or the ring wasn't worn. Try Sync now or reconnect with full scopes.</div>`
+    : (metricId === 'activity_score' && series.every(p => p.v === 0))
+      ? `<div class="wearable-detail-empty">Every day shows 0 — Oura suppresses the Activity composite score while Rest Mode is on. Check the <b>Steps</b> card for raw movement data, or disable Rest Mode in the Oura app.</div>`
+      : '';
+
+  return `<button class="modal-close" onclick="closeModal()">&times;</button>
+    <h3>${escapeHTML(canon.label)}${subLabel}</h3>
+    <div class="modal-unit">
+      ${escapeHTML(sourceName)} · ${deltaStr} vs baseline · ${escapeHTML(trendWord)} 30d
+    </div>
+    <div class="modal-chart" style="height:260px"><canvas id="chart-modal"></canvas></div>
+    ${emptyHint}
+    <div class="wearable-detail-stats">${statsCells}</div>`;
+}
+
+function renderWearableChart(canvas, canon, m, series) {
+  const tc = getChartColors();
+  const labels = series.map(p => p.date);
+  const values = series.map(p => p.v);
+  const baselineValues = values.map(() => m.baseline);
+
+  // Y-axis padding so baseline line and sparkline aren't clipped to the edge.
+  const ymin = Math.min(...values, m.baseline);
+  const ymax = Math.max(...values, m.baseline);
+  const pad = Math.max((ymax - ymin) * 0.08, 0.5);
+
+  const unit = canon.unit || '';
+  const formatV = v => (v == null || !isFinite(v)) ? '—' : (Number.isInteger(v) || unit === 'ms' || unit === 'bpm' || unit === 'min' || unit === '') ? String(Math.round(v)) : v.toFixed(1);
+
+  state.chartInstances['modal'] = new window.Chart(canvas, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: canon.label,
+          data: values,
+          borderColor: tc.lineColor || '#60a5fa',
+          backgroundColor: 'transparent',
+          borderWidth: 2,
+          pointRadius: 0,
+          pointHoverRadius: 4,
+          tension: 0.3,
+          spanGaps: true,
+        },
+        {
+          label: 'Baseline',
+          data: baselineValues,
+          borderColor: tc.gridColor || '#9ca3af',
+          backgroundColor: 'transparent',
+          borderWidth: 1,
+          borderDash: [4, 4],
+          pointRadius: 0,
+          pointHoverRadius: 0,
+          tension: 0,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: tc.tooltipBg, titleColor: tc.tooltipTitle,
+          bodyColor: tc.tooltipBody, borderColor: tc.tooltipBorder, borderWidth: 1,
+          callbacks: { label: (c) => `${c.dataset.label}: ${formatV(c.parsed.y)}${unit ? ' ' + unit : ''}` },
+        },
+      },
+      scales: {
+        x: {
+          type: 'time',
+          time: { tooltipFormat: 'MMM d, yyyy', displayFormats: { day: 'MMM d', month: 'MMM yyyy' } },
+          ticks: { source: 'auto', color: tc.tickColor, font: { size: 10 }, maxTicksLimit: 8 },
+          grid: { display: false },
+        },
+        y: {
+          min: ymin - pad, max: ymax + pad,
+          ticks: { color: tc.tickColor, font: { size: 10 } },
+          grid: { color: tc.gridColor },
+        },
+      },
+    },
+  });
 }
 
 async function syncWearableNow() {

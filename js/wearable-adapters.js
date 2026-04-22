@@ -33,6 +33,7 @@ export const CANONICAL_METRICS = {
   sleep_score:      { id: 'sleep_score',      label: 'Sleep',       sub: 'score', unit: '',      worseWhen: 'down'   },
   readiness_score:  { id: 'readiness_score',  label: 'Readiness',   sub: 'score', unit: '',      worseWhen: 'down'   },
   activity_score:   { id: 'activity_score',   label: 'Activity',    sub: 'score', unit: '',      worseWhen: 'down'   },
+  steps:            { id: 'steps',             label: 'Steps',       sub: '',      unit: '',      worseWhen: 'down'   },
   stress_high_min:  { id: 'stress_high_min',  label: 'Stress',      sub: 'high',  unit: 'min',   worseWhen: 'up'     },
   resilience_level: { id: 'resilience_level', label: 'Resilience',  sub: 'level', unit: '/5',    worseWhen: 'down'   },
   cardio_age:       { id: 'cardio_age',       label: 'Cardio age',  sub: '',      unit: 'yrs',   worseWhen: 'up'     },
@@ -46,7 +47,7 @@ export const CANONICAL_METRICS = {
 // here still renders (appended in registry order) — the list just pins priority.
 export const DEFAULT_METRIC_ORDER = [
   'hrv_rmssd', 'rhr', 'sleep_score', 'readiness_score',
-  'activity_score', 'stress_high_min', 'resilience_level', 'cardio_age',
+  'activity_score', 'steps', 'stress_high_min', 'resilience_level', 'cardio_age',
 ];
 
 export const ADAPTERS = [
@@ -73,7 +74,8 @@ export const ADAPTERS = [
       rhr:              { endpoint: 'v2/usercollection/sleep',                   field: 'average_heart_rate' },
       sleep_score:      { endpoint: 'v2/usercollection/daily_sleep',             field: 'score' },
       readiness_score:  { endpoint: 'v2/usercollection/daily_readiness',         field: 'score' },
-      activity_score:   { endpoint: 'v2/usercollection/daily_activity',          field: 'score' },
+      activity_score:   { endpoint: 'v2/usercollection/daily_activity',          field: 'score' },           // 0 when user has Rest Mode on — see steps as fallback
+      steps:            { endpoint: 'v2/usercollection/daily_activity',          field: 'steps' },
       stress_high_min:  { endpoint: 'v2/usercollection/daily_stress',            field: 'stress_high' },     // seconds → minutes in fetcher
       resilience_level: { endpoint: 'v2/usercollection/daily_resilience',        field: 'level' },           // enum → 1-5 in fetcher
       cardio_age:       { endpoint: 'v2/usercollection/daily_cardiovascular_age', field: 'vascular_age' },

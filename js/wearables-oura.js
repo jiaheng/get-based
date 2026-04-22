@@ -142,8 +142,8 @@ export async function fetchOuraDailyRange(accessToken, startDate, endDate) {
         source: 'oura', date: day,
         hrv_rmssd: null, rhr: null,
         sleep_score: null, readiness_score: null,
-        activity_score: null, stress_high_min: null,
-        resilience_level: null, cardio_age: null,
+        activity_score: null, steps: null,
+        stress_high_min: null, resilience_level: null, cardio_age: null,
         spo2_avg: null, body_temp_delta: null, glucose_avg: null,
       });
     }
@@ -172,7 +172,9 @@ export async function fetchOuraDailyRange(accessToken, startDate, endDate) {
   }
   for (const d of dailyActivity) {
     if (!d?.day) continue;
-    if (typeof d.score === 'number') ensureRow(d.day).activity_score = d.score;
+    const row = ensureRow(d.day);
+    if (typeof d.score === 'number') row.activity_score = d.score;
+    if (typeof d.steps === 'number') row.steps = d.steps;
   }
   for (const d of dailyStress) {
     if (!d?.day) continue;
