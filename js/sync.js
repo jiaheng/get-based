@@ -797,6 +797,13 @@ export function onDataSaved() {
   if (_syncEnabled && evolu) {
     const profileId = state.currentProfile;
     const data = state.importedData;
+    // Bump sync-ts immediately so a pull firing during the debounce window
+    // sees local as newer and skips — otherwise it would clobber the fresh
+    // local write (e.g. wearableConnections from OAuth callback) with the
+    // pre-write relay snapshot. pushProfile bumps sync-ts again on success.
+    if (profileId) {
+      localStorage.setItem(`labcharts-${profileId}-sync-ts`, String(Date.now()));
+    }
     clearTimeout(_debounceTimer);
     _debounceTimer = setTimeout(() => {
       if (_syncing) {

@@ -3916,7 +3916,11 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
 
 .wearable-card-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* auto-fit so the grid stays even no matter how many cards the adapter
+     registry produces (4 for Oura basics, 8-9 with full scopes, more when
+     WHOOP/Apple Health join). Cards want ~220px min; the row refills across
+     the available width without leaving half-empty tail rows. */
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 10px;
 }
 .wearable-card-grid.hidden { display: none; }

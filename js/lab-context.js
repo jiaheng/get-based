@@ -10,6 +10,7 @@ import { getBloodDrawPhases, getNextBestDrawDate, detectPerimenopausePattern, de
 import { scanSupplementsForWarnings, humanizeEffect } from './supplement-warnings.js';
 import { scanDietForContaminants } from './food-contaminants.js';
 import { ingredientDailyTotal, effectiveTimesPerDay } from './supplements.js';
+import { CANONICAL_METRICS, DEFAULT_METRIC_ORDER } from './wearable-adapters.js';
 
 // ═══════════════════════════════════════════════
 // LAB CONTEXT MEMOIZATION
@@ -762,16 +763,17 @@ export function setWearableContextEnabled(on) {
   localStorage.setItem('labcharts-ai-ctx-wearables', on ? 'on' : 'off');
 }
 
-const METRIC_LABELS = {
-  hrv_rmssd: 'HRV (RMSSD)',
-  rhr: 'Resting HR',
-  sleep_score: 'Sleep score',
-  readiness_score: 'Readiness score',
-  spo2_avg: 'SpO₂',
-  body_temp_delta: 'Body temp Δ',
-  glucose_avg: 'Glucose avg',
-};
-const METRIC_UNITS = { hrv_rmssd: 'ms', rhr: 'bpm', sleep_score: '', readiness_score: '', spo2_avg: '%', body_temp_delta: '°C', glucose_avg: 'mg/dL' };
+// Metric labels + units are derived from the canonical registry (single source
+// of truth in wearable-adapters.js). Adding a new canonical metric automatically
+// flows into the AI context — no duplicated tables to drift out of sync.
+function metricLabel(mid) {
+  const c = CANONICAL_METRICS[mid];
+  if (!c) return mid;
+  return c.sub ? `${c.label} (${c.sub})` : c.label;
+}
+function metricUnit(mid) {
+  return CANONICAL_METRICS[mid]?.unit || '';
+}
 
 // Builds ~200-token summary of wearable state. Shape is deliberately terse so
 // it can be included in every prompt without blowing context budget.
@@ -785,8 +787,8 @@ export function buildWearableContext(importedData) {
   const lines = [`## Wearables (${sourceNames.join(' + ')}, ${maxCov}d coverage)`];
 
   for (const [mid, m] of Object.entries(summary.metrics)) {
-    const label = METRIC_LABELS[mid] || mid;
-    const unit = METRIC_UNITS[mid] ?? '';
+    const label = metricLabel(mid);
+    const unit = metricUnit(mid);
     const deltaPct = m.baseline ? ((m.latest - m.baseline) / m.baseline * 100) : 0;
     const arrow = deltaPct > 0.5 ? '↑' : deltaPct < -0.5 ? '↓' : '→';
     const deltaLabel = `${arrow}${Math.abs(deltaPct).toFixed(0)}%`;
@@ -794,11 +796,13 @@ export function buildWearableContext(importedData) {
     lines.push(`${label}: ${m.latest}${unitStr} latest · baseline ${m.baseline} · ${deltaLabel} · ${m.trend30d} 30d`);
   }
 
-  // Compact weekly series for the 4 core metrics (if present) — lets the AI see shape without per-day noise.
+  // Compact weekly series for every default-order metric that has data — lets
+  // the AI see shape without per-day noise. Walks the registry order so new
+  // canonical metrics get included automatically.
   const weeklySeriesLines = [];
-  for (const mid of ['hrv_rmssd', 'rhr', 'sleep_score', 'readiness_score']) {
+  for (const mid of DEFAULT_METRIC_ORDER) {
     const w = summary.metrics[mid]?.weekly;
-    if (w && w.length >= 2) weeklySeriesLines.push(`  ${METRIC_LABELS[mid]}: ${w.slice(-6).join('→')}`);
+    if (w && w.length >= 2) weeklySeriesLines.push(`  ${metricLabel(mid)}: ${w.slice(-6).join('→')}`);
   }
   if (weeklySeriesLines.length > 0) {
     lines.push('Weekly trend (last 6w):');

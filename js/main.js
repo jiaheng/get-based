@@ -56,9 +56,37 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Scheduled wearable sync (only fires when a source is connected)
   initWearableScheduler();
 
-  // Handle Oura OAuth2 callback first — it's distinguishable by presence of a
-  // pending state entry in sessionStorage. If handled, consume the URL params
-  // so the OpenRouter path below doesn't double-process the same code.
+  // Migrate legacy data to profile system on first load
+  if (!localStorage.getItem('labcharts-profiles')) {
+    const profiles = [{ id: 'default', name: 'Default' }];
+    await saveProfiles(profiles);
+    setActiveProfileId('default');
+    const oldImported = localStorage.getItem('labcharts-imported');
+    if (oldImported) {
+      localStorage.setItem(profileStorageKey('default', 'imported'), oldImported);
+      localStorage.removeItem('labcharts-imported');
+    }
+    const oldUnits = localStorage.getItem('labcharts-units');
+    if (oldUnits) {
+      localStorage.setItem(profileStorageKey('default', 'units'), oldUnits);
+      localStorage.removeItem('labcharts-units');
+    }
+  }
+  // Populate profiles cache from (possibly encrypted) storage
+  await initProfilesCache();
+  // Load active profile BEFORE any OAuth callback handling — the callback
+  // writes into state.importedData (wearableConnections for Oura) and
+  // persists via saveImportedData, which keys off state.currentProfile. If
+  // the callback runs first, saves land in the wrong profile's localStorage
+  // and get orphaned the moment we swap profiles here.
+  state.currentProfile = getActiveProfileId();
+  const savedImported = await encryptedGetItem(profileStorageKey(state.currentProfile, 'imported'));
+  if (savedImported) { try { state.importedData = JSON.parse(savedImported); if (!state.importedData.notes) state.importedData.notes = []; migrateProfileData(state.importedData); } catch(e) {} }
+
+  // Handle Oura OAuth2 callback — must run AFTER profile load so saveConnection
+  // writes to the active profile's state + localStorage. Distinguishable by
+  // presence of a pending state entry in sessionStorage; if handled we skip
+  // the OpenRouter path below so the same code isn't double-processed.
   const ouraHandled = await handleOAuthCallbackOnLoad();
 
   // Handle OpenRouter OAuth callback (?code=...)
@@ -78,28 +106,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  // Migrate legacy data to profile system on first load
-  if (!localStorage.getItem('labcharts-profiles')) {
-    const profiles = [{ id: 'default', name: 'Default' }];
-    await saveProfiles(profiles);
-    setActiveProfileId('default');
-    const oldImported = localStorage.getItem('labcharts-imported');
-    if (oldImported) {
-      localStorage.setItem(profileStorageKey('default', 'imported'), oldImported);
-      localStorage.removeItem('labcharts-imported');
-    }
-    const oldUnits = localStorage.getItem('labcharts-units');
-    if (oldUnits) {
-      localStorage.setItem(profileStorageKey('default', 'units'), oldUnits);
-      localStorage.removeItem('labcharts-units');
-    }
-  }
-  // Populate profiles cache from (possibly encrypted) storage
-  await initProfilesCache();
-  // Load active profile
-  state.currentProfile = getActiveProfileId();
-  const savedImported = await encryptedGetItem(profileStorageKey(state.currentProfile, 'imported'));
-  if (savedImported) { try { state.importedData = JSON.parse(savedImported); if (!state.importedData.notes) state.importedData.notes = []; migrateProfileData(state.importedData); } catch(e) {} }
   // Initialize Evolu sync after profile is loaded (needs state.currentProfile)
   await initSync();
   renderSyncIndicator();

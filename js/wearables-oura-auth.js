@@ -19,7 +19,16 @@ const REFRESH_LOCK_KEY = 'oura-oauth-refresh';     // navigator.locks name
 
 // Default scope set — matches the minimum we need for the v1 dashboard strip.
 // Caller can override for extra cards (e.g. adding 'spo2' for the SpO2 card).
-export const DEFAULT_OURA_SCOPES = ['personal', 'daily', 'heartrate', 'session'];
+// Scope map (confirmed via Oura 401 responses, not their docs — docs say
+// `spo2Daily` but the gate rejects that string):
+//   personal     → personal_info
+//   daily        → daily_sleep / daily_readiness / daily_activity
+//   heartrate    → heartrate stream
+//   session      → sessions
+//   spo2         → daily_spo2
+//   stress       → daily_stress, daily_resilience
+//   heart_health → daily_cardiovascular_age
+export const DEFAULT_OURA_SCOPES = ['personal', 'daily', 'heartrate', 'session', 'spo2', 'stress', 'heart_health'];
 
 // ─────────────────────────────────────────────────────────
 // Helpers
@@ -91,20 +100,35 @@ export async function completeOAuthCallback(urlParams) {
   try { pending = JSON.parse(pendingRaw); } catch { return { ok: false, error: 'Corrupt pending state' }; }
   if (pending.state !== returnedState) return { ok: false, error: 'State mismatch — possible CSRF, aborting' };
 
-  const exchangeRes = await fetch(PROXY_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      oura_token_exchange: {
-        code,
-        redirect_uri: pending.redirectUri,
-        client_id: pending.clientId,
-      },
-    }),
-  });
-  const body = await exchangeRes.json().catch(() => ({}));
+  // Oura's edge (CloudFront in front of cloud.ouraring.com) intermittently
+  // 5xx's the /oauth/token endpoint. The auth code is single-use and short-
+  // lived, so we retry quickly — 3 tries, exponential backoff — before
+  // surfacing the failure to the user.
+  let exchangeRes, body;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    exchangeRes = await fetch(PROXY_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        oura_token_exchange: {
+          code,
+          redirect_uri: pending.redirectUri,
+          client_id: pending.clientId,
+        },
+      }),
+    });
+    body = await exchangeRes.clone().json().catch(() => ({}));
+    if (exchangeRes.ok) break;
+    // Only retry transient server-side failures; 400/401 means our request is bad.
+    if (exchangeRes.status < 500 || attempt === 2) break;
+    await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+  }
   if (!exchangeRes.ok) {
-    return { ok: false, error: body?.error || body?.error_description || `Token exchange failed (${exchangeRes.status})` };
+    // Oura sometimes returns HTML (CloudFront error page) instead of JSON on 5xx;
+    // body?.error is then undefined and we'd leak a wall of HTML into the toast.
+    const detail = body?.error || body?.error_description;
+    const hint = exchangeRes.status >= 500 ? ' — Oura is down, try again in a minute' : '';
+    return { ok: false, error: detail ? detail : `Token exchange failed (${exchangeRes.status})${hint}` };
   }
   return {
     ok: true,

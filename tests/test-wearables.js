@@ -227,14 +227,88 @@ return (async function() {
   assert('isOuraCallback false when state absent', !oauth.isOuraCallback(new URLSearchParams('code=X')));
   assert('isOuraCallback false when pending missing', (sessionStorage.removeItem('oura-oauth-pending'), !oauth.isOuraCallback(new URLSearchParams('code=X&state=xyz'))));
 
-  // DEFAULT_OURA_SCOPES sanity
-  assert('DEFAULT_OURA_SCOPES includes personal+daily+heartrate+session',
+  // DEFAULT_OURA_SCOPES sanity — covers all canonical-metric-backing endpoints
+  assert('DEFAULT_OURA_SCOPES includes base 4 (personal+daily+heartrate+session)',
     ['personal', 'daily', 'heartrate', 'session'].every(s => oauth.DEFAULT_OURA_SCOPES.includes(s)));
+  assert('DEFAULT_OURA_SCOPES includes spo2 (daily_spo2)',
+    oauth.DEFAULT_OURA_SCOPES.includes('spo2'));
+  assert('DEFAULT_OURA_SCOPES includes stress (daily_stress + daily_resilience)',
+    oauth.DEFAULT_OURA_SCOPES.includes('stress'));
+  assert('DEFAULT_OURA_SCOPES includes heart_health (daily_cardiovascular_age)',
+    oauth.DEFAULT_OURA_SCOPES.includes('heart_health'));
+  assert('DEFAULT_OURA_SCOPES does NOT include docs-claimed spo2Daily (gate rejects it)',
+    !oauth.DEFAULT_OURA_SCOPES.includes('spo2Daily'));
+  // Adapter-registered scopes must match what the auth module requests — a drift
+  // here means the authorize URL and the token-gate check for different things.
+  assert('Oura adapter scope list matches DEFAULT_OURA_SCOPES',
+    JSON.stringify([...ouraAdapter.oauth.scopes].sort()) === JSON.stringify([...oauth.DEFAULT_OURA_SCOPES].sort()));
+
+  // Extended canonical metrics (8 cards ship with the dashboard strip at v1.22)
+  for (const mid of ['activity_score','stress_high_min','resilience_level','cardio_age']) {
+    assert(`CANONICAL_METRICS has ${mid}`, !!reg.CANONICAL_METRICS[mid]);
+    assert(`Oura adapter maps ${mid}`, reg.adapterSupportsMetric('oura', mid));
+  }
+  assert('DEFAULT_METRIC_ORDER is 8 metrics (4 core + 4 extended)', reg.DEFAULT_METRIC_ORDER.length === 8);
+
+  // AI context labels derive from canonical registry — must handle every ordered
+  // metric without falling back to raw ids.
+  const fakeSummary = {
+    sources: { oura: { connectedSince: '2026-01-01', lastSyncAt: Date.now(), coverageDays: 30 } },
+    metrics: {},
+  };
+  for (const mid of reg.DEFAULT_METRIC_ORDER) {
+    fakeSummary.metrics[mid] = { primarySource: 'oura', latest: 50, baseline: 50, baselineP25: 45, baselineP75: 55, rolling: { d7: 50, d30: 50, d90: 50 }, trend30d: 'flat', weekly: [49, 50, 51, 50, 50, 50] };
+  }
+  const ctxAll = labCtx.buildWearableContext({ wearableSummary: fakeSummary });
+  assert('AI context renders all 8 canonical labels (no raw IDs)',
+    !/activity_score|stress_high_min|resilience_level|cardio_age/.test(ctxAll) &&
+    ctxAll.includes('Activity') && ctxAll.includes('Stress') && ctxAll.includes('Resilience') && ctxAll.includes('Cardio age'));
+  assert('AI context includes weekly trend for extended metrics',
+    ctxAll.includes('Weekly trend') && /Resilience.*→/.test(ctxAll));
 
   // ═══════════════════════════════════════
-  // 7. Window exports for render handlers
+  // 8. Resilience + stress value normalization
   // ═══════════════════════════════════════
-  console.log('%c 7. Window Exports ', 'font-weight:bold;color:#f59e0b');
+  console.log('%c 8. Value Normalization ', 'font-weight:bold;color:#f59e0b');
+  const { fetchOuraDailyRange } = await import('../js/wearables-oura.js');
+  assert('fetchOuraDailyRange is exported', typeof fetchOuraDailyRange === 'function');
+  // We can't hit Oura here, but we can assert the helper behaviors indirectly
+  // by checking metric definitions. Resilience enum → 1..5 numeric maps through
+  // the fetcher; stress_high (seconds) → minutes via /60 round. Both guarantees
+  // live in wearables-oura.js; this test pins the shape contract.
+  assert('resilience_level metric unit is /5 (registry contract)',
+    reg.CANONICAL_METRICS.resilience_level.unit === '/5');
+  assert('stress_high_min metric unit is min (registry contract)',
+    reg.CANONICAL_METRICS.stress_high_min.unit === 'min');
+
+  // ═══════════════════════════════════════
+  // 9. Render-helper divide-by-zero guards
+  // ═══════════════════════════════════════
+  console.log('%c 9. Render Guards ', 'font-weight:bold;color:#f59e0b');
+  // Force-load wearables.js (side-effect module that registers window.*).
+  await import('../js/wearables.js');
+  // deltaClassFor / formatDelta are not exported — they're internal to the strip
+  // render. We test them via the full render path: a metric with baseline=0 must
+  // NOT produce "NaN%" in the rendered HTML, and the delta cell must still carry
+  // a neutral class (no bad/good red/green paint on divide-by-zero).
+  const zeroBaselineSummary = {
+    sources: { oura: { connectedSince: '2026-01-01', lastSyncAt: Date.now(), coverageDays: 10 } },
+    metrics: {
+      activity_score: { primarySource: 'oura', latest: 0, baseline: 0, baselineP25: 0, baselineP75: 0, rolling: { d7: 0, d30: 0, d90: 0 }, trend30d: 'flat', weekly: [0,0,0,0] },
+    },
+  };
+  // Stash summary so renderWearableStrip reads it
+  window._labState.importedData = window._labState.importedData || {};
+  window._labState.importedData.wearableSummary = zeroBaselineSummary;
+  const html = window.renderWearableStrip();
+  assert('render never emits NaN% on zero baseline', !/NaN/.test(html));
+  assert('render shows dash marker for zero-baseline delta', /→\s*—/.test(html) || /→—/.test(html));
+  delete window._labState.importedData.wearableSummary;
+
+  // ═══════════════════════════════════════
+  // 10. Window exports for render handlers
+  // ═══════════════════════════════════════
+  console.log('%c 10. Window Exports ', 'font-weight:bold;color:#f59e0b');
   assert('window.renderWearableStrip exists', typeof window.renderWearableStrip === 'function');
   assert('window.renderWearablesSettingsSection exists', typeof window.renderWearablesSettingsSection === 'function');
   assert('window.handleWearableConnect exists', typeof window.handleWearableConnect === 'function');

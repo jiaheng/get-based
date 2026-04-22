@@ -5,6 +5,16 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.22.1', date: '2026-04-22', title: 'Wearables polish — more cards + connection fixes',
+    items: [
+      'Strip now shows up to 8 cards — added Activity, Stress, Resilience, and Cardio Age alongside the original four. Auto-fit grid so any card count lays out evenly (ready for WHOOP / Apple Health next).',
+      'Fixed the connection-not-persisting bug — the OAuth callback previously raced with the profile loader and saved tokens to the wrong storage key. Settings → Data → Wearables now reliably shows "connected" after you approve on Oura\'s side.',
+      'No more 40-second wait on return from Oura: the dashboard loads immediately and the 90-day backfill runs in the background.',
+      'Scope list corrected (Oura\'s docs say <code>spo2Daily</code>, their gate actually wants <code>spo2</code> / <code>stress</code> / <code>heart_health</code>) — existing users: hit Disconnect + Reconnect once to re-issue the token with all scopes.',
+      'Token exchange retries up to 3× on Oura 5xx (CloudFront blips) instead of failing the whole connect. Error messages no longer leak raw CloudFront HTML.',
+    ]
+  },
+  {
     version: '1.22.0', date: '2026-04-22', title: 'Wearables integration — Oura',
     items: [
       'Connect your Oura ring in Settings → Data → Wearables with one click — getbased sends you to Oura to approve, then pulls 90 days of sleep, readiness, resting heart rate, and HRV (RMSSD). OAuth2 flow with tokens refreshed automatically; your credentials never live in getbased\'s bundle.',

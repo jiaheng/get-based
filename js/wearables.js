@@ -114,7 +114,9 @@ function formatAgo(ts) {
 }
 
 // Semantic delta colour: worse-direction → red, better-direction → green, ~flat → neutral.
+// Returns 'delta-flat' for zero/missing baseline so we don't paint NaN% red/green.
 function deltaClassFor(latest, baseline, worseWhen) {
+  if (!baseline || !isFinite(baseline)) return 'delta-flat';
   const pct = ((latest - baseline) / baseline) * 100;
   if (Math.abs(pct) < 3) return 'delta-flat';
   const isDown = pct < 0;
@@ -124,6 +126,9 @@ function deltaClassFor(latest, baseline, worseWhen) {
 }
 
 function formatDelta(latest, baseline) {
+  // Zero baseline happens when the metric is 0 across the window (e.g. activity
+  // score on a ring that wasn't worn); render a dash instead of NaN%.
+  if (!baseline || !isFinite(baseline)) return '→ —';
   const pct = ((latest - baseline) / baseline) * 100;
   const arrow = pct > 0.5 ? '↑' : pct < -0.5 ? '↓' : '→';
   return `${arrow} ${Math.abs(pct).toFixed(0)}%`;
@@ -167,7 +172,7 @@ function sparklineSVG(series, baseline, worseWhen) {
   const lastY = yFor(series[series.length - 1]).toFixed(1);
   const baselineY = yFor(baseline).toFixed(1);
   const last = series[series.length - 1];
-  const deltaPct = Math.abs((last - baseline) / baseline);
+  const deltaPct = (baseline && isFinite(baseline)) ? Math.abs((last - baseline) / baseline) : 0;
   let toneClass = 'spark-neutral';
   if (deltaPct >= 0.03 && worseWhen !== 'either') {
     const endsBelow = last < baseline;

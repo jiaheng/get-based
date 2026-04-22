@@ -28,19 +28,26 @@
 //   worseWhen       'up' | 'down' | 'either'  — semantic colour for delta badges
 
 export const CANONICAL_METRICS = {
-  hrv_rmssd:       { id: 'hrv_rmssd',       label: 'HRV',        sub: 'RMSSD', unit: 'ms',    worseWhen: 'down' },
-  rhr:             { id: 'rhr',             label: 'Resting HR', sub: '',      unit: 'bpm',   worseWhen: 'up'   },
-  sleep_score:     { id: 'sleep_score',     label: 'Sleep',      sub: 'score', unit: '',      worseWhen: 'down' },
-  readiness_score: { id: 'readiness_score', label: 'Readiness',  sub: 'score', unit: '',      worseWhen: 'down' },
+  hrv_rmssd:        { id: 'hrv_rmssd',        label: 'HRV',         sub: 'RMSSD', unit: 'ms',    worseWhen: 'down'   },
+  rhr:              { id: 'rhr',              label: 'Resting HR',  sub: '',      unit: 'bpm',   worseWhen: 'up'     },
+  sleep_score:      { id: 'sleep_score',      label: 'Sleep',       sub: 'score', unit: '',      worseWhen: 'down'   },
+  readiness_score:  { id: 'readiness_score',  label: 'Readiness',   sub: 'score', unit: '',      worseWhen: 'down'   },
+  activity_score:   { id: 'activity_score',   label: 'Activity',    sub: 'score', unit: '',      worseWhen: 'down'   },
+  stress_high_min:  { id: 'stress_high_min',  label: 'Stress',      sub: 'high',  unit: 'min',   worseWhen: 'up'     },
+  resilience_level: { id: 'resilience_level', label: 'Resilience',  sub: 'level', unit: '/5',    worseWhen: 'down'   },
+  cardio_age:       { id: 'cardio_age',       label: 'Cardio age',  sub: '',      unit: 'yrs',   worseWhen: 'up'     },
   // Canonical extras — adapters opt in by mapping to them
-  spo2_avg:        { id: 'spo2_avg',        label: 'SpO₂',       sub: '',      unit: '%',     worseWhen: 'down' },
-  body_temp_delta: { id: 'body_temp_delta', label: 'Body temp',  sub: 'Δ',     unit: '°C',    worseWhen: 'either' },
-  glucose_avg:     { id: 'glucose_avg',     label: 'Glucose',    sub: 'avg',   unit: 'mg/dL', worseWhen: 'either' },
+  spo2_avg:         { id: 'spo2_avg',         label: 'SpO₂',        sub: '',      unit: '%',     worseWhen: 'down'   },
+  body_temp_delta:  { id: 'body_temp_delta',  label: 'Body temp',   sub: 'Δ',     unit: '°C',    worseWhen: 'either' },
+  glucose_avg:      { id: 'glucose_avg',      label: 'Glucose',     sub: 'avg',   unit: 'mg/dL', worseWhen: 'either' },
 };
 
 // Default display order for the dashboard strip. A canonical metric not listed
 // here still renders (appended in registry order) — the list just pins priority.
-export const DEFAULT_METRIC_ORDER = ['hrv_rmssd', 'rhr', 'sleep_score', 'readiness_score'];
+export const DEFAULT_METRIC_ORDER = [
+  'hrv_rmssd', 'rhr', 'sleep_score', 'readiness_score',
+  'activity_score', 'stress_high_min', 'resilience_level', 'cardio_age',
+];
 
 export const ADAPTERS = [
   {
@@ -58,16 +65,20 @@ export const ADAPTERS = [
         'https://getbased.health/app',
         'http://localhost:8000/app',
       ],
-      scopes: ['personal', 'daily', 'heartrate', 'session'],
+      scopes: ['personal', 'daily', 'heartrate', 'session', 'spo2', 'stress', 'heart_health'],
     },
     apiHost: 'api.ouraring.com',
     metrics: {
-      hrv_rmssd:       { endpoint: 'v2/usercollection/sleep',           field: 'average_hrv' },
-      rhr:             { endpoint: 'v2/usercollection/sleep',           field: 'average_heart_rate' },
-      sleep_score:     { endpoint: 'v2/usercollection/daily_sleep',     field: 'score' },
-      readiness_score: { endpoint: 'v2/usercollection/daily_readiness', field: 'score' },
-      spo2_avg:        { endpoint: 'v2/usercollection/daily_spo2',      field: 'spo2_percentage' },
-      body_temp_delta: { endpoint: 'v2/usercollection/daily_readiness', field: 'temperature_deviation' },
+      hrv_rmssd:        { endpoint: 'v2/usercollection/sleep',                   field: 'average_hrv' },
+      rhr:              { endpoint: 'v2/usercollection/sleep',                   field: 'average_heart_rate' },
+      sleep_score:      { endpoint: 'v2/usercollection/daily_sleep',             field: 'score' },
+      readiness_score:  { endpoint: 'v2/usercollection/daily_readiness',         field: 'score' },
+      activity_score:   { endpoint: 'v2/usercollection/daily_activity',          field: 'score' },
+      stress_high_min:  { endpoint: 'v2/usercollection/daily_stress',            field: 'stress_high' },     // seconds → minutes in fetcher
+      resilience_level: { endpoint: 'v2/usercollection/daily_resilience',        field: 'level' },           // enum → 1-5 in fetcher
+      cardio_age:       { endpoint: 'v2/usercollection/daily_cardiovascular_age', field: 'vascular_age' },
+      spo2_avg:         { endpoint: 'v2/usercollection/daily_spo2',              field: 'spo2_percentage' },
+      body_temp_delta:  { endpoint: 'v2/usercollection/daily_readiness',         field: 'temperature_deviation' },
     },
     accountInfo: { endpoint: 'v2/usercollection/personal_info', identityField: 'email' },
   },

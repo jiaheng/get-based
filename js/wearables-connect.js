@@ -102,15 +102,22 @@ export async function handleOAuthCallbackOnLoad() {
     account: info.ok ? info.account : null,
     lastSyncAt: 0,
   });
-  showNotification?.('Oura connected — backfilling 90 days…', 'info', 3000);
-  try {
-    const bf = await backfillWearable('oura');
-    await syncWearableSummary(getActiveProfileId(), listConnectedSources());
-    showNotification?.(`Oura backfilled ${bf.rows} days`, 'success');
-    if (window.navigate) window.navigate('dashboard');
-  } catch (e) {
-    showNotification?.(`Backfill failed: ${e.message}`, 'error', 5000);
-  }
+  showNotification?.('Oura connected — backfilling 90 days in background…', 'info', 4000);
+  // Navigate now so the user sees the dashboard (with the just-connected header
+  // in settings + mock strip) instead of staring at a blank page for 30-60s
+  // while 90 days of Oura data paginates through. Backfill fires-and-forgets;
+  // the strip re-renders when syncWearableSummary updates state.importedData.
+  if (window.navigate) window.navigate('dashboard');
+  (async () => {
+    try {
+      const bf = await backfillWearable('oura');
+      await syncWearableSummary(getActiveProfileId(), listConnectedSources());
+      showNotification?.(`Oura backfilled ${bf.rows} days`, 'success');
+      if (window.navigate) window.navigate('dashboard');
+    } catch (e) {
+      showNotification?.(`Backfill failed: ${e.message}`, 'error', 5000);
+    }
+  })();
   return true;
 }
 
@@ -174,8 +181,13 @@ export async function backfillWearable(adapterId, daysBack = BACKFILL_DAYS) {
   if (rows.length > 0) await upsertDailyBatch(profileId, rows);
   await setMeta(profileId, `last-sync:${adapterId}`, { at: Date.now(), rows: rows.length, startDate, endDate });
 
-  const updated = { ...getConnection(adapterId), lastSyncAt: Date.now(), needsReauth: false };
-  saveConnection(adapterId, updated);
+  // Re-read the live connection — if it disappeared mid-flight (profile swap,
+  // state reload, etc.), DO NOT write a partial stub that wipes tokens. This
+  // was the root of the "Settings says not connected after backfill" bug.
+  const current = getConnection(adapterId);
+  if (current?.accessToken) {
+    saveConnection(adapterId, { ...current, lastSyncAt: Date.now(), needsReauth: false });
+  }
   return { rows: rows.length, startDate, endDate };
 }
 
@@ -196,8 +208,12 @@ export async function incrementalSyncWearable(adapterId) {
   if (rows.length > 0) await upsertDailyBatch(profileId, rows);
   await setMeta(profileId, `last-sync:${adapterId}`, { at: Date.now(), rows: rows.length, startDate, endDate });
 
-  const updated = { ...getConnection(adapterId), lastSyncAt: Date.now(), needsReauth: false };
-  saveConnection(adapterId, updated);
+  // Same guard as backfillWearable — never overwrite a full connection with
+  // a tokenless stub if state was swapped while we were fetching.
+  const current = getConnection(adapterId);
+  if (current?.accessToken) {
+    saveConnection(adapterId, { ...current, lastSyncAt: Date.now(), needsReauth: false });
+  }
   return { rows: rows.length, startDate, endDate };
 }
 

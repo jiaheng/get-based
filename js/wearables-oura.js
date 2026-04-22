@@ -109,14 +109,28 @@ function meanOrNull(arr) {
 // Returns canonical L1 rows for the inclusive date range [startDate, endDate].
 // Each row is keyed by date; missing metrics are null (not omitted) so consumers
 // can see "no spo2 today" vs "spo2 not yet fetched."
+// Resilience `level` is a string enum; map to 1-5 so baseline/trend math works.
+const RESILIENCE_LEVEL_TO_NUM = {
+  limited: 1, adequate: 2, solid: 3, strong: 4, exceptional: 5,
+};
+
 export async function fetchOuraDailyRange(accessToken, startDate, endDate) {
   const params = { start_date: startDate, end_date: endDate };
-  // Fetch collections in parallel — independent endpoints.
-  const [sleepSessions, dailySleep, dailyReadiness, dailySpo2] = await Promise.all([
-    ouraCollect('v2/usercollection/sleep',           accessToken, params).catch(e => { logDebug('sleep', e); return []; }),
-    ouraCollect('v2/usercollection/daily_sleep',     accessToken, params).catch(e => { logDebug('daily_sleep', e); return []; }),
-    ouraCollect('v2/usercollection/daily_readiness', accessToken, params).catch(e => { logDebug('daily_readiness', e); return []; }),
-    ouraCollect('v2/usercollection/daily_spo2',      accessToken, params).catch(e => { logDebug('daily_spo2', e); return []; }),
+  // Fetch collections in parallel — independent endpoints. New (daily_activity,
+  // daily_stress, daily_resilience, daily_cardiovascular_age) are covered by
+  // the `daily` scope we already request, so no reconnect needed for them.
+  const [
+    sleepSessions, dailySleep, dailyReadiness, dailySpo2,
+    dailyActivity, dailyStress, dailyResilience, dailyCardioAge,
+  ] = await Promise.all([
+    ouraCollect('v2/usercollection/sleep',                    accessToken, params).catch(e => { logDebug('sleep', e); return []; }),
+    ouraCollect('v2/usercollection/daily_sleep',              accessToken, params).catch(e => { logDebug('daily_sleep', e); return []; }),
+    ouraCollect('v2/usercollection/daily_readiness',          accessToken, params).catch(e => { logDebug('daily_readiness', e); return []; }),
+    ouraCollect('v2/usercollection/daily_spo2',               accessToken, params).catch(e => { logDebug('daily_spo2', e); return []; }),
+    ouraCollect('v2/usercollection/daily_activity',           accessToken, params).catch(e => { logDebug('daily_activity', e); return []; }),
+    ouraCollect('v2/usercollection/daily_stress',             accessToken, params).catch(e => { logDebug('daily_stress', e); return []; }),
+    ouraCollect('v2/usercollection/daily_resilience',         accessToken, params).catch(e => { logDebug('daily_resilience', e); return []; }),
+    ouraCollect('v2/usercollection/daily_cardiovascular_age', accessToken, params).catch(e => { logDebug('daily_cardiovascular_age', e); return []; }),
   ]);
 
   const sleepByDay = bestSessionPerDay(sleepSessions);
@@ -128,6 +142,8 @@ export async function fetchOuraDailyRange(accessToken, startDate, endDate) {
         source: 'oura', date: day,
         hrv_rmssd: null, rhr: null,
         sleep_score: null, readiness_score: null,
+        activity_score: null, stress_high_min: null,
+        resilience_level: null, cardio_age: null,
         spo2_avg: null, body_temp_delta: null, glucose_avg: null,
       });
     }
@@ -136,8 +152,6 @@ export async function fetchOuraDailyRange(accessToken, startDate, endDate) {
 
   for (const [day, s] of sleepByDay) {
     const row = ensureRow(day);
-    // Oura populates `average_hrv` on sleep sessions when HRV measurements were collected;
-    // some firmware/account combos leave it null and only provide `hrv` 5-min samples.
     row.hrv_rmssd = s?.average_hrv ?? meanOrNull(s?.hrv) ?? meanOrNull(s?.hrv_samples);
     row.rhr       = s?.average_heart_rate ?? s?.lowest_heart_rate ?? null;
   }
@@ -153,9 +167,26 @@ export async function fetchOuraDailyRange(accessToken, startDate, endDate) {
   }
   for (const d of dailySpo2) {
     if (!d?.day) continue;
-    // Field name varies: `spo2_percentage.average` (newer) or `spo2_percentage` (older).
     const v = typeof d.spo2_percentage === 'object' ? d.spo2_percentage?.average : d.spo2_percentage;
     if (typeof v === 'number') ensureRow(d.day).spo2_avg = v;
+  }
+  for (const d of dailyActivity) {
+    if (!d?.day) continue;
+    if (typeof d.score === 'number') ensureRow(d.day).activity_score = d.score;
+  }
+  for (const d of dailyStress) {
+    if (!d?.day) continue;
+    // Oura returns `stress_high` in seconds — convert to minutes for display.
+    if (typeof d.stress_high === 'number') ensureRow(d.day).stress_high_min = Math.round(d.stress_high / 60);
+  }
+  for (const d of dailyResilience) {
+    if (!d?.day) continue;
+    const n = RESILIENCE_LEVEL_TO_NUM[String(d.level || '').toLowerCase()];
+    if (typeof n === 'number') ensureRow(d.day).resilience_level = n;
+  }
+  for (const d of dailyCardioAge) {
+    if (!d?.day) continue;
+    if (typeof d.vascular_age === 'number') ensureRow(d.day).cardio_age = d.vascular_age;
   }
 
   // Return sorted ascending by date so consumers get chronological order.
