@@ -5,6 +5,15 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.24.0', date: '2026-04-22', title: 'Fitbit integration (BETA) — 6 wearable vendors supported',
+    items: [
+      '<b>Fitbit</b> joins the integrations list. OAuth 2.0 with PKCE — public client, no server-held secret. Pulls HRV RMSSD, resting heart rate, steps, sleep efficiency (0-100 proxy for Fitbit\'s in-app Sleep Score, which isn\'t exposed via API), SpO₂ average, skin temperature delta, and body weight from log entries.',
+      'Six wearables supported end-to-end now: Oura, WHOOP, Withings, Ultrahuman, Apple Health (file-import), Fitbit. All OAuth2 adapters share the same dispatch table — WHOOP and Fitbit both PKCE, Oura / Withings / Ultrahuman server-side. Adding the next vendor is a ~1-day template fill-in.',
+      'Fitbit setup needs a Client ID from <a href="https://dev.fitbit.com/apps/new" target="_blank" rel="noopener">dev.fitbit.com</a> (free, self-serve, no partnership application required). Paste the ID into the adapter registry; no env var needed because PKCE doesn\'t use client_secret.',
+      'Sleep score caveat: Fitbit\'s native "Sleep Score" (0-100) is NOT exposed via the Web API. We surface the main sleep\'s <code>efficiency</code> percentage on the same 0-100 scale so the card stays comparable to Oura / WHOOP scores. Not identical numbers, but the same shape and the same trend direction.',
+    ]
+  },
+  {
     version: '1.23.4', date: '2026-04-22', title: 'Apple Health card — own the privacy story',
     items: [
       'Rewrote the Apple Health settings copy to make the file-import path the intentional choice, not a limitation. We don\'t route your Apple Health data through a third-party aggregator or a companion app we haven\'t built yet — you export occasionally and your data never touches our servers.',

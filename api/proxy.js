@@ -16,6 +16,7 @@ const ALLOWED_ORIGINS = [
   'https://api.prod.whoop.com/',
   'https://partner.ultrahuman.com/',
   'https://wbsapi.withings.net/',
+  'https://api.fitbit.com/',
 ];
 
 /// Block literal IPs in private / reserved / cloud-metadata ranges so

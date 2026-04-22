@@ -13,6 +13,8 @@ import { fetchOuraDailyRange, fetchOuraPersonalInfo, daysAgoIso, isoDay } from '
 import { beginOAuth as beginOuraOAuth, completeOAuthCallback as completeOuraCallback, isOuraCallback, withFreshToken as ouraWithFreshToken, DEFAULT_OURA_SCOPES } from './wearables-oura-auth.js';
 import { fetchWhoopDailyRange, fetchWhoopPersonalInfo } from './wearables-whoop.js';
 import { beginOAuth as beginWhoopOAuth, completeOAuthCallback as completeWhoopCallback, isWhoopCallback, withFreshToken as whoopWithFreshToken, DEFAULT_WHOOP_SCOPES } from './wearables-whoop-auth.js';
+import { fetchFitbitDailyRange, fetchFitbitPersonalInfo } from './wearables-fitbit.js';
+import { beginOAuth as beginFitbitOAuth, completeOAuthCallback as completeFitbitCallback, isFitbitCallback, withFreshToken as fitbitWithFreshToken, DEFAULT_FITBIT_SCOPES } from './wearables-fitbit-auth.js';
 import { fetchUltrahumanDailyRange, fetchUltrahumanPersonalInfo } from './wearables-ultrahuman.js';
 import { beginOAuth as beginUltrahumanOAuth, completeOAuthCallback as completeUltrahumanCallback, isUltrahumanCallback, withFreshToken as ultrahumanWithFreshToken, DEFAULT_ULTRAHUMAN_SCOPES } from './wearables-ultrahuman-auth.js';
 import { fetchWithingsDailyRange, fetchWithingsPersonalInfo } from './wearables-withings.js';
@@ -122,6 +124,15 @@ const OAUTH_DISPATCH = {
     fetchRange: fetchUltrahumanDailyRange,
     displayName: 'Ultrahuman',
   },
+  fitbit: {
+    begin: (args) => beginFitbitOAuth({ ...args, scopes: args.scopes || DEFAULT_FITBIT_SCOPES }),
+    isCallback: isFitbitCallback,
+    complete: completeFitbitCallback,
+    withFreshToken: fitbitWithFreshToken,
+    fetchAccountInfo: fetchFitbitPersonalInfo,
+    fetchRange: fetchFitbitDailyRange,
+    displayName: 'Fitbit',
+  },
 };
 
 // Called from main.js on page load. Returns true if a callback was handled.
@@ -218,6 +229,9 @@ async function fetchRange(adapter, startDate, endDate) {
   }
   if (adapter.id === 'ultrahuman') {
     return callWithRefresh(adapter, (token) => fetchUltrahumanDailyRange(token, startDate, endDate));
+  }
+  if (adapter.id === 'fitbit') {
+    return callWithRefresh(adapter, (token) => fetchFitbitDailyRange(token, startDate, endDate));
   }
   return [];
 }

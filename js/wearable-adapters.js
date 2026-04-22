@@ -176,6 +176,39 @@ export const ADAPTERS = [
   },
 
   {
+    id: 'fitbit',
+    displayName: 'Fitbit',
+    authType: 'oauth2',
+    authDocsUrl: 'https://dev.fitbit.com/build/reference/web-api/',
+    beta: true,
+    oauth: {
+      // Fitbit PKCE — public client, no client_secret. Paste the Client ID
+      // from dev.fitbit.com → Register an App here (application type: Personal
+      // for dev, Server for production). Redirect URIs below must match what
+      // you register there, character-for-character.
+      clientId: 'REPLACE_WITH_FITBIT_CLIENT_ID',
+      redirectUris: [
+        'https://app.getbased.health/',
+        'https://getbased.health/app',
+        'http://localhost:8000/app',
+      ],
+      scopes: ['profile', 'activity', 'heartrate', 'sleep', 'oxygen_saturation', 'respiratory_rate', 'temperature', 'weight'],
+      pkce: true,
+    },
+    apiHost: 'api.fitbit.com',
+    metrics: {
+      hrv_rmssd:       { endpoint: '1/user/-/hrv/date/',                         field: 'hrv[0].value.dailyRmssd' },
+      rhr:             { endpoint: '1/user/-/activities/heart/date/',            field: 'activities-heart[0].value.restingHeartRate' },
+      steps:           { endpoint: '1/user/-/activities/steps/date/',            field: 'activities-steps[0].value' },
+      sleep_score:     { endpoint: '1.2/user/-/sleep/date/',                     field: 'sleep[0].efficiency' }, // efficiency as a 0-100 proxy — Fitbit doesn't expose Sleep Score via API
+      spo2_avg:        { endpoint: '1/user/-/spo2/date/',                        field: 'value.avg' },
+      body_temp_delta: { endpoint: '1/user/-/temp/skin/date/',                   field: 'tempSkin[0].value.nightlyRelative' },
+      weight:          { endpoint: '1/user/-/body/log/weight/date/',             field: 'weight[-1].weight' },
+    },
+    accountInfo: { endpoint: '1/user/-/profile.json', identityField: 'email' },
+  },
+
+  {
     id: 'withings',
     displayName: 'Withings',
     authType: 'oauth2',

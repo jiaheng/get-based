@@ -371,7 +371,7 @@ return (async function() {
   // 11. Phase-3 multi-vendor adapter registry
   // ═══════════════════════════════════════
   console.log('%c 11. Multi-Vendor ', 'font-weight:bold;color:#f59e0b');
-  for (const vid of ['whoop', 'ultrahuman', 'apple_health', 'withings']) {
+  for (const vid of ['whoop', 'ultrahuman', 'apple_health', 'withings', 'fitbit']) {
     const v = reg.adapterById(vid);
     assert(`Adapter ${vid} registered`, !!v);
     assert(`Adapter ${vid} carries beta flag`, v?.beta === true);
@@ -529,6 +529,39 @@ return (async function() {
 
   const withingsFetcher = await import('../js/wearables-withings.js');
   assert('fetchWithingsDailyRange exists', typeof withingsFetcher.fetchWithingsDailyRange === 'function');
+
+  // ═══════════════════════════════════════
+  // 16. Fitbit PKCE + fetcher shape
+  // ═══════════════════════════════════════
+  console.log('%c 16. Fitbit PKCE ', 'font-weight:bold;color:#f59e0b');
+  const fitbitAuth = await import('../js/wearables-fitbit-auth.js');
+  const fitbitFetcher = await import('../js/wearables-fitbit.js');
+  const fitbitReg = reg.adapterById('fitbit');
+
+  assert('Fitbit uses OAuth2 with PKCE (public client, no client_secret)',
+    fitbitReg?.authType === 'oauth2' && fitbitReg?.oauth?.pkce === true);
+  assert('Fitbit scopes include heartrate + sleep + profile',
+    ['heartrate', 'sleep', 'profile'].every(s => fitbitAuth.DEFAULT_FITBIT_SCOPES.includes(s)));
+  assert('Fitbit scopes include temperature + weight (for skin Δ + scale readings)',
+    ['temperature', 'weight'].every(s => fitbitAuth.DEFAULT_FITBIT_SCOPES.includes(s)));
+  assert('Fitbit adapter scope list matches DEFAULT_FITBIT_SCOPES (no drift)',
+    JSON.stringify([...fitbitReg.oauth.scopes].sort()) ===
+    JSON.stringify([...fitbitAuth.DEFAULT_FITBIT_SCOPES].sort()));
+
+  const fbUrl = await fitbitAuth.buildAuthorizeUrl({
+    clientId: 'fb-test-client', redirectUri: 'http://localhost:8000/app',
+    scopes: fitbitAuth.DEFAULT_FITBIT_SCOPES, state: 'fb-state-xyz',
+    codeVerifier: 'Dm4l9H2NqE8yP5Rb7w3a6Z1K0VxYcOjG4FiU_n-tBXs',
+  });
+  assert('Fitbit authorize URL hits www.fitbit.com/oauth2/authorize',
+    fbUrl.startsWith('https://www.fitbit.com/oauth2/authorize'));
+  assert('Fitbit authorize URL carries code_challenge', /code_challenge=[A-Za-z0-9_-]+/.test(fbUrl));
+  assert('Fitbit authorize URL declares S256 method', fbUrl.includes('code_challenge_method=S256'));
+  assert('Fitbit authorize URL does NOT leak code_verifier', !fbUrl.includes('code_verifier='));
+  assert('Fitbit scopes are space-delimited in URL', /scope=profile\+activity\+heartrate/.test(fbUrl));
+
+  assert('fetchFitbitDailyRange exists', typeof fitbitFetcher.fetchFitbitDailyRange === 'function');
+  assert('fetchFitbitPersonalInfo exists', typeof fitbitFetcher.fetchFitbitPersonalInfo === 'function');
 
   // Formatter-unification guard: a value with unit '%' must render the SAME
   // way in the strip card and the detail modal. Catches the v1.22.2 divergence
