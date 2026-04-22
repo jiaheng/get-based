@@ -3999,17 +3999,26 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
 .wearable-sparkline.spark-neutral .spark-line,
 .wearable-sparkline.spark-neutral .spark-last { stroke: var(--accent); fill: var(--accent); }
 
+.wearable-card-bottom {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  min-height: 18px;
+}
 .wearable-trend-pill {
   font-size: 10px; font-weight: 500; color: var(--text-muted);
-  align-self: flex-start;
   padding: 1px 6px; border-radius: 6px;
   background: rgba(128,128,128,0.08);
   text-transform: none; letter-spacing: 0;
 }
-.wearable-trend-declining { color: var(--red); background: var(--red-bg); }
+.wearable-trend-bad       { color: var(--red);   background: var(--red-bg); }
+.wearable-trend-good      { color: var(--green); background: var(--green-bg); }
 .wearable-trend-improving { color: var(--green); background: var(--green-bg); }
-.wearable-trend-rising    { color: var(--red); background: var(--red-bg); }
 .wearable-trend-flat      { color: var(--text-muted); background: rgba(128,128,128,0.08); }
+.wearable-source-badge {
+  font-size: 9px; font-weight: 600; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.05em;
+  padding: 1px 5px; border-radius: 4px;
+  background: rgba(128,128,128,0.08);
+}
 
 .wearable-strip-footer {
   margin-top: 10px; padding-top: 8px;
