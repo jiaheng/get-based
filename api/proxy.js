@@ -13,6 +13,9 @@ const ALLOWED_ORIGINS = [
   'https://api.routstr.com/',
   'https://api.ppq.ai/',
   'https://api.ouraring.com/',
+  'https://api.prod.whoop.com/',
+  'https://partner.ultrahuman.com/',
+  'https://wbsapi.withings.net/',
 ];
 
 /// Block literal IPs in private / reserved / cloud-metadata ranges so
@@ -93,6 +96,14 @@ export default async function handler(req) {
   // Single place in the codebase that reads OURA_CLIENT_SECRET.
   if (payload.oura_token_exchange || payload.oura_token_refresh) {
     return handleOuraTokenRequest(payload);
+  }
+
+  // ─── Withings OAuth2 server-side flow ───────────────────────────
+  // Same pattern as Oura. Withings's token endpoint demands
+  // `action=requesttoken` / `requesttoken2` in the form body alongside the
+  // grant params; single place that reads WITHINGS_CLIENT_SECRET.
+  if (payload.withings_token_exchange || payload.withings_token_refresh) {
+    return handleWithingsTokenRequest(payload);
   }
 
   const { url, headers, body, method: upstreamMethod } = payload;
@@ -211,6 +222,67 @@ async function handleOuraTokenRequest(payload) {
     });
   } catch (e) {
     return new Response(JSON.stringify({ error: 'Token endpoint unreachable: ' + e.message }), {
+      status: 502, headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+    });
+  }
+}
+
+// ─── Withings token handler ────────────────────────────────────────
+// Payloads:
+//   { withings_token_exchange: { code, redirect_uri, client_id } }
+//   { withings_token_refresh:  { refresh_token, client_id } }
+// Withings's token endpoint is POST wbsapi.withings.net/v2/oauth2 with an
+// `action=requesttoken` (or `requesttoken2` for refresh) in the body.
+async function handleWithingsTokenRequest(payload) {
+  const secret = typeof process !== 'undefined' ? process.env?.WITHINGS_CLIENT_SECRET : undefined;
+  if (!secret) {
+    return new Response(JSON.stringify({ error: 'WITHINGS_CLIENT_SECRET not configured on this deployment' }), {
+      status: 500, headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+    });
+  }
+
+  let form;
+  if (payload.withings_token_exchange) {
+    const { code, redirect_uri, client_id } = payload.withings_token_exchange;
+    if (!code || !redirect_uri || !client_id) {
+      return new Response(JSON.stringify({ error: 'withings_token_exchange requires code, redirect_uri, client_id' }), {
+        status: 400, headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+      });
+    }
+    form = new URLSearchParams({
+      action: 'requesttoken',
+      grant_type: 'authorization_code',
+      client_id, client_secret: secret,
+      code, redirect_uri,
+    });
+  } else {
+    const { refresh_token, client_id } = payload.withings_token_refresh;
+    if (!refresh_token || !client_id) {
+      return new Response(JSON.stringify({ error: 'withings_token_refresh requires refresh_token, client_id' }), {
+        status: 400, headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+      });
+    }
+    form = new URLSearchParams({
+      action: 'requesttoken',
+      grant_type: 'refresh_token',
+      client_id, client_secret: secret,
+      refresh_token,
+    });
+  }
+
+  try {
+    const res = await fetch('https://wbsapi.withings.net/v2/oauth2', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: form.toString(),
+    });
+    const body = await res.text();
+    return new Response(body, {
+      status: res.status,
+      headers: { ...corsHeaders(), 'Content-Type': res.headers.get('content-type') || 'application/json' },
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: 'Withings token endpoint unreachable: ' + e.message }), {
       status: 502, headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
     });
   }

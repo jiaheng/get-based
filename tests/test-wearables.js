@@ -474,6 +474,41 @@ return (async function() {
   assert('Hostile unit ("furlongs" for steps) is refused, not ingested',
     hostileRows.length === 0 || hostileRows[0].steps === null);
 
+  // ═══════════════════════════════════════
+  // 15. Withings OAuth2 + measure-type decoding
+  // ═══════════════════════════════════════
+  console.log('%c 15. Withings ', 'font-weight:bold;color:#f59e0b');
+  const withingsAuth = await import('../js/wearables-withings-auth.js');
+  assert('Withings scopes include user.metrics',
+    withingsAuth.DEFAULT_WITHINGS_SCOPES.includes('user.metrics'));
+  const withingsAuthUrl = withingsAuth.buildAuthorizeUrl({
+    clientId: 'test-client', redirectUri: 'http://localhost:8000/app',
+    scopes: withingsAuth.DEFAULT_WITHINGS_SCOPES, state: 'abc123',
+  });
+  assert('Withings authorize URL hits account.withings.com',
+    withingsAuthUrl.startsWith('https://account.withings.com/oauth2_user/authorize2'));
+  assert('Withings authorize URL carries state param',
+    withingsAuthUrl.includes('state=abc123'));
+  // Scopes are comma-delimited (Withings quirk — not space like everyone else)
+  assert('Withings scope list is comma-delimited (not space)',
+    /scope=user\.info%2Cuser\.metrics/.test(withingsAuthUrl));
+
+  const withingsReg = reg.adapterById('withings');
+  assert('Withings adapter scopes match DEFAULT_WITHINGS_SCOPES',
+    JSON.stringify([...withingsReg.oauth.scopes].sort()) === JSON.stringify([...withingsAuth.DEFAULT_WITHINGS_SCOPES].sort()));
+
+  // Measure-type code sanity — Withings uses numeric codes (1=weight, 10=BP sys
+  // etc.). Our adapter declares them explicitly so the renderer can surface
+  // them; if a tester's scale is only pushing type 77 (hydration) we ignore it
+  // rather than mapping to something wrong.
+  assert('Withings weight maps to measType 1',      withingsReg.metrics.weight?.measType === 1);
+  assert('Withings BP diastolic maps to measType 9', withingsReg.metrics.bp_diastolic?.measType === 9);
+  assert('Withings BP systolic maps to measType 10', withingsReg.metrics.bp_systolic?.measType === 10);
+  assert('Withings pulse/RHR maps to measType 11',  withingsReg.metrics.rhr?.measType === 11);
+
+  const withingsFetcher = await import('../js/wearables-withings.js');
+  assert('fetchWithingsDailyRange exists', typeof withingsFetcher.fetchWithingsDailyRange === 'function');
+
   // Formatter-unification guard: a value with unit '%' must render the SAME
   // way in the strip card and the detail modal. Catches the v1.22.2 divergence
   // where `formatValue(97, '%')` returned "97" but the modal's inline formatV

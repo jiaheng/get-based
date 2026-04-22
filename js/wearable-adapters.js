@@ -169,24 +169,24 @@ export const ADAPTERS = [
     authDocsUrl: 'https://developer.withings.com/oauth2/',
     beta: true,
     oauth: {
-      clientId: 'getbased-withings-beta',
+      // TODO: replace with the Client ID from your Withings developer portal.
+      // Requires WITHINGS_CLIENT_SECRET env var on Vercel + local dev-server.
+      clientId: 'REPLACE_WITH_WITHINGS_CLIENT_ID',
       redirectUris: [
         'https://app.getbased.health/',
         'https://getbased.health/app',
         'http://localhost:8000/app',
       ],
-      scopes: ['user.metrics', 'user.activity', 'user.sleepevents'],
-      pkce: false, // Withings is server-side flow like Oura — secret on proxy
+      scopes: ['user.info', 'user.metrics', 'user.activity', 'user.sleepevents'],
+      pkce: false, // Server-side flow like Oura — secret held by /api/proxy
     },
     apiHost: 'wbsapi.withings.net',
     metrics: {
-      weight:       { endpoint: 'measure',     field: 'weight' },
-      bp_systolic:  { endpoint: 'measure',     field: 'diastolic' }, // 9 = systolic, 10 = diastolic in Withings type codes
-      bp_diastolic: { endpoint: 'measure',     field: 'systolic' },
-      hrv_rmssd:    { endpoint: 'v2/heart',    field: 'hrv' },
-      rhr:          { endpoint: 'v2/heart',    field: 'resting_heart_rate' },
-      sleep_score:  { endpoint: 'v2/sleep',    field: 'sleep_score' },
-      steps:        { endpoint: 'v2/measure',  field: 'steps' },
+      weight:       { endpoint: 'measure',  measType: 1  },
+      bp_diastolic: { endpoint: 'measure',  measType: 9  },
+      bp_systolic:  { endpoint: 'measure',  measType: 10 },
+      rhr:          { endpoint: 'measure',  measType: 11 },
+      sleep_score:  { endpoint: 'v2/sleep', field: 'sleep_score' },
     },
     accountInfo: { endpoint: 'v2/user', identityField: 'email' },
   },

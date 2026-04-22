@@ -513,10 +513,13 @@ function renderAdapterCard(adapter, isConnected) {
 
 function renderAuthBlock(adapter, conn) {
   if (adapter.authType === 'oauth2') {
-    // WHOOP + Oura both go through the OAuth block; Withings is scaffolded but
-    // the interactive implementation lands in a follow-up — surface a clear
-    // "Coming soon" so testers know to wait.
-    if (adapter.id === 'withings') return renderComingSoonBlock(adapter, 'OAuth2 flow coming in the next beta — follow the tester thread to get a call when it ships.');
+    // If an OAuth adapter hasn't been given a real client_id yet, surface the
+    // scaffold block so testers see "not wired" instead of a broken authorize
+    // URL. The first real beta tester only lands once the maintainer pastes
+    // the ID + sets the provider's env var on Vercel.
+    if (adapter.oauth?.clientId?.startsWith('REPLACE_WITH_')) {
+      return renderComingSoonBlock(adapter, `${adapter.displayName} OAuth is registered but needs maintainer to paste the Client ID and set ${adapter.id.toUpperCase()}_CLIENT_SECRET. Ping the maintainer to unlock.`);
+    }
     return renderOAuthBlock(adapter, conn);
   }
   if (adapter.authType === 'pat') return renderPATBlock(adapter, conn);

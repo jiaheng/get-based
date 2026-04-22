@@ -5,6 +5,14 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.23.2', date: '2026-04-22', title: 'Withings OAuth2 goes live (BETA)',
+    items: [
+      'Withings scales and BP cuffs connect via OAuth2 — weight, systolic, and diastolic flow into the strip alongside your Oura/WHOOP/Apple Health data. Sleep score from Withings sleep trackers populates if you have one.',
+      'Setup needs maintainer to paste the Client ID into the adapter registry and set <code>WITHINGS_CLIENT_SECRET</code> on Vercel + local dev. Until the ID lands, the settings card says "Ping the maintainer to unlock".',
+      'Proxy allowlist tightened — all wearable API hosts (Oura, WHOOP, Ultrahuman, Withings) are explicitly listed rather than passing through the generic HTTPS fallback.',
+    ]
+  },
+  {
     version: '1.23.1', date: '2026-04-22', title: 'Apple Health import is live (BETA)',
     items: [
       'Drop your Apple Health <code>export.zip</code> (or raw <code>export.xml</code>) on the Integrations tab. The XML parser runs entirely in your browser — no upload, no third-party service. Currently ingests HRV (SDNN), resting heart rate, steps, and SpO₂; more metrics next pass.',

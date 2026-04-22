@@ -14,6 +14,8 @@ import { beginOAuth as beginOuraOAuth, completeOAuthCallback as completeOuraCall
 import { fetchWhoopDailyRange, fetchWhoopPersonalInfo } from './wearables-whoop.js';
 import { beginOAuth as beginWhoopOAuth, completeOAuthCallback as completeWhoopCallback, isWhoopCallback, withFreshToken as whoopWithFreshToken, DEFAULT_WHOOP_SCOPES } from './wearables-whoop-auth.js';
 import { fetchUltrahumanDailyRange, verifyUltrahumanPAT } from './wearables-ultrahuman.js';
+import { fetchWithingsDailyRange, fetchWithingsPersonalInfo } from './wearables-withings.js';
+import { beginOAuth as beginWithingsOAuth, completeOAuthCallback as completeWithingsCallback, isWithingsCallback, withFreshToken as withingsWithFreshToken, DEFAULT_WITHINGS_SCOPES } from './wearables-withings-auth.js';
 import { getActiveProfileId } from './profile.js';
 import { isDebugMode, showNotification } from './utils.js';
 
@@ -100,6 +102,15 @@ const OAUTH_DISPATCH = {
     fetchAccountInfo: fetchWhoopPersonalInfo,
     fetchRange: fetchWhoopDailyRange,
     displayName: 'WHOOP',
+  },
+  withings: {
+    begin: (args) => beginWithingsOAuth({ ...args, scopes: args.scopes || DEFAULT_WITHINGS_SCOPES }),
+    isCallback: isWithingsCallback,
+    complete: completeWithingsCallback,
+    withFreshToken: withingsWithFreshToken,
+    fetchAccountInfo: fetchWithingsPersonalInfo,
+    fetchRange: fetchWithingsDailyRange,
+    displayName: 'Withings',
   },
 };
 
@@ -233,6 +244,9 @@ async function fetchRange(adapter, startDate, endDate) {
   }
   if (adapter.id === 'whoop') {
     return callWithRefresh(adapter, (token) => fetchWhoopDailyRange(token, startDate, endDate));
+  }
+  if (adapter.id === 'withings') {
+    return callWithRefresh(adapter, (token) => fetchWithingsDailyRange(token, startDate, endDate));
   }
   if (adapter.id === 'ultrahuman') {
     const conn = getConnection(adapter.id);

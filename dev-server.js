@@ -220,6 +220,54 @@ const server = http.createServer((req, res) => {
           return;
         }
 
+        // Withings OAuth2 token exchange/refresh — mirrors Oura pattern with
+        // Withings's non-standard action=requesttoken body field.
+        if (payload.withings_token_exchange || payload.withings_token_refresh) {
+          const secret = process.env.WITHINGS_CLIENT_SECRET;
+          if (!secret) {
+            res.writeHead(500, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'WITHINGS_CLIENT_SECRET not set — export it before `node dev-server.js`' }));
+            return;
+          }
+          let form;
+          if (payload.withings_token_exchange) {
+            const { code, redirect_uri, client_id } = payload.withings_token_exchange;
+            if (!code || !redirect_uri || !client_id) {
+              res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+              res.end('{"error":"withings_token_exchange requires code, redirect_uri, client_id"}'); return;
+            }
+            form = new URLSearchParams({
+              action: 'requesttoken', grant_type: 'authorization_code',
+              client_id, client_secret: secret, code, redirect_uri,
+            });
+          } else {
+            const { refresh_token, client_id } = payload.withings_token_refresh;
+            if (!refresh_token || !client_id) {
+              res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+              res.end('{"error":"withings_token_refresh requires refresh_token, client_id"}'); return;
+            }
+            form = new URLSearchParams({
+              action: 'requesttoken', grant_type: 'refresh_token',
+              client_id, client_secret: secret, refresh_token,
+            });
+          }
+          const tokenReq = https.request('https://wbsapi.withings.net/v2/oauth2', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          }, (tokenRes) => {
+            const ct = tokenRes.headers['content-type'] || 'application/json';
+            res.writeHead(tokenRes.statusCode, { 'Content-Type': ct, 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' });
+            tokenRes.pipe(res);
+          });
+          tokenReq.on('error', (e) => {
+            res.writeHead(502, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'Withings token endpoint unreachable: ' + e.message }));
+          });
+          tokenReq.write(form.toString());
+          tokenReq.end();
+          return;
+        }
+
         const { url: targetUrl, headers: fwdHeaders, body: fwdBody, method: upMethod } = payload;
         if (!targetUrl) { res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }); res.end('{"error":"missing url"}'); return; }
         const parsedUrl = new URL(targetUrl);
