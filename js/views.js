@@ -110,14 +110,14 @@ export function showDashboard(data) {
   // ── 3b. Focus Card (always render if data exists — shows cached insight even when AI is paused) ──
   html += renderFocusCard();
 
+  // ── 3c. Wearable strip (Oura) — mock-only in this PR, real data pipeline in follow-up ──
+  html += renderWearableStrip();
+
   // ── 4. Profile Context Cards ──
   html += renderProfileContextCards();
 
   // ── 5. Menstrual Cycle (female only) ──
   if (state.profileSex === 'female') html += renderMenstrualCycleSection(data);
-
-  // ── 5b. Wearable strip (Oura) — mock-only in this PR, real data pipeline in follow-up ──
-  html += renderWearableStrip();
 
   // ── 6. Supplements & Medications ──
   html += renderSupplementsSection();
