@@ -5,6 +5,13 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.23.4', date: '2026-04-22', title: 'Apple Health card — own the privacy story',
+    items: [
+      'Rewrote the Apple Health settings copy to make the file-import path the intentional choice, not a limitation. We don\'t route your Apple Health data through a third-party aggregator or a companion app we haven\'t built yet — you export occasionally and your data never touches our servers.',
+      'Still on the roadmap: a native iOS companion app that reads HealthKit on-device, encrypts locally with your Evolu mnemonic, and sends only ciphertext to the browser. Not built yet — when it ships you\'ll get daily sync without the privacy regression.',
+    ]
+  },
+  {
     version: '1.23.3', date: '2026-04-22', title: 'Ultrahuman → OAuth2 (dropped legacy PAT flow)',
     items: [
       'Ultrahuman now uses their proper OAuth2 partner API (<code>auth.ultrahuman.com/authorise</code> → <code>partner.ultrahuman.com/api/partners/oauth/token</code>) instead of the legacy static-token endpoint. Per-user consent, refresh tokens, no shared partner secret in the browser.',

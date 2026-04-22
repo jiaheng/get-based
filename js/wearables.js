@@ -552,7 +552,8 @@ function renderAppleHealthBlock(adapter, conn) {
     </div>`;
   }
   return `<div class="wearable-adapter-body">
-    <p class="wearable-adapter-hint">Export from iPhone: Health app → your profile photo (top right) → <b>Export All Health Data</b>. Drop the resulting <code>export.zip</code> here (or the <code>export.xml</code> inside). Parsing happens in your browser — nothing uploads.</p>
+    <p class="wearable-adapter-hint">getbased doesn't connect to an Apple Health API — none exists. A daily auto-sync would require either a native iOS companion app (not built yet) or routing your data through a third-party aggregator (we don't). Instead, export occasionally from your iPhone and drop the zip here. No credentials, no server contact, no tracking — your Health data never leaves your control.</p>
+    <p class="wearable-adapter-hint" style="font-size:11px;opacity:0.85">iPhone → Health app → tap your profile photo (top right) → <b>Export All Health Data</b> → AirDrop / email the <code>export.zip</code> to your computer → drop it below (or the <code>export.xml</code> inside). Parsing runs entirely in your browser.</p>
     <div class="apple-health-dropzone"
          ondragover="event.preventDefault();this.classList.add('drag-over')"
          ondragleave="this.classList.remove('drag-over')"
