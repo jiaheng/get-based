@@ -106,6 +106,13 @@ export default async function handler(req) {
     return handleWithingsTokenRequest(payload);
   }
 
+  // ─── Ultrahuman OAuth2 server-side flow ─────────────────────────
+  // Confidential client (has client_secret). Token endpoint at
+  // partner.ultrahuman.com/api/partners/oauth/token.
+  if (payload.ultrahuman_token_exchange || payload.ultrahuman_token_refresh) {
+    return handleUltrahumanTokenRequest(payload);
+  }
+
   const { url, headers, body, method: upstreamMethod } = payload;
 
   if (!url || !isAllowedUrl(url)) {
@@ -283,6 +290,58 @@ async function handleWithingsTokenRequest(payload) {
     });
   } catch (e) {
     return new Response(JSON.stringify({ error: 'Withings token endpoint unreachable: ' + e.message }), {
+      status: 502, headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+    });
+  }
+}
+
+// ─── Ultrahuman token handler ──────────────────────────────────────
+async function handleUltrahumanTokenRequest(payload) {
+  const secret = typeof process !== 'undefined' ? process.env?.ULTRAHUMAN_CLIENT_SECRET : undefined;
+  if (!secret) {
+    return new Response(JSON.stringify({ error: 'ULTRAHUMAN_CLIENT_SECRET not configured on this deployment' }), {
+      status: 500, headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+    });
+  }
+
+  let form;
+  if (payload.ultrahuman_token_exchange) {
+    const { code, redirect_uri, client_id } = payload.ultrahuman_token_exchange;
+    if (!code || !redirect_uri || !client_id) {
+      return new Response(JSON.stringify({ error: 'ultrahuman_token_exchange requires code, redirect_uri, client_id' }), {
+        status: 400, headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+      });
+    }
+    form = new URLSearchParams({
+      grant_type: 'authorization_code',
+      client_id, client_secret: secret, code, redirect_uri,
+    });
+  } else {
+    const { refresh_token, client_id } = payload.ultrahuman_token_refresh;
+    if (!refresh_token || !client_id) {
+      return new Response(JSON.stringify({ error: 'ultrahuman_token_refresh requires refresh_token, client_id' }), {
+        status: 400, headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+      });
+    }
+    form = new URLSearchParams({
+      grant_type: 'refresh_token',
+      client_id, client_secret: secret, refresh_token,
+    });
+  }
+
+  try {
+    const res = await fetch('https://partner.ultrahuman.com/api/partners/oauth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: form.toString(),
+    });
+    const body = await res.text();
+    return new Response(body, {
+      status: res.status,
+      headers: { ...corsHeaders(), 'Content-Type': res.headers.get('content-type') || 'application/json' },
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: 'Ultrahuman token endpoint unreachable: ' + e.message }), {
       status: 502, headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
     });
   }

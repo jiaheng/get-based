@@ -99,20 +99,33 @@ export const ADAPTERS = [
   {
     id: 'ultrahuman',
     displayName: 'Ultrahuman',
-    authType: 'pat',
-    authDocsUrl: 'https://blog.ultrahuman.com/blog/api-onboarding',
+    authType: 'oauth2',
+    authDocsUrl: 'https://vision.ultrahuman.com/developer-docs?type=oauth',
     beta: true,
+    oauth: {
+      // Ultrahuman OAuth2 confidential client (has client_secret). Paste the
+      // Client ID from the partner credentials email reply here; the matching
+      // secret lives in ULTRAHUMAN_CLIENT_SECRET (Vercel env + local .env.local).
+      clientId: 'REPLACE_WITH_ULTRAHUMAN_CLIENT_ID',
+      redirectUris: [
+        'https://app.getbased.health/',
+        'https://getbased.health/app',
+        'http://localhost:8000/app',
+      ],
+      scopes: ['profile', 'ring_data', 'cgm_data'],
+      pkce: false,
+    },
     apiHost: 'partner.ultrahuman.com',
     metrics: {
-      hrv_rmssd:       { endpoint: 'api/v1/metrics',                        field: 'hrv' },
-      rhr:             { endpoint: 'api/v1/metrics',                        field: 'resting_heart_rate' },
-      sleep_score:     { endpoint: 'api/v1/metrics',                        field: 'sleep_index' },
-      readiness_score: { endpoint: 'api/v1/metrics',                        field: 'recovery_index' },
-      steps:           { endpoint: 'api/v1/metrics',                        field: 'steps' },
-      body_temp_delta: { endpoint: 'api/v1/metrics',                        field: 'temperature' },
-      glucose_avg:     { endpoint: 'api/v1/metrics',                        field: 'glucose_avg' }, // CGM users only
+      hrv_rmssd:       { endpoint: 'api/partners/v1/user_data/metrics', field: 'hrv' },
+      rhr:             { endpoint: 'api/partners/v1/user_data/metrics', field: 'resting_heart_rate' },
+      sleep_score:     { endpoint: 'api/partners/v1/user_data/metrics', field: 'sleep_index' },
+      readiness_score: { endpoint: 'api/partners/v1/user_data/metrics', field: 'recovery_index' },
+      steps:           { endpoint: 'api/partners/v1/user_data/metrics', field: 'steps' },
+      body_temp_delta: { endpoint: 'api/partners/v1/user_data/metrics', field: 'temperature' },
+      glucose_avg:     { endpoint: 'api/partners/v1/user_data/metrics', field: 'glucose_avg' }, // cgm_data scope only
     },
-    accountInfo: { endpoint: 'api/v1/metrics', identityField: 'email' },
+    accountInfo: { endpoint: 'api/partners/v1/user_data/user_info', identityField: 'email' },
   },
 
   {

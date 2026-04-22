@@ -364,7 +364,8 @@ return (async function() {
   assert('window.handleWearableDisconnect exists', typeof window.handleWearableDisconnect === 'function');
   assert('window.syncWearableNow exists', typeof window.syncWearableNow === 'function');
   assert('window.openWearableDetail exists', typeof window.openWearableDetail === 'function');
-  assert('window.handleWearablePATConnect exists (Ultrahuman etc.)', typeof window.handleWearablePATConnect === 'function');
+  assert('handleWearablePATConnect removed (Ultrahuman moved to OAuth2)',
+    typeof window.handleWearablePATConnect === 'undefined');
 
   // ═══════════════════════════════════════
   // 11. Phase-3 multi-vendor adapter registry
@@ -377,7 +378,12 @@ return (async function() {
   }
   assert('WHOOP uses OAuth2 with PKCE',
     reg.adapterById('whoop')?.authType === 'oauth2' && reg.adapterById('whoop')?.oauth?.pkce === true);
-  assert('Ultrahuman uses PAT auth', reg.adapterById('ultrahuman')?.authType === 'pat');
+  assert('Ultrahuman uses OAuth2 (moved off legacy PAT in v1.23.3)',
+    reg.adapterById('ultrahuman')?.authType === 'oauth2');
+  assert('Ultrahuman is confidential client (client_secret held by proxy, no PKCE)',
+    reg.adapterById('ultrahuman')?.oauth?.pkce === false);
+  assert('Ultrahuman scopes include profile + ring_data + cgm_data',
+    ['profile', 'ring_data', 'cgm_data'].every(s => reg.adapterById('ultrahuman')?.oauth?.scopes?.includes(s)));
   assert('Apple Health uses file-import auth', reg.adapterById('apple_health')?.authType === 'file-import');
   assert('Withings uses OAuth2 server-side (no PKCE)',
     reg.adapterById('withings')?.authType === 'oauth2' && reg.adapterById('withings')?.oauth?.pkce === false);
@@ -419,12 +425,27 @@ return (async function() {
     !whoopAuthUrl.includes('code_verifier='));
 
   // ═══════════════════════════════════════
-  // 13. Ultrahuman PAT fetcher shape
+  // 13. Ultrahuman OAuth2 + fetcher shape
   // ═══════════════════════════════════════
-  console.log('%c 13. Ultrahuman PAT ', 'font-weight:bold;color:#f59e0b');
+  console.log('%c 13. Ultrahuman OAuth2 ', 'font-weight:bold;color:#f59e0b');
   const uh = await import('../js/wearables-ultrahuman.js');
   assert('fetchUltrahumanDailyRange exists', typeof uh.fetchUltrahumanDailyRange === 'function');
-  assert('verifyUltrahumanPAT exists', typeof uh.verifyUltrahumanPAT === 'function');
+  assert('fetchUltrahumanPersonalInfo exists (moved off verifyPAT to OAuth2 user_info)',
+    typeof uh.fetchUltrahumanPersonalInfo === 'function');
+  const uhAuth = await import('../js/wearables-ultrahuman-auth.js');
+  assert('Ultrahuman scopes include profile + ring_data + cgm_data',
+    ['profile', 'ring_data', 'cgm_data'].every(s => uhAuth.DEFAULT_ULTRAHUMAN_SCOPES.includes(s)));
+  const uhUrl = uhAuth.buildAuthorizeUrl({
+    clientId: 'test-client', redirectUri: 'http://localhost:8000/app',
+    scopes: uhAuth.DEFAULT_ULTRAHUMAN_SCOPES, state: 'uh-test-state',
+  });
+  assert('Ultrahuman authorize URL hits auth.ultrahuman.com/authorise',
+    uhUrl.startsWith('https://auth.ultrahuman.com/authorise'));
+  assert('Ultrahuman scope list is space-delimited',
+    /scope=profile\+ring_data\+cgm_data/.test(uhUrl));
+  assert('Ultrahuman adapter scope list matches DEFAULT_ULTRAHUMAN_SCOPES',
+    JSON.stringify([...reg.adapterById('ultrahuman').oauth.scopes].sort()) ===
+    JSON.stringify([...uhAuth.DEFAULT_ULTRAHUMAN_SCOPES].sort()));
 
   // ═══════════════════════════════════════
   // 14. Apple Health XML parser

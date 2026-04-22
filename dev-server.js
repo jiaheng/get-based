@@ -237,6 +237,48 @@ const server = http.createServer((req, res) => {
           return;
         }
 
+        // Ultrahuman OAuth2 token exchange/refresh — confidential client,
+        // token endpoint at partner.ultrahuman.com/api/partners/oauth/token.
+        if (payload.ultrahuman_token_exchange || payload.ultrahuman_token_refresh) {
+          const secret = process.env.ULTRAHUMAN_CLIENT_SECRET;
+          if (!secret) {
+            res.writeHead(500, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'ULTRAHUMAN_CLIENT_SECRET not set — add it to .env.local' }));
+            return;
+          }
+          let form;
+          if (payload.ultrahuman_token_exchange) {
+            const { code, redirect_uri, client_id } = payload.ultrahuman_token_exchange;
+            if (!code || !redirect_uri || !client_id) {
+              res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+              res.end('{"error":"ultrahuman_token_exchange requires code, redirect_uri, client_id"}'); return;
+            }
+            form = new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri, client_id, client_secret: secret });
+          } else {
+            const { refresh_token, client_id } = payload.ultrahuman_token_refresh;
+            if (!refresh_token || !client_id) {
+              res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+              res.end('{"error":"ultrahuman_token_refresh requires refresh_token, client_id"}'); return;
+            }
+            form = new URLSearchParams({ grant_type: 'refresh_token', refresh_token, client_id, client_secret: secret });
+          }
+          const tokenReq = https.request('https://partner.ultrahuman.com/api/partners/oauth/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          }, (tokenRes) => {
+            const ct = tokenRes.headers['content-type'] || 'application/json';
+            res.writeHead(tokenRes.statusCode, { 'Content-Type': ct, 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' });
+            tokenRes.pipe(res);
+          });
+          tokenReq.on('error', (e) => {
+            res.writeHead(502, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'Ultrahuman token endpoint unreachable: ' + e.message }));
+          });
+          tokenReq.write(form.toString());
+          tokenReq.end();
+          return;
+        }
+
         // Withings OAuth2 token exchange/refresh — mirrors Oura pattern with
         // Withings's non-standard action=requesttoken body field.
         if (payload.withings_token_exchange || payload.withings_token_refresh) {

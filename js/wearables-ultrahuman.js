@@ -1,13 +1,12 @@
-// wearables-ultrahuman.js — Ultrahuman Ring Air data layer (PAT auth)
+// wearables-ultrahuman.js — Ultrahuman Ring Air data layer (OAuth2)
 //
-// Ultrahuman uses Personal Access Tokens — user pastes a key from their
-// partner portal. No OAuth dance, no refresh flow. Requests route through
-// /api/proxy so the key is redacted server-side and CORS is handled.
+// Targets the new OAuth2 partner API under /api/partners/v1/user_data/*,
+// not the legacy static-token /api/v1/partner/* endpoints. The access_token
+// identifies the user — no email query param needed.
 //
-// BETA: scope + response shapes haven't been validated against a live token
-// yet. Field names below follow Ultrahuman's published docs as of 2026-04.
-// First beta tester will surface any drift; the .catch(() => []) on each
-// endpoint degrades gracefully if a field was renamed.
+// Fields normalised to canonical metrics; vendor-specific keys stay local
+// to this module. If Ultrahuman rotates a field name, the .catch() on each
+// endpoint keeps the backfill alive for the other metrics.
 
 import { isDebugMode } from './utils.js';
 
@@ -35,28 +34,36 @@ async function uhGET(path, accessToken, params = {}) {
   return res.json();
 }
 
-// Verify the PAT is valid by pulling a 1-day metrics window.
-export async function verifyUltrahumanPAT(accessToken, email) {
+// Account info — used on connect to stamp an identity so the settings card
+// can show "connected as <email>". No-op on failure; identity is decorative.
+export async function fetchUltrahumanPersonalInfo(accessToken) {
   try {
-    const today = new Date().toISOString().slice(0, 10);
-    const res = await uhGET('api/v1/metrics', accessToken, { email, date: today });
-    return { ok: true, account: { email: email || null } };
+    const info = await uhGET('api/partners/v1/user_data/user_info', accessToken);
+    return {
+      ok: true,
+      account: {
+        email: info?.email || info?.user?.email || null,
+        firstName: info?.first_name || info?.user?.first_name || null,
+        lastName:  info?.last_name  || info?.user?.last_name  || null,
+      },
+    };
   } catch (e) {
     return { ok: false, error: e.message, status: e.status };
   }
 }
 
-// Returns canonical L1 rows for [startDate, endDate]. Ultrahuman's partner
-// API is day-resolution, keyed by ?email&date. We loop one day at a time;
-// their API doesn't support multi-day ranges in a single call.
-export async function fetchUltrahumanDailyRange(accessToken, email, startDate, endDate) {
+// Returns canonical L1 rows for [startDate, endDate]. Ultrahuman's OAuth2
+// metrics endpoint is day-scoped (one ?date=YYYY-MM-DD at a time), so we
+// loop. If a given day returns a partial payload (no CGM subscription, no
+// ring worn) we still keep the row with nulls for the missing metrics.
+export async function fetchUltrahumanDailyRange(accessToken, startDate, endDate) {
   const start = new Date(startDate + 'T00:00:00Z');
-  const end = new Date(endDate + 'T00:00:00Z');
+  const end   = new Date(endDate   + 'T00:00:00Z');
   const byDate = new Map();
   for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
     const day = d.toISOString().slice(0, 10);
     let payload;
-    try { payload = await uhGET('api/v1/metrics', accessToken, { email, date: day }); }
+    try { payload = await uhGET('api/partners/v1/user_data/metrics', accessToken, { date: day }); }
     catch (e) { logDebug('metrics', e); continue; }
     const row = canonicalizeDay(day, payload);
     if (row) byDate.set(day, row);
@@ -64,33 +71,34 @@ export async function fetchUltrahumanDailyRange(accessToken, email, startDate, e
   return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
 }
 
-// Ultrahuman returns nested `metric_data` objects per day. Field names track
-// the docs snapshot as of 2026-04 — they may drift. Keep this function as
-// the ONLY place that touches vendor-specific keys.
+// Ultrahuman returns nested `metric_data` blocks; the exact shape varies by
+// scope (ring_data vs cgm_data). This function is the ONE place that knows
+// vendor-specific field names — if Ultrahuman renames anything, patch here.
 function canonicalizeDay(day, payload) {
-  const data = payload?.data?.metric_data || payload?.metric_data || payload || {};
+  const data = payload?.data?.metric_data || payload?.metric_data || payload?.data || payload || {};
   const row = {
     source: 'ultrahuman', date: day,
-    hrv_rmssd: null, rhr: null,
+    hrv_rmssd: null, hrv_sdnn: null, rhr: null,
     sleep_score: null, readiness_score: null,
     activity_score: null, steps: null,
+    strain: null,
     stress_high_min: null, resilience_level: null, cardio_age: null,
+    weight: null, bp_systolic: null, bp_diastolic: null,
     spo2_avg: null, body_temp_delta: null, glucose_avg: null,
   };
   const pick = (path) => path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), data);
   const numOrNull = (v) => (typeof v === 'number' && isFinite(v)) ? v : null;
 
-  row.hrv_rmssd       = numOrNull(pick('hrv.avg')) ?? numOrNull(pick('hrv'));
-  row.rhr             = numOrNull(pick('resting_heart_rate.avg')) ?? numOrNull(pick('resting_heart_rate'));
-  row.sleep_score     = numOrNull(pick('sleep_index.score')) ?? numOrNull(pick('sleep_index'));
-  row.readiness_score = numOrNull(pick('recovery_index.score')) ?? numOrNull(pick('recovery_index'));
-  row.steps           = numOrNull(pick('steps.total')) ?? numOrNull(pick('steps'));
-  row.body_temp_delta = numOrNull(pick('temperature.deviation')) ?? numOrNull(pick('temperature'));
-  row.glucose_avg     = numOrNull(pick('glucose.avg')); // CGM stack only
+  row.hrv_rmssd       = numOrNull(pick('hrv.avg'))                 ?? numOrNull(pick('hrv'));
+  row.rhr             = numOrNull(pick('resting_heart_rate.avg'))  ?? numOrNull(pick('resting_heart_rate'));
+  row.sleep_score     = numOrNull(pick('sleep_index.score'))       ?? numOrNull(pick('sleep_index'));
+  row.readiness_score = numOrNull(pick('recovery_index.score'))    ?? numOrNull(pick('recovery_index'));
+  row.steps           = numOrNull(pick('steps.total'))             ?? numOrNull(pick('steps'));
+  row.body_temp_delta = numOrNull(pick('temperature.deviation'))   ?? numOrNull(pick('temperature'));
+  row.glucose_avg     = numOrNull(pick('glucose.avg'))             ?? numOrNull(pick('glucose'));
 
-  // If every metric is null, skip the row — keeps the L1 table clean for days
-  // the ring wasn't worn or the partner API simply returned nothing.
-  if (Object.values(row).every(v => v === null || v === 'ultrahuman' || typeof v === 'string')) return null;
+  // Drop entirely-null days (ring wasn't worn, scope didn't cover this user)
+  if (Object.keys(row).filter(k => k !== 'source' && k !== 'date').every(k => row[k] === null)) return null;
   return row;
 }
 

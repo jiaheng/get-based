@@ -13,7 +13,8 @@ import { fetchOuraDailyRange, fetchOuraPersonalInfo, daysAgoIso, isoDay } from '
 import { beginOAuth as beginOuraOAuth, completeOAuthCallback as completeOuraCallback, isOuraCallback, withFreshToken as ouraWithFreshToken, DEFAULT_OURA_SCOPES } from './wearables-oura-auth.js';
 import { fetchWhoopDailyRange, fetchWhoopPersonalInfo } from './wearables-whoop.js';
 import { beginOAuth as beginWhoopOAuth, completeOAuthCallback as completeWhoopCallback, isWhoopCallback, withFreshToken as whoopWithFreshToken, DEFAULT_WHOOP_SCOPES } from './wearables-whoop-auth.js';
-import { fetchUltrahumanDailyRange, verifyUltrahumanPAT } from './wearables-ultrahuman.js';
+import { fetchUltrahumanDailyRange, fetchUltrahumanPersonalInfo } from './wearables-ultrahuman.js';
+import { beginOAuth as beginUltrahumanOAuth, completeOAuthCallback as completeUltrahumanCallback, isUltrahumanCallback, withFreshToken as ultrahumanWithFreshToken, DEFAULT_ULTRAHUMAN_SCOPES } from './wearables-ultrahuman-auth.js';
 import { fetchWithingsDailyRange, fetchWithingsPersonalInfo } from './wearables-withings.js';
 import { beginOAuth as beginWithingsOAuth, completeOAuthCallback as completeWithingsCallback, isWithingsCallback, withFreshToken as withingsWithFreshToken, DEFAULT_WITHINGS_SCOPES } from './wearables-withings-auth.js';
 import { getActiveProfileId } from './profile.js';
@@ -112,6 +113,15 @@ const OAUTH_DISPATCH = {
     fetchRange: fetchWithingsDailyRange,
     displayName: 'Withings',
   },
+  ultrahuman: {
+    begin: (args) => beginUltrahumanOAuth({ ...args, scopes: args.scopes || DEFAULT_ULTRAHUMAN_SCOPES }),
+    isCallback: isUltrahumanCallback,
+    complete: completeUltrahumanCallback,
+    withFreshToken: ultrahumanWithFreshToken,
+    fetchAccountInfo: fetchUltrahumanPersonalInfo,
+    fetchRange: fetchUltrahumanDailyRange,
+    displayName: 'Ultrahuman',
+  },
 };
 
 // Called from main.js on page load. Returns true if a callback was handled.
@@ -157,39 +167,9 @@ export async function handleOAuthCallbackOnLoad() {
   return true;
 }
 
-// ─────────────────────────────────────────────────────────
-// PAT (Personal Access Token) flow — Ultrahuman
-// ─────────────────────────────────────────────────────────
-
-export async function connectWithPAT(adapterId, { accessToken, email }) {
-  const adapter = adapterById(adapterId);
-  if (!adapter) throw new Error(`Unknown adapter: ${adapterId}`);
-  if (adapter.authType !== 'pat') throw new Error(`Adapter ${adapterId} is not PAT`);
-  if (adapterId !== 'ultrahuman') throw new Error(`Unsupported PAT adapter: ${adapterId}`);
-
-  const verify = await verifyUltrahumanPAT(accessToken, email);
-  if (!verify.ok) {
-    const e = new Error(verify.error || 'PAT verification failed');
-    e.status = verify.status; throw e;
-  }
-  saveConnection(adapterId, {
-    accessToken,
-    email,                           // PAT flow needs email in every call
-    connectedAt: new Date().toISOString(),
-    account: verify.account,
-    lastSyncAt: 0,
-  });
-  (async () => {
-    try {
-      const bf = await backfillWearable(adapterId);
-      await syncWearableSummary(getActiveProfileId(), listConnectedSources());
-      showNotification?.(`${adapter.displayName} backfilled ${bf.rows} days`, 'success');
-      if (window.navigate) window.navigate('dashboard');
-    } catch (e) {
-      showNotification?.(`Backfill failed: ${e.message}`, 'error', 5000);
-    }
-  })();
-}
+// (PAT flow removed in v1.23.3 — all OAuth2 adapters now go through the
+//  unified OAUTH_DISPATCH table + handleOAuthCallbackOnLoad. Ultrahuman
+//  moved from legacy static-token to their OAuth2 partner API.)
 
 // ─────────────────────────────────────────────────────────
 // Per-adapter dispatch (fetch + auth refresh)
@@ -201,18 +181,6 @@ export async function connectWithPAT(adapterId, { accessToken, email }) {
 async function callWithRefresh(adapter, fetcher) {
   let conn = getConnection(adapter.id);
   if (!conn) throw new Error(`Not connected: ${adapter.id}`);
-
-  // PAT adapters have no refresh ceremony — just call straight through.
-  if (adapter.authType === 'pat') {
-    try { return await fetcher(conn.accessToken); }
-    catch (e) {
-      if (e?.status === 401 || e?.status === 403) {
-        saveConnection(adapter.id, { ...conn, needsReauth: true });
-        const wrap = new Error('Reconnect required'); wrap.code = 'needs-reauth'; throw wrap;
-      }
-      throw e;
-    }
-  }
 
   const disp = OAUTH_DISPATCH[adapter.id];
   if (!disp) throw new Error(`No auth dispatch for ${adapter.id}`);
@@ -249,8 +217,7 @@ async function fetchRange(adapter, startDate, endDate) {
     return callWithRefresh(adapter, (token) => fetchWithingsDailyRange(token, startDate, endDate));
   }
   if (adapter.id === 'ultrahuman') {
-    const conn = getConnection(adapter.id);
-    return callWithRefresh(adapter, (token) => fetchUltrahumanDailyRange(token, conn?.email, startDate, endDate));
+    return callWithRefresh(adapter, (token) => fetchUltrahumanDailyRange(token, startDate, endDate));
   }
   return [];
 }

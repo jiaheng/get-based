@@ -5,6 +5,15 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.23.3', date: '2026-04-22', title: 'Ultrahuman → OAuth2 (dropped legacy PAT flow)',
+    items: [
+      'Ultrahuman now uses their proper OAuth2 partner API (<code>auth.ultrahuman.com/authorise</code> → <code>partner.ultrahuman.com/api/partners/oauth/token</code>) instead of the legacy static-token endpoint. Per-user consent, refresh tokens, no shared partner secret in the browser.',
+      'Scopes: <code>profile ring_data cgm_data</code> — same one OAuth flow covers Ring Air biometrics and M1 glucose data.',
+      'Needs <code>ULTRAHUMAN_CLIENT_SECRET</code> on Vercel + local <code>.env.local</code>, and the Client ID pasted into the adapter registry once Ultrahuman issues partner credentials.',
+      'PAT settings UI removed — every OAuth adapter (Oura / WHOOP / Withings / Ultrahuman) now goes through the same unified "Connect" button.',
+    ]
+  },
+  {
     version: '1.23.2', date: '2026-04-22', title: 'Withings OAuth2 goes live (BETA)',
     items: [
       'Withings scales and BP cuffs connect via OAuth2 — weight, systolic, and diastolic flow into the strip alongside your Oura/WHOOP/Apple Health data. Sleep score from Withings sleep trackers populates if you have one.',
