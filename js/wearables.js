@@ -736,8 +736,8 @@ function renderAppleHealthBlock(adapter, conn) {
       <div class="wearable-adapter-identity">Imported from ${fileName}</div>
       <div class="wearable-adapter-meta">Last import: ${escapeHTML(when)} · ${conn.coverageDays ?? '?'} days</div>
       <div class="wearable-adapter-actions">
-        <button class="ctx-btn-option" onclick="document.getElementById('apple-health-file-input').click()">Re-import new export</button>
-        <button class="ctx-btn-option ctx-btn-danger" onclick="handleWearableDisconnect('${escapeHTML(adapter.id)}')">Remove data</button>
+        <button class="wearable-action wearable-action-primary" onclick="document.getElementById('apple-health-file-input').click()">Re-import new export</button>
+        <button class="wearable-action wearable-action-danger" onclick="handleWearableDisconnect('${escapeHTML(adapter.id)}')">Remove data</button>
       </div>
       <input type="file" id="apple-health-file-input" accept=".zip,.xml,application/zip,application/xml" style="display:none" onchange="handleAppleHealthFilePick(this)">
     </div>`;
@@ -772,7 +772,10 @@ function renderOAuthBlock(adapter, conn) {
     return `<div class="wearable-adapter-body">
       ${reauthNote}
       <div class="wearable-adapter-actions">
-        <button class="ctx-btn-option ctx-btn-primary" onclick="handleWearableConnect('${escapeHTML(adapter.id)}')">${conn?.needsReauth ? 'Reconnect' : 'Connect'} ${escapeHTML(adapter.displayName)}</button>
+        <button class="wearable-action wearable-action-primary wearable-action-connect" onclick="handleWearableConnect('${escapeHTML(adapter.id)}')">
+          ${vendorIcon(adapter.id)}
+          <span>${conn?.needsReauth ? 'Reconnect' : 'Connect'} ${escapeHTML(adapter.displayName)}</span>
+        </button>
       </div>
     </div>`;
   }
@@ -784,9 +787,12 @@ function renderOAuthBlock(adapter, conn) {
     <div class="wearable-adapter-identity">${identity}</div>
     <div class="wearable-adapter-meta">Last sync: ${escapeHTML(when)}</div>
     <div class="wearable-adapter-actions">
-      <button class="ctx-btn-option" onclick="handleWearableSyncNow('${escapeHTML(adapter.id)}')">Sync now</button>
-      <button class="ctx-btn-option" onclick="handleWearableBackfill('${escapeHTML(adapter.id)}')">Re-sync last 90 days</button>
-      <button class="ctx-btn-option ctx-btn-danger" onclick="handleWearableDisconnect('${escapeHTML(adapter.id)}')">Disconnect</button>
+      <button class="wearable-action wearable-action-primary" onclick="handleWearableSyncNow('${escapeHTML(adapter.id)}', this)" aria-label="Sync ${escapeHTML(adapter.displayName)} now">
+        <svg class="wearable-action-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 4 21 12 13 12"/></svg>
+        <span>Sync</span>
+      </button>
+      <button class="wearable-action" onclick="handleWearableBackfill('${escapeHTML(adapter.id)}')">Re-sync 90d</button>
+      <button class="wearable-action wearable-action-danger" onclick="handleWearableDisconnect('${escapeHTML(adapter.id)}')">Disconnect</button>
     </div>
   </div>`;
 }
