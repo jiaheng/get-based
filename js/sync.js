@@ -556,14 +556,26 @@ async function buildSyncPayload(profileId, importedData) {
   const aiSettings = await collectAISettings();
   const chatData = await collectChatData(profileId);
   const displayPrefs = collectDisplayPrefs(profileId);
+  // Strip wearable OAuth credentials before sync. Per-row LWW would let a stale
+  // device resurrect a disconnected vendor or overwrite a freshly-rotated
+  // refresh token. Wearable summary (the L2 dashboard data) still syncs; the
+  // tokens stay local. Users connect each wearable per-device — see the note
+  // in the Settings → Integrations panel.
+  const safeImported = stripWearableCredentials(importedData);
   return JSON.stringify({
     _v: 3,
-    importedData,
+    importedData: safeImported,
     profile: profile || null,
     aiSettings: Object.keys(aiSettings).length > 0 ? aiSettings : undefined,
     chatData: chatData || undefined,
     displayPrefs: displayPrefs || undefined,
   });
+}
+
+function stripWearableCredentials(importedData) {
+  if (!importedData?.wearableConnections) return importedData;
+  const { wearableConnections, ...rest } = importedData;
+  return rest;
 }
 
 function parseSyncPayload(dataJson) {

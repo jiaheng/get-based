@@ -755,12 +755,28 @@ function _formatLensChunks(result) {
 
 // Default ON when wearables are connected — opposite of the group-filter default
 // (which is OFF). Users turn OFF via Settings → AI → "Include wearable data".
+// Per-profile so each profile keeps its own preference (e.g. "Test" profile
+// excludes wearables from AI context, your "main" profile includes them).
+function _wearableCtxKey() {
+  const pid = localStorage.getItem('labcharts-active-profile') || 'default';
+  return `labcharts-${pid}-ai-ctx-wearables`;
+}
 export function isWearableContextEnabled() {
-  const v = localStorage.getItem('labcharts-ai-ctx-wearables');
+  const v = localStorage.getItem(_wearableCtxKey());
+  // Migrate legacy global key (set in v1.21.x) — read once, write per-profile,
+  // delete the global. Idempotent: subsequent calls go straight to per-profile.
+  if (v === null) {
+    const legacy = localStorage.getItem('labcharts-ai-ctx-wearables');
+    if (legacy !== null) {
+      localStorage.setItem(_wearableCtxKey(), legacy);
+      localStorage.removeItem('labcharts-ai-ctx-wearables');
+      return legacy !== 'off';
+    }
+  }
   return v !== 'off';
 }
 export function setWearableContextEnabled(on) {
-  localStorage.setItem('labcharts-ai-ctx-wearables', on ? 'on' : 'off');
+  localStorage.setItem(_wearableCtxKey(), on ? 'on' : 'off');
 }
 
 // Metric labels + units are derived from the canonical registry (single source

@@ -5,131 +5,14 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
-    version: '1.25.1', date: '2026-04-23', title: 'Wearables strip — empty vendors no longer headline',
+    version: '1.22.0', date: '2026-04-23', title: 'Wearables — connect 7 devices, see all your metrics in one place',
     items: [
-      'Connected vendors that haven\'t returned any rows yet (e.g. Polar after first connect, before a device sync to Polar Flow) no longer appear in the strip header. The header label and coverage count reflect only sources that actually contributed data.',
-      'A new footer line surfaces them instead: "Polar connected — waiting on first device sync." Clear that the connection is healthy without making it look like Polar drove half the displayed numbers.',
-    ]
-  },
-  {
-    version: '1.25.0', date: '2026-04-23', title: 'Polar AccessLink (BETA) — 7 wearable vendors supported',
-    items: [
-      '<b>Polar</b> joins the integrations list. OAuth 2.0 server-side flow (confidential client, no PKCE), self-serve at <a href="https://admin.polaraccesslink.com/" target="_blank" rel="noopener">admin.polaraccesslink.com</a>. Pulls resting heart rate, steps, sleep score, and workout-gated HRV (RMSSD during recorded exercises only).',
-      'Seven wearables supported end-to-end now: Oura, WHOOP, Withings, Ultrahuman, Fitbit, Polar, Apple Health (file-import). Polar is the 6th OAuth2 adapter.',
-      'Polar-specific plumbing: one-time <code>POST /v3/users</code> registration after first connect, exactly-once delivery via AccessLink\'s transactions model (open → read → commit only after IndexedDB write succeeds). If a sync crashes mid-flight, Polar replays the same items next time — your data never goes missing, never duplicates.',
-      'HRV caveat: Polar exposes HRV only from recorded workouts, not daily overnight averages like Oura / WHOOP / Fitbit. Expect the HRV trend to be sparse unless you train with the chest strap or H10.',
-    ]
-  },
-  {
-    version: '1.24.2', date: '2026-04-23', title: 'Wearables polish — Withings error codes, source picker positioning, test coverage',
-    items: [
-      'Withings errors now surface what they mean. Codes 100/101/102/243/283/284 (token dead — reconnect), 293/343/601 (rate limited), 251 (expired authorization code), and ~40 others map to readable messages instead of a bare number.',
-      'Source picker stays on-screen on mobile. Tapping the "via {vendor}" badge near the bottom-right of a small viewport no longer renders the dropdown under the chat FAB — it flips above the badge when it would collide with either the FAB hotspot or the viewport edge.',
-      'Internal: extracted <code>parseEnvLocal</code>, <code>_proxyHostBlocked</code>, and PKCE challenge derivation into exports so they can be unit-tested. 58 node-side assertions added covering SSRF guards, env parsing, and all 10 known vendor hosts; 30+ browser assertions added covering OAUTH_DISPATCH drift, Withings error codes, and PKCE SHA256 against the RFC 7636 Appendix B test vector.',
-      'Updated CLAUDE.md and a few stale code comments still framed around Oura-only. The wearables layer supports 6 vendors now (Oura, WHOOP, Withings, Ultrahuman, Fitbit, Apple Health).',
-    ]
-  },
-  {
-    version: '1.24.1', date: '2026-04-22', title: 'Audit pass — a11y, security, Fitbit rate limits, source picker',
-    items: [
-      '<b>Fitbit backfill 90× faster and no longer 429s</b>. Switched to Fitbit\'s date-range endpoints — one request per metric per backfill instead of one per day. Fitbit\'s 150-req/hour limit used to kill the first connect within minutes.',
-      '<b>Pick which wearable drives each metric</b>. When you have more than one connected (Oura + Fitbit, say), click the tiny "via Oura" / "via Fitbit" badge on any card and choose. Defaults to most-recent-data, but now you can pin it to whichever you trust more for that specific reading.',
-      'Source-aware footer caveat. The "Deep HRV needs an ECG chest strap — Oura provides RMSSD only" note now only shows when Oura is actually driving your HRV card.',
-      'Accessibility: every strip card now has a screen-reader-friendly label ("HRV RMSSD 39 ms, up 20% vs baseline, rising 30d — open detail"). The strip header and Sync now button are keyboard-activatable. Detail modal focus moves to the close button on open.',
-      'Proxy hardening: <code>/api/proxy</code> now reflects CORS only to our own origins (app.getbased.health, getbased.health, localhost:8000 in dev) instead of <code>*</code>. Local dev-server gained the same SSRF allowlist the production edge function always had.',
-      'Cross-tab auth race fixed. When two tabs tried to refresh tokens at the same time, the losing tab could end up with an invalidated refresh_token and hit a spurious "needs reconnection" toast. Now each tab re-reads the latest connection inside the lock and skips if another tab already refreshed.',
-      'Profile-swap guard. Starting an OAuth flow in profile A and returning in profile B no longer lands the connection in the wrong profile; we surface a clear "switch back and retry" message.',
-      'Polish: "Re-backfill 90d" → "Re-sync last 90 days". "Ping the maintainer to unlock" → "{vendor} support is in progress — we\'re waiting on partner credentials". Card headings hear "HRV RMSSD" instead of "HRVRMSSD".',
-    ]
-  },
-  {
-    version: '1.24.0', date: '2026-04-22', title: 'Fitbit integration (BETA) — 6 wearable vendors supported',
-    items: [
-      '<b>Fitbit</b> joins the integrations list. OAuth 2.0 with PKCE — public client, no server-held secret. Pulls HRV RMSSD, resting heart rate, steps, sleep efficiency (0-100 proxy for Fitbit\'s in-app Sleep Score, which isn\'t exposed via API), SpO₂ average, skin temperature delta, and body weight from log entries.',
-      'Six wearables supported end-to-end now: Oura, WHOOP, Withings, Ultrahuman, Apple Health (file-import), Fitbit. All OAuth2 adapters share the same dispatch table — WHOOP and Fitbit both PKCE, Oura / Withings / Ultrahuman server-side. Adding the next vendor is a ~1-day template fill-in.',
-      'Fitbit setup needs a Client ID from <a href="https://dev.fitbit.com/apps/new" target="_blank" rel="noopener">dev.fitbit.com</a> (free, self-serve, no partnership application required). Paste the ID into the adapter registry; no env var needed because PKCE doesn\'t use client_secret.',
-      'Sleep score caveat: Fitbit\'s native "Sleep Score" (0-100) is NOT exposed via the Web API. We surface the main sleep\'s <code>efficiency</code> percentage on the same 0-100 scale so the card stays comparable to Oura / WHOOP scores. Not identical numbers, but the same shape and the same trend direction.',
-    ]
-  },
-  {
-    version: '1.23.4', date: '2026-04-22', title: 'Apple Health card — own the privacy story',
-    items: [
-      'Rewrote the Apple Health settings copy to make the file-import path the intentional choice, not a limitation. We don\'t route your Apple Health data through a third-party aggregator or a companion app we haven\'t built yet — you export occasionally and your data never touches our servers.',
-      'Still on the roadmap: a native iOS companion app that reads HealthKit on-device, encrypts locally with your Evolu mnemonic, and sends only ciphertext to the browser. Not built yet — when it ships you\'ll get daily sync without the privacy regression.',
-    ]
-  },
-  {
-    version: '1.23.3', date: '2026-04-22', title: 'Ultrahuman → OAuth2 (dropped legacy PAT flow)',
-    items: [
-      'Ultrahuman now uses their proper OAuth2 partner API (<code>auth.ultrahuman.com/authorise</code> → <code>partner.ultrahuman.com/api/partners/oauth/token</code>) instead of the legacy static-token endpoint. Per-user consent, refresh tokens, no shared partner secret in the browser.',
-      'Scopes: <code>profile ring_data cgm_data</code> — same one OAuth flow covers Ring Air biometrics and M1 glucose data.',
-      'Needs <code>ULTRAHUMAN_CLIENT_SECRET</code> on Vercel + local <code>.env.local</code>, and the Client ID pasted into the adapter registry once Ultrahuman issues partner credentials.',
-      'PAT settings UI removed — every OAuth adapter (Oura / WHOOP / Withings / Ultrahuman) now goes through the same unified "Connect" button.',
-    ]
-  },
-  {
-    version: '1.23.2', date: '2026-04-22', title: 'Withings OAuth2 goes live (BETA)',
-    items: [
-      'Withings scales and BP cuffs connect via OAuth2 — weight, systolic, and diastolic flow into the strip alongside your Oura/WHOOP/Apple Health data. Sleep score from Withings sleep trackers populates if you have one.',
-      'Setup needs maintainer to paste the Client ID into the adapter registry and set <code>WITHINGS_CLIENT_SECRET</code> on Vercel + local dev. Until the ID lands, the settings card says "Ping the maintainer to unlock".',
-      'Proxy allowlist tightened — all wearable API hosts (Oura, WHOOP, Ultrahuman, Withings) are explicitly listed rather than passing through the generic HTTPS fallback.',
-    ]
-  },
-  {
-    version: '1.23.1', date: '2026-04-22', title: 'Apple Health import is live (BETA)',
-    items: [
-      'Drop your Apple Health <code>export.zip</code> (or raw <code>export.xml</code>) on the Integrations tab. The XML parser runs entirely in your browser — no upload, no third-party service. Currently ingests HRV (SDNN), resting heart rate, steps, and SpO₂; more metrics next pass.',
-      'Multi-source support is live: connect Apple Health alongside Oura/WHOOP and the strip automatically picks the source with the most-recent non-null value per metric. "via Apple Health" / "via Oura" badges on each card show which is driving each reading.',
-      'Aggregation rules per metric: HRV → mean, resting HR → min (protects against third-party-app outliers), steps → sum across sources, SpO₂ → mean. Bogus-unit records are refused rather than stored in the wrong scale.',
-    ]
-  },
-  {
-    version: '1.23.0', date: '2026-04-22', title: 'Multi-vendor wearables (BETA) — Ultrahuman, WHOOP, Apple Health, Withings',
-    items: [
-      'New <b>Integrations</b> tab in Settings — Wearables and Agent Access moved out of the Data tab, which was getting crowded with unrelated sections.',
-      '<b>Ultrahuman (BETA)</b> — paste a Personal Access Token from their partner portal and get HRV, RHR, sleep, recovery, steps, body temp delta, and glucose (for CGM users). No OAuth redirect, no proxy secret; token stays in your browser.',
-      '<b>WHOOP (BETA)</b> — OAuth2 with PKCE (no client secret in the browser). Brings HRV, RHR, sleep performance, recovery score, and WHOOP-native <b>strain</b> (0–21 Borg scale) as a new canonical metric.',
-      '<b>Apple Health (BETA, scaffold)</b> — file-import adapter for <code>export.zip</code>. Registry + UI in place; the streaming XML parser lands in the next beta.',
-      '<b>Withings (BETA, scaffold)</b> — OAuth2 entry registered for scales / BP cuffs / Scanwatch. Brings weight, systolic, and diastolic as new canonicals. Interactive flow lands in the next beta.',
-      'Multi-source support under the hood: when you connect more than one wearable the strip cards show a "via &lt;vendor&gt;" badge and auto-pick the most-recent non-null source per metric. A per-metric manual override picker lands alongside Withings.',
-      'All four new adapters are labeled BETA until a real tester validates them end-to-end. <a href="https://github.com/elkimek/get-based/issues" target="_blank" rel="noopener">Please report what you see</a> — response shapes and scope strings from these vendors are only as accurate as their docs (which have been known to lie — Oura\'s <code>spo2Daily</code> turned out to be <code>spo2</code>).',
-    ]
-  },
-  {
-    version: '1.22.3', date: '2026-04-22', title: 'Wearables a11y + consistent number formatting',
-    items: [
-      'Wearable cards are now keyboard-activatable — tab to a card, press Enter or Space to open the detail view.',
-      'Numbers render identically on the strip and in the detail modal. Before, SpO₂ 97 showed as "97" on the card but "97.0" in the modal; same story for integer cardio-age or resilience levels.',
-    ]
-  },
-  {
-    version: '1.22.2', date: '2026-04-22', title: 'Wearables detail view — click any card for the full 90-day chart',
-    items: [
-      'Click a wearable card to open a detail modal with a 90-day daily chart (Chart.js, time-axis), baseline reference line, and stats (latest, P25–P75 range, 7d/30d rolling averages, coverage).',
-      'Added <b>Steps</b> as a 9th card (from <code>daily_activity.steps</code>) — raw movement counts that populate even while Oura Rest Mode suppresses the composite Activity score. If Activity shows all zeros, the detail modal now explains why.',
-      'Modal stats grid is auto-fit responsive, so it looks right on narrow phones and wide monitors alike.',
-    ]
-  },
-  {
-    version: '1.22.1', date: '2026-04-22', title: 'Wearables polish — more cards + connection fixes',
-    items: [
-      'Strip now shows up to 8 cards — added Activity, Stress, Resilience, and Cardio Age alongside the original four. Auto-fit grid so any card count lays out evenly (ready for WHOOP / Apple Health next).',
-      'Fixed the connection-not-persisting bug — the OAuth callback previously raced with the profile loader and saved tokens to the wrong storage key. Settings → Data → Wearables now reliably shows "connected" after you approve on Oura\'s side.',
-      'No more 40-second wait on return from Oura: the dashboard loads immediately and the 90-day backfill runs in the background.',
-      'Scope list corrected (Oura\'s docs say <code>spo2Daily</code>, their gate actually wants <code>spo2</code> / <code>stress</code> / <code>heart_health</code>) — existing users: hit Disconnect + Reconnect once to re-issue the token with all scopes.',
-      'Token exchange retries up to 3× on Oura 5xx (CloudFront blips) instead of failing the whole connect. Error messages no longer leak raw CloudFront HTML.',
-    ]
-  },
-  {
-    version: '1.22.0', date: '2026-04-22', title: 'Wearables integration — Oura',
-    items: [
-      'Connect your Oura ring in Settings → Data → Wearables with one click — getbased sends you to Oura to approve, then pulls 90 days of sleep, readiness, resting heart rate, and HRV (RMSSD). OAuth2 flow with tokens refreshed automatically; your credentials never live in getbased\'s bundle.',
-      'New dashboard strip sits just below the Focus Card: four metrics (HRV, Resting HR, Sleep, Readiness) with 12-week sparklines, baseline reference, and trend direction. Semantic colors — HRV down reads red, RHR up reads red.',
-      'Source-agnostic by design: adapter registry in <code>js/wearable-adapters.js</code> means WHOOP, Ultrahuman, and Apple Health XML slot in with one entry each. Canonical metrics so "HRV" means the same thing across vendors.',
-      'Storage separates concerns: raw daily rows stay local in IndexedDB per device (never syncs), a compact rolling summary + anomaly events ride Evolu sync so other devices and personal agents see the trend picture.',
-      'Sync writes are event-driven — big shifts, trend flips, week rollovers, plus a 14-day max silence — roughly 4–8 relay writes per month instead of one per day.',
-      'AI context: ~400 tokens of baselines + weekly trend + recent anomalies, added to every prompt by default. Toggle in Settings → AI.',
-      'Deep HRV (SDNN · pNN50 · HF/LF) needs an ECG chest strap — Oura provides RMSSD only. Flagged in the UI so the limit is visible up front.',
+      '<b>Seven wearable integrations.</b> Connect Oura, WHOOP, Withings, Ultrahuman, Fitbit, Polar, or Apple Health (file import). Each one syncs the metrics it exposes — HRV, resting heart rate, sleep, readiness, activity, steps, and more — into a single dashboard view alongside your blood work.',
+      '<b>Wearable strip on the dashboard</b> with cards for each metric. Click any card for the full 90-day chart. If you have more than one wearable connected, tap the tiny <i>via {vendor}</i> badge to choose which one drives that metric.',
+      '<b>Settings → Integrations panel</b> for managing connections. Real vendor logos, one click to connect, expand a row to sync, re-sync 90 days, or disconnect. Works in light and dark themes.',
+      '<b>Settings → AI → AI Context</b> has a toggle to include or exclude wearable data from the AI chat context. On by default; turn it off to keep wearable metrics out of every chat prompt.',
+      '<b>Privacy by design.</b> Wearable data stays on your device. Only a compact summary plus anomaly events sync to your other devices via the existing Evolu CRDT. We never see your raw HRV / sleep / heart-rate data.',
+      '<b>Notes.</b> Polar exposes HRV only from recorded workouts (not overnight averages like Oura / WHOOP / Fitbit). Apple Health is file-import — export from your iPhone and drop the zip in. All seven integrations are <i>beta</i> — please report issues.',
     ]
   },
   {

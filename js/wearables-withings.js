@@ -148,7 +148,11 @@ export async function fetchWithingsPersonalInfo(accessToken) {
     const today = Math.floor(Date.now() / 1000);
     const week = today - 7 * 86400;
     const meas = await withingsPOST('getmeas', accessToken, { startdate: String(week), enddate: String(today) });
-    return { ok: true, account: { email: null, userId: meas?.updatetime ? 'verified' : null } };
+    // Withings doesn't expose email via getmeas. We can confirm the token
+    // works (got a response) and stamp the date of the most recent measure
+    // as a friendly identifier ("Withings · last measure 2026-04-22").
+    const lastDate = meas?.updatetime ? new Date(meas.updatetime * 1000).toISOString().slice(0, 10) : null;
+    return { ok: true, account: { email: null, lastMeasure: lastDate, identity: lastDate ? `Withings — last measure ${lastDate}` : 'Withings (account verified)' } };
   } catch (e) {
     return { ok: false, error: e.message, status: e.status };
   }

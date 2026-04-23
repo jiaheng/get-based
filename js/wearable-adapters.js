@@ -135,9 +135,13 @@ export const ADAPTERS = [
     authDocsUrl: 'https://developer.whoop.com/docs/developing/oauth',
     beta: true,
     oauth: {
-      // PKCE flow — no client secret needed in browser. The clientId here is
-      // a placeholder until the production WHOOP developer app is registered.
-      clientId: 'getbased-whoop-beta',
+      // PKCE flow — no client secret needed in browser. WHOOP dev portal
+      // requires an active paid consumer membership (sign up via the free
+      // trial at join.whoop.com first, then request dev access at
+      // developer.whoop.com). Until that lands, the REPLACE_WITH_ prefix
+      // gates the UI to "waiting on partner credentials" so users don't
+      // hit invalid_client at WHOOP's authorize endpoint.
+      clientId: 'REPLACE_WITH_WHOOP_CLIENT_ID',
       redirectUris: [
         'https://app.getbased.health/',
         'https://getbased.health/app',
@@ -155,24 +159,6 @@ export const ADAPTERS = [
       strain:          { endpoint: 'developer/v1/cycle',                    field: 'score.strain' },
     },
     accountInfo: { endpoint: 'developer/v1/user/profile/basic', identityField: 'email' },
-  },
-
-  {
-    id: 'apple_health',
-    displayName: 'Apple Health',
-    authType: 'file-import',
-    authDocsUrl: 'https://support.apple.com/guide/iphone/share-your-health-data-iph27f6325b2/ios',
-    beta: true,
-    apiHost: null, // file-import has no host
-    metrics: {
-      // Apple Health XML `type` attribute → canonical metric mapping. Populated
-      // by the parser at import time, not fetched per-request.
-      hrv_sdnn:        { hkType: 'HKQuantityTypeIdentifierHeartRateVariabilitySDNN' },
-      rhr:             { hkType: 'HKQuantityTypeIdentifierRestingHeartRate' },
-      steps:           { hkType: 'HKQuantityTypeIdentifierStepCount' },
-      spo2_avg:        { hkType: 'HKQuantityTypeIdentifierOxygenSaturation' },
-      body_temp_delta: { hkType: 'HKQuantityTypeIdentifierBodyTemperature' },
-    },
   },
 
   {
@@ -271,6 +257,27 @@ export const ADAPTERS = [
       hrv_rmssd:   { endpoint: 'v3/users/{uid}/exercise-transactions', field: 'heart-rate-variability-avg' }, // workout-gated, may be sparse
     },
     accountInfo: { endpoint: 'v3/users/{uid}', identityField: 'polar-user-id' },
+  },
+
+  {
+    // Apple Health sits last — file-import-only, no OAuth, no live sync.
+    // Different operational shape from the rest, so visually grouping it at
+    // the bottom makes the list easier to scan.
+    id: 'apple_health',
+    displayName: 'Apple Health',
+    authType: 'file-import',
+    authDocsUrl: 'https://support.apple.com/guide/iphone/share-your-health-data-iph27f6325b2/ios',
+    beta: true,
+    apiHost: null, // file-import has no host
+    metrics: {
+      // Apple Health XML `type` attribute → canonical metric mapping. Populated
+      // by the parser at import time, not fetched per-request.
+      hrv_sdnn:        { hkType: 'HKQuantityTypeIdentifierHeartRateVariabilitySDNN' },
+      rhr:             { hkType: 'HKQuantityTypeIdentifierRestingHeartRate' },
+      steps:           { hkType: 'HKQuantityTypeIdentifierStepCount' },
+      spo2_avg:        { hkType: 'HKQuantityTypeIdentifierOxygenSaturation' },
+      body_temp_delta: { hkType: 'HKQuantityTypeIdentifierBodyTemperature' },
+    },
   },
 ];
 

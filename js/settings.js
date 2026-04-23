@@ -129,6 +129,21 @@ export function openSettingsModal(tab) {
         <div id="ai-provider-panel">${window.renderAIProviderPanel(provider)}</div>
       </div>
 
+      <div class="settings-group-title">AI Context</div>
+
+      <div class="settings-section" id="ai-context-section">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;color:var(--text-secondary)">Include wearable data</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:2px">~200 tokens summarising HRV, sleep, recovery and trends from your connected wearables.</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="ai-ctx-wearables-toggle" ${window.isWearableContextEnabled?.() ? 'checked' : ''} onchange="window.setWearableContextEnabled(this.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
       <div class="settings-group-title">PDF Import Privacy</div>
 
       <div class="settings-section" id="privacy-section">

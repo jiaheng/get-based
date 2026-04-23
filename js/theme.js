@@ -50,6 +50,12 @@ export function toggleTheme() {
   const activeCat = activeNav ? activeNav.dataset.category : 'dashboard';
   window.destroyAllCharts();
   window.navigate(activeCat);
+  // If the Settings modal is open, the wearables list (and other theme-sensitive
+  // panels) won't re-render via navigate(). Vendor logos in the integrations
+  // list use theme-aware iconLight/iconDark assets — refresh in place.
+  if (document.getElementById('settings-modal')?.classList.contains('show')) {
+    window.refreshSettingsWearables?.();
+  }
 }
 
 export function getChartColors() {

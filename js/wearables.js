@@ -18,32 +18,17 @@
 import { escapeHTML, showNotification, showConfirmDialog } from './utils.js';
 import { state } from './state.js';
 import { ADAPTERS, adapterById, canonicalMetric, metricsForSources } from './wearable-adapters.js';
+import { brandMarkMono } from './brand-assets.js';
 
-// ─────────────────────────────────────────────────────────
-// Vendor form-factor glyphs (monochrome SVG, currentColor)
-// Phase 1: form-factor icons (ring / wrist / scale / phone), NOT logos.
-// Useful at-a-glance "which kind of device is this?" signal with zero brand
-// licensing exposure. Phase 2 swaps in official "Sign in with X" assets.
-// ─────────────────────────────────────────────────────────
-const VENDOR_FORM_FACTOR = {
-  oura:        'ring',
-  ultrahuman:  'ring',
-  whoop:       'band',
-  fitbit:      'band',
-  polar:       'band',
-  withings:    'scale',
-  apple_health:'phone',
-};
-const FORM_FACTOR_SVG = {
-  ring:  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="3"/></svg>',
-  band:  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="8" width="12" height="8" rx="2"/><path d="M9 8V5h6v3M9 16v3h6v-3"/></svg>',
-  scale: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M12 9v6"/></svg>',
-  phone: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2"/><path d="M9 7l1.5 1.5L9 10l1.5 1.5"/></svg>',
-};
-function vendorIcon(adapterId) {
-  const ff = VENDOR_FORM_FACTOR[adapterId];
-  if (!ff) return '';
-  return `<span class="wearable-vendor-icon" aria-hidden="true">${FORM_FACTOR_SVG[ff] || ''}</span>`;
+// Vendor logo / mark beside the adapter name. Backed by brands/<vendor>/
+// and the registry in js/brand-assets.js. Phase 1 ships monochrome
+// placeholder marks (form-factor only, no trademarks); Phase 2b drops
+// official kits in per vendor and the render code picks them up
+// automatically via brandHasSignIn / brandSignInUrl.
+function vendorIcon(adapterId, opts = {}) {
+  const mark = brandMarkMono(adapterId, opts);
+  if (!mark) return '';
+  return `<span class="wearable-vendor-icon" aria-hidden="true">${mark}</span>`;
 }
 import { beginConnectOAuth, backfillWearable, disconnectWearable, syncNow, listConnectedSources, getConnection } from './wearables-connect.js';
 import { syncWearableSummary } from './wearables-summary.js';
@@ -271,7 +256,16 @@ function renderCard(metricId, canon, metric, showSourceBadge) {
 export function renderWearableStrip() {
   const summary = getWearableSummary();
   if (!summary) return '';
-  const sourceIds = Object.keys(summary.sources || {});
+  // Sort by ADAPTERS registry order (Oura first, Apple Health last) instead
+  // of summary.sources insertion order — that way the strip header reads
+  // "Oura + Fitbit + Apple Health" regardless of which one the user
+  // connected first.
+  const adapterOrderIndex = (sid) => {
+    const idx = ADAPTERS.findIndex(a => a.id === sid);
+    return idx === -1 ? 999 : idx;
+  };
+  const sourceIds = Object.keys(summary.sources || {})
+    .sort((a, b) => adapterOrderIndex(a) - adapterOrderIndex(b));
   if (sourceIds.length === 0) return '';
   if (!summary.metrics || Object.keys(summary.metrics).length === 0) return '';
 
@@ -333,7 +327,15 @@ export function renderWearableStrip() {
     if (!metric) continue;
     const canon = canonicalMetric(metricId);
     if (!canon) continue;
-    html += renderCard(metricId, canon, metric, showSourceBadges);
+    // Show the "via {vendor}" badge only when ≥2 connected vendors actually
+    // expose THIS metric (not just when ≥2 vendors are connected). Avoids
+    // fake-interactive badges on uniquely-sourced metrics like Withings
+    // weight or WHOOP strain.
+    const providersForMetric = headerSourceIds.filter(sid =>
+      adapterById(sid)?.metrics?.[metricId]
+    );
+    const showBadgeForThisMetric = providersForMetric.length > 1;
+    html += renderCard(metricId, canon, metric, showBadgeForThisMetric);
   }
 
   html += `</div>`;
@@ -545,7 +547,14 @@ async function chooseWearableSource(metricId, event) {
   const canon = canonicalMetric(metricId);
   if (!canon) return;
   const connected = listConnectedSources();
-  const connectedIds = Object.keys(connected);
+  // Sort connected vendors by ADAPTERS registry order so the picker presents
+  // them in the same order users see in Settings → Integrations.
+  const connectedIds = Object.keys(connected)
+    .sort((a, b) => {
+      const ai = ADAPTERS.findIndex(x => x.id === a);
+      const bi = ADAPTERS.findIndex(x => x.id === b);
+      return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+    });
   if (connectedIds.length < 2) return;
 
   // Find sources that map this canonical metric in their adapter registry —
@@ -668,134 +677,193 @@ async function syncWearableNow(triggerEl) {
 
 export function renderWearablesSettingsSection() {
   const connected = listConnectedSources();
-  const cards = ADAPTERS.map(a => renderAdapterCard(a, !!connected[a.id])).join('');
-  return `<div class="settings-section-header">
-    <span class="settings-section-title">Wearable Integrations</span>
-    <span class="settings-section-hint">Data stays on this device; a compact summary + anomaly events sync to your other devices.</span>
+  const rows = ADAPTERS.map(a => renderAdapterRow(a, !!connected[a.id])).join('');
+  // BETA badge moves out of every row to a single section-level note. Every
+  // wearable adapter is currently beta — the per-row chip was redundant.
+  return `<div class="settings-section-header" style="display:block">
+    <div class="settings-section-title" style="display:block;margin-bottom:4px">Wearable Integrations</div>
+    <div class="settings-section-hint" style="display:block">Data stays on this device; a compact summary + anomaly events sync to your other devices. All integrations are <em>beta</em> — please report issues.</div>
   </div>
-  <div class="wearables-adapter-grid">${cards}</div>`;
+  <div class="wearables-adapter-list">${rows}</div>`;
 }
 
-function renderAdapterCard(adapter, isConnected) {
+// Each adapter renders as a single horizontal row:
+//   [icon] [name] [status]                   [right-aligned action]
+// Connected adapters expand a details drawer below the row (identity, last
+// sync, manage actions). Apple Health expands its export instructions.
+function renderAdapterRow(adapter, isConnected) {
   const conn = isConnected ? getConnection(adapter.id) : null;
-  const statusChip = !isConnected
-    ? `<span class="wearable-adapter-chip wearable-adapter-chip-off">not connected</span>`
-    : conn?.needsReauth
-      ? `<span class="wearable-adapter-chip wearable-adapter-chip-bad">needs reconnection</span>`
-      : `<span class="wearable-adapter-chip wearable-adapter-chip-ok">connected</span>`;
-  const betaBadge = adapter.beta
-    ? `<span class="wearable-adapter-chip wearable-adapter-chip-beta" title="Beta — shape may change; please report issues">BETA</span>`
-    : '';
+  const isOAuth = adapter.authType === 'oauth2';
+  const isPendingClient = isOAuth && adapter.oauth?.clientId?.startsWith('REPLACE_WITH_');
+  const isFileImport = adapter.authType === 'file-import' && adapter.id === 'apple_health';
 
-  const authBlock = renderAuthBlock(adapter, conn);
+  // Status text — only when there's something meaningful to say.
+  let status = '';
+  if (isConnected && conn?.needsReauth) {
+    status = `<span class="wearable-row-status wearable-row-status-bad">needs reconnection</span>`;
+  } else if (isConnected) {
+    const ago = conn?.lastSyncAt ? formatAgo(conn.lastSyncAt) : 'never synced';
+    status = `<span class="wearable-row-status wearable-row-status-ok">connected · ${escapeHTML(ago)}</span>`;
+  } else if (isPendingClient) {
+    status = `<span class="wearable-row-status wearable-row-status-pending">waiting on partner credentials</span>`;
+  } else if (isFileImport && !conn) {
+    status = `<span class="wearable-row-status wearable-row-status-muted">file import only</span>`;
+  } else if (isFileImport && conn) {
+    status = `<span class="wearable-row-status wearable-row-status-ok">imported · ${escapeHTML(conn.coverageDays ?? '?')} days</span>`;
+  }
 
-  return `<div class="wearable-adapter-card${isConnected ? ' is-connected' : ''}" data-adapter="${escapeHTML(adapter.id)}">
-    <div class="wearable-adapter-header">
-      <div class="wearable-adapter-name">
-        ${vendorIcon(adapter.id)}
-        <span>${escapeHTML(adapter.displayName)}</span>
-        ${betaBadge}
-      </div>
-      ${statusChip}
+  // Right-aligned action — Connect button, expand chevron, or Import.
+  const action = renderRowAction(adapter, conn, { isPendingClient, isFileImport });
+
+  // Expandable body (only for connected adapters + Apple Health when wanting help).
+  const detail = renderRowDetail(adapter, conn, { isPendingClient, isFileImport });
+
+  // Use <details>/<summary> for free keyboard-accessible disclosure when
+  // there's something to expand. Otherwise render a flat row.
+  const hasDetail = !!detail;
+  const expandable = hasDetail;
+
+  // When the logo already contains the vendor wordmark (Oura, Ultrahuman,
+  // Withings, Polar) we hide the duplicate text label — visually the logo
+  // IS the name. Vendors with symbol-only marks (WHOOP circular, Fitbit
+  // dot-grid, Apple Health file glyph) still get the text label.
+  const isWordmark = brandIconIsWordmark(adapter.id);
+  const nameSpan = isWordmark
+    ? `<span class="wearable-row-name sr-only">${escapeHTML(adapter.displayName)}</span>`
+    : `<span class="wearable-row-name">${escapeHTML(adapter.displayName)}</span>`;
+
+  if (expandable) {
+    // Apple Health disconnected starts open by default — the dropzone +
+    // export instructions are the whole reason a user lands on that row.
+    // Other rows start collapsed.
+    const startOpen = isFileImport && !conn;
+    return `<details class="wearable-row${isConnected ? ' is-connected' : ''}" data-adapter="${escapeHTML(adapter.id)}"${startOpen ? ' open' : ''}>
+      <summary class="wearable-row-summary">
+        ${vendorIcon(adapter.id, { size: 20 })}
+        ${nameSpan}
+        ${status}
+        <span class="wearable-row-action">${action}</span>
+      </summary>
+      <div class="wearable-row-detail">${detail}</div>
+    </details>`;
+  }
+
+  return `<div class="wearable-row" data-adapter="${escapeHTML(adapter.id)}">
+    <div class="wearable-row-summary wearable-row-summary-flat">
+      ${vendorIcon(adapter.id, { size: 20 })}
+      ${nameSpan}
+      ${status}
+      <span class="wearable-row-action">${action}</span>
     </div>
-    ${authBlock}
   </div>`;
 }
 
-function renderAuthBlock(adapter, conn) {
-  if (adapter.authType === 'oauth2') {
-    // If an OAuth adapter hasn't been given a real client_id yet, surface the
-    // scaffold block so testers see "not wired" instead of a broken authorize
-    // URL. The first real beta tester only lands once the maintainer pastes
-    // the ID + sets the provider's env var on Vercel.
-    if (adapter.oauth?.clientId?.startsWith('REPLACE_WITH_')) {
-      return renderComingSoonBlock(adapter, `${adapter.displayName} support is in progress — we’re waiting on partner credentials. Check back soon or watch the changelog.`);
-    }
-    return renderOAuthBlock(adapter, conn);
+// Vendors whose icon asset already contains their name (wordmark-style logo).
+// We keep the text in the DOM for screen readers but hide it visually so the
+// row doesn't read "Oura Oura connected · 5h ago". Polar is excluded —
+// currently using the monochrome fallback glyph, not the wordmark, until the
+// AccessLink written-consent ticket lands. See brands/polar/LICENSE.md.
+function brandIconIsWordmark(adapterId) {
+  return new Set(['oura', 'ultrahuman', 'withings']).has(adapterId);
+}
+
+// Right-side action — plain accent buttons across all vendors. Vendor brand
+// identity sits on the LEFT side of the row (via vendorIcon's monochrome
+// mark using each vendor's actual logo silhouette). The right side is
+// uniform action language: Connect / Reconnect / Import / docs link / chevron.
+function renderRowAction(adapter, conn, { isPendingClient, isFileImport }) {
+  if (conn && !conn.needsReauth) {
+    return `<span class="wearable-row-chevron" aria-hidden="true">▾</span>`;
   }
-  if (adapter.authType === 'file-import') {
-    if (adapter.id === 'apple_health') return renderAppleHealthBlock(adapter, conn);
-    return `<p class="wearable-adapter-note">File import — ships in a follow-up.</p>`;
+  if (conn && conn.needsReauth) {
+    return `<button type="button" class="wearable-action-row-btn" onclick="event.stopPropagation();handleWearableConnect('${escapeHTML(adapter.id)}')" aria-label="Reconnect ${escapeHTML(adapter.displayName)}">Reconnect</button>`;
+  }
+  if (isPendingClient) {
+    const docs = adapter.authDocsUrl
+      ? `<a class="wearable-row-link" href="${escapeHTML(adapter.authDocsUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">docs&nbsp;↗</a>`
+      : '';
+    return docs;
+  }
+  if (isFileImport) {
+    return `<button type="button" class="wearable-action-row-btn" onclick="event.stopPropagation();document.getElementById('apple-health-file-input').click()">Import</button>`;
+  }
+  if (adapter.authType === 'oauth2') {
+    return `<button type="button" class="wearable-action-row-btn" onclick="event.stopPropagation();handleWearableConnect('${escapeHTML(adapter.id)}')" aria-label="Connect ${escapeHTML(adapter.displayName)}">Connect</button>`;
   }
   return '';
 }
 
-function renderComingSoonBlock(adapter, msg) {
-  const docs = adapter.authDocsUrl ? `<a href="${escapeHTML(adapter.authDocsUrl)}" target="_blank" rel="noopener">Provider docs</a>` : '';
-  return `<div class="wearable-adapter-body">
-    <p class="wearable-adapter-hint">${escapeHTML(msg)}</p>
-    ${docs ? `<p class="wearable-adapter-hint" style="font-size:11px;opacity:0.8">${docs}</p>` : ''}
-  </div>`;
-}
-
-function renderAppleHealthBlock(adapter, conn) {
-  if (conn?.lastSyncAt) {
+function renderRowDetail(adapter, conn, { isPendingClient, isFileImport }) {
+  // Connected OAuth — identity + manage actions
+  if (conn && !conn.needsReauth && adapter.authType === 'oauth2') {
+    const acct = conn.account || {};
+    const when = conn.lastSyncAt ? new Date(conn.lastSyncAt).toLocaleString() : 'never';
+    // Vendor identity priority: vendor-supplied identity string → email →
+    // full name → user-id → generic fallback. Withings supplies a
+    // last-measure timestamp string; Polar exposes first/last name + userId;
+    // Oura/Fitbit/WHOOP supply email.
+    const fullName = [acct.firstName, acct.lastName].filter(Boolean).join(' ').trim();
+    const identity = escapeHTML(
+      acct.identity
+      || acct.email
+      || fullName
+      || (acct.userId ? `User ${acct.userId}` : '')
+      || (acct['polar-user-id'] ? `User ${acct['polar-user-id']}` : '')
+      || '(account verified)'
+    );
+    return `<div class="wearable-adapter-identity">${identity}</div>
+      <div class="wearable-adapter-meta">Last sync: ${escapeHTML(when)}</div>
+      <div class="wearable-adapter-actions">
+        <button class="wearable-action wearable-action-primary" onclick="handleWearableSyncNow('${escapeHTML(adapter.id)}', this)" aria-label="Sync ${escapeHTML(adapter.displayName)} now">
+          <svg class="wearable-action-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 4 21 12 13 12"/></svg>
+          <span>Sync</span>
+        </button>
+        <button class="wearable-action" onclick="handleWearableBackfill('${escapeHTML(adapter.id)}')">Re-sync last 90 days</button>
+        <button class="wearable-action wearable-action-danger" onclick="handleWearableDisconnect('${escapeHTML(adapter.id)}')">Disconnect</button>
+      </div>`;
+  }
+  // Apple Health connected — different actions
+  if (conn && isFileImport) {
     const when = new Date(conn.lastSyncAt).toLocaleString();
     const fileName = conn.fileName ? escapeHTML(conn.fileName) : 'export';
-    return `<div class="wearable-adapter-body">
-      <div class="wearable-adapter-identity">Imported from ${fileName}</div>
+    return `<div class="wearable-adapter-identity">Imported from ${fileName}</div>
       <div class="wearable-adapter-meta">Last import: ${escapeHTML(when)} · ${conn.coverageDays ?? '?'} days</div>
       <div class="wearable-adapter-actions">
         <button class="wearable-action wearable-action-primary" onclick="document.getElementById('apple-health-file-input').click()">Re-import new export</button>
         <button class="wearable-action wearable-action-danger" onclick="handleWearableDisconnect('${escapeHTML(adapter.id)}')">Remove data</button>
       </div>
-      <input type="file" id="apple-health-file-input" accept=".zip,.xml,application/zip,application/xml" style="display:none" onchange="handleAppleHealthFilePick(this)">
-    </div>`;
+      <input type="file" id="apple-health-file-input" accept=".zip,.xml,application/zip,application/xml" style="display:none" onchange="handleAppleHealthFilePick(this)">`;
   }
-  return `<div class="wearable-adapter-body">
-    <p class="wearable-adapter-hint">getbased doesn't connect to an Apple Health API — none exists. A daily auto-sync would require either a native iOS companion app (not built yet) or routing your data through a third-party aggregator (we don't). Instead, export occasionally from your iPhone and drop the zip here. No credentials, no server contact, no tracking — your Health data never leaves your control.</p>
-    <p class="wearable-adapter-hint" style="font-size:11px;opacity:0.85">iPhone → Health app → tap your profile photo (top right) → <b>Export All Health Data</b> → AirDrop / email the <code>export.zip</code> to your computer → drop it below (or the <code>export.xml</code> inside). Parsing runs entirely in your browser.</p>
-    <div class="apple-health-dropzone"
-         ondragover="event.preventDefault();this.classList.add('drag-over')"
-         ondragleave="this.classList.remove('drag-over')"
-         ondrop="event.preventDefault();this.classList.remove('drag-over');handleAppleHealthDrop(event)"
-         onclick="document.getElementById('apple-health-file-input').click()">
-      <div class="apple-health-dropzone-icon">📂</div>
-      <div class="apple-health-dropzone-text">Drop <code>export.zip</code> or <code>export.xml</code> here — or click to pick a file</div>
-    </div>
-    <div id="apple-health-progress" class="apple-health-progress" style="display:none">
-      <div class="apple-health-progress-bar"><div class="apple-health-progress-fill"></div></div>
-      <div class="apple-health-progress-text"></div>
-    </div>
-    <input type="file" id="apple-health-file-input" accept=".zip,.xml,application/zip,application/xml" style="display:none" onchange="handleAppleHealthFilePick(this)">
-  </div>`;
-}
-
-// renderPATBlock removed in v1.23.3 — Ultrahuman moved from legacy static-token
-// PAT to their OAuth2 partner API. All adapters now go through renderOAuthBlock.
-
-function renderOAuthBlock(adapter, conn) {
-  if (!conn || conn.needsReauth) {
-    const reauthNote = conn?.needsReauth
-      ? `<p class="wearable-adapter-hint" style="color:var(--red)">Your ${escapeHTML(adapter.displayName)} token was revoked or expired beyond refresh. Reconnect to resume data pulls.</p>`
-      : `<p class="wearable-adapter-hint">Clicking <strong>Connect</strong> sends you to ${escapeHTML(adapter.displayName)} to authorise getbased — you'll be redirected back automatically.</p>`;
-    return `<div class="wearable-adapter-body">
-      ${reauthNote}
-      <div class="wearable-adapter-actions">
-        <button class="wearable-action wearable-action-primary wearable-action-connect" onclick="handleWearableConnect('${escapeHTML(adapter.id)}')">
-          ${vendorIcon(adapter.id)}
-          <span>${conn?.needsReauth ? 'Reconnect' : 'Connect'} ${escapeHTML(adapter.displayName)}</span>
-        </button>
+  // Apple Health disconnected — full how-to-export + dropzone
+  if (isFileImport) {
+    return `<p class="wearable-adapter-hint" style="font-size:12px">iPhone → Health app → tap your profile photo (top right) → <b>Export All Health Data</b> → AirDrop / email the <code>export.zip</code> to your computer → drop it below (or the <code>export.xml</code> inside). Parsing runs entirely in your browser.</p>
+      <div class="apple-health-dropzone"
+           ondragover="event.preventDefault();this.classList.add('drag-over')"
+           ondragleave="this.classList.remove('drag-over')"
+           ondrop="event.preventDefault();this.classList.remove('drag-over');handleAppleHealthDrop(event)"
+           onclick="document.getElementById('apple-health-file-input').click()">
+        <div class="apple-health-dropzone-icon">📂</div>
+        <div class="apple-health-dropzone-text">Drop <code>export.zip</code> or <code>export.xml</code> here — or click to pick a file</div>
       </div>
-    </div>`;
+      <div id="apple-health-progress" class="apple-health-progress" style="display:none">
+        <div class="apple-health-progress-bar"><div class="apple-health-progress-fill"></div></div>
+        <div class="apple-health-progress-text"></div>
+      </div>
+      <input type="file" id="apple-health-file-input" accept=".zip,.xml,application/zip,application/xml" style="display:none" onchange="handleAppleHealthFilePick(this)">`;
   }
-
-  const acct = conn.account || {};
-  const when = conn.lastSyncAt ? new Date(conn.lastSyncAt).toLocaleString() : 'never';
-  const identity = acct.email ? escapeHTML(acct.email) : '(account verified)';
-  return `<div class="wearable-adapter-body">
-    <div class="wearable-adapter-identity">${identity}</div>
-    <div class="wearable-adapter-meta">Last sync: ${escapeHTML(when)}</div>
-    <div class="wearable-adapter-actions">
-      <button class="wearable-action wearable-action-primary" onclick="handleWearableSyncNow('${escapeHTML(adapter.id)}', this)" aria-label="Sync ${escapeHTML(adapter.displayName)} now">
-        <svg class="wearable-action-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 4 21 12 13 12"/></svg>
-        <span>Sync</span>
-      </button>
-      <button class="wearable-action" onclick="handleWearableBackfill('${escapeHTML(adapter.id)}')">Re-sync 90d</button>
-      <button class="wearable-action wearable-action-danger" onclick="handleWearableDisconnect('${escapeHTML(adapter.id)}')">Disconnect</button>
-    </div>
-  </div>`;
+  // Pending OAuth client — explanation
+  if (isPendingClient) {
+    return `<p class="wearable-adapter-hint">${escapeHTML(adapter.displayName)} support is in progress — we're waiting on partner credentials. Check back soon or watch the changelog.</p>`;
+  }
+  // Disconnected OAuth (default) — no detail to expand. The Connect button
+  // in the row action is enough; row stays flat.
+  return null;
 }
+
+// renderConnectButton was removed in v1.22.0 along with the brand-coloured
+// Connect pills — Settings now uses uniform ghost buttons via renderRowAction.
+// Brand asset registry + render helpers stay intact in js/brand-assets.js for
+// landing-site reuse.
 
 function handleWearableConnect(adapterId) {
   try {
@@ -839,7 +907,10 @@ async function importAppleHealthFlow(file) {
   }
 }
 
-async function handleWearableSyncNow(adapterId) {
+async function handleWearableSyncNow(adapterId, triggerEl) {
+  const btn = triggerEl;
+  btn?.classList.add('is-syncing');
+  if (btn) btn.disabled = true;
   try {
     showNotification?.(`Syncing ${adapterId}…`, 'info', 1500);
     const res = await syncNow(adapterId);
@@ -847,6 +918,10 @@ async function handleWearableSyncNow(adapterId) {
     refreshSettingsWearables();
     if (window.navigate) window.navigate('dashboard');
   } catch { /* syncNow already notified */ }
+  finally {
+    btn?.classList.remove('is-syncing');
+    if (btn) btn.disabled = false;
+  }
 }
 
 async function handleWearableBackfill(adapterId) {

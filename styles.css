@@ -3905,9 +3905,21 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
   font-size: 12px; color: var(--text-muted);
 }
 .wearable-strip-sync {
-  color: var(--accent); text-decoration: none; font-weight: 500;
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 10px 4px 8px; border-radius: 999px;
+  border: 1px solid var(--border); background: transparent;
+  color: var(--text-secondary); font: inherit; font-size: 11px; font-weight: 500;
+  cursor: pointer; transition: all 0.15s ease; line-height: 1;
 }
-.wearable-strip-sync:hover { text-decoration: underline; }
+.wearable-strip-sync:hover:not(:disabled) {
+  border-color: var(--accent); color: var(--accent); background: var(--bg-secondary);
+}
+.wearable-strip-sync:disabled { opacity: 0.7; cursor: progress; }
+.wearable-strip-sync-icon { transition: transform 0.2s ease; flex-shrink: 0; }
+.wearable-strip-sync.is-syncing .wearable-strip-sync-icon {
+  animation: wearable-spin 0.9s linear infinite;
+}
+@keyframes wearable-spin { to { transform: rotate(360deg); } }
 .wearable-collapse-arrow {
   display: inline-block; transition: transform 0.18s ease;
   color: var(--text-muted); font-size: 14px;
@@ -4073,23 +4085,120 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
   line-height: 1.5;
 }
 
-/* Settings — wearable adapter cards */
-.wearables-adapter-grid {
-  display: grid; grid-template-columns: 1fr; gap: 12px; margin-top: 10px;
-}
-.wearable-adapter-card {
-  background: var(--bg-primary);
+/* Settings — wearable adapter list (Slack/Notion-style integrations row).
+   Each vendor gets one row; connected vendors expand a details drawer. */
+.wearables-adapter-list {
+  display: flex;
+  flex-direction: column;
+  margin-top: 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px 14px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--bg-primary);
 }
-.wearable-adapter-header {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 10px; margin-bottom: 8px;
+.wearable-row {
+  border-bottom: 1px solid var(--border);
+  transition: background 0.12s ease;
 }
-.wearable-adapter-name {
-  font-size: 14px; font-weight: 600; color: var(--text-primary);
+.wearable-row:last-child { border-bottom: 0; }
+.wearable-row:hover { background: rgba(255,255,255,0.02); }
+[data-theme="light"] .wearable-row:hover { background: rgba(0,0,0,0.02); }
+.wearable-row[open] { background: var(--bg-secondary); }
+.wearable-row-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  min-height: 56px;
 }
+.wearable-row-summary::-webkit-details-marker { display: none; }
+.wearable-row-summary-flat {
+  cursor: default;
+}
+.wearable-row-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+.wearable-row-status {
+  font-size: 12px;
+  color: var(--text-muted);
+  flex: 1;
+  min-width: 0;
+}
+.wearable-row-status-ok      { color: var(--green); }
+.wearable-row-status-bad     { color: var(--red); }
+.wearable-row-status-pending { color: var(--text-muted); font-style: italic; }
+.wearable-row-status-muted   { color: var(--text-muted); }
+.wearable-row-action {
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.wearable-row-link {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-decoration: none;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+.wearable-row-link:hover { color: var(--accent); background: var(--bg-secondary); }
+.wearable-row-chevron {
+  color: var(--text-muted);
+  font-size: 14px;
+  transition: transform 0.18s ease;
+  display: inline-block;
+  padding: 0 4px;
+}
+.wearable-row[open] .wearable-row-chevron { transform: rotate(180deg); }
+.wearable-row-detail {
+  padding: 4px 16px 16px 48px;  /* Indent past the icon column */
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-primary);
+}
+/* Right-side action button — plain accent pill, uniform across vendors.
+   Vendor brand identity sits on the left (mark + name); the right side
+   speaks pure action language so the column reads as one consistent
+   "what does this row let me do?" affordance. */
+.wearable-action-row-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  line-height: 1;
+  white-space: nowrap;
+  min-width: 88px;
+  justify-content: center;
+}
+.wearable-action-row-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--bg-secondary);
+}
+.wearable-action-row-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Legacy chip styles — preserved for any external reuse but no longer
+   applied by the settings panel. Kept lean. */
 .wearable-adapter-chip {
   font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
   padding: 2px 8px; border-radius: 8px;
@@ -4229,6 +4338,203 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
 .wearable-adapter-note {
   font-size: 12px; color: var(--text-muted); font-style: italic; margin: 0;
 }
+
+/* ── Vendor form-factor icon (settings cards + Connect buttons) ── */
+.wearable-vendor-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.wearable-adapter-name {
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.wearable-adapter-card.is-connected .wearable-vendor-icon {
+  color: var(--accent);
+}
+.wearable-adapter-card.is-connected {
+  border-color: rgba(79, 140, 255, 0.25);
+}
+
+/* ── Unified adapter action button (replaces ad-hoc ctx-btn-option overrides) ── */
+.wearable-action {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 14px; border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent; color: var(--text-secondary);
+  font: inherit; font-size: 12px; font-weight: 500;
+  cursor: pointer; transition: all 0.15s ease; line-height: 1;
+  white-space: nowrap;
+}
+.wearable-action:hover:not(:disabled) {
+  border-color: var(--accent); color: var(--accent); background: var(--bg-secondary);
+}
+.wearable-action:disabled { opacity: 0.7; cursor: progress; }
+.wearable-action-icon { flex-shrink: 0; transition: transform 0.2s ease; }
+.wearable-action.is-syncing .wearable-action-icon {
+  animation: wearable-spin 0.9s linear infinite;
+}
+.wearable-action-primary {
+  background: var(--accent-gradient);
+  border-color: transparent;
+  color: white;
+}
+.wearable-action-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+  border-color: transparent; color: white; background: var(--accent-gradient);
+}
+.wearable-action-danger {
+  color: var(--text-muted);
+}
+.wearable-action-danger:hover:not(:disabled) {
+  border-color: var(--red); color: var(--red); background: var(--red-bg);
+}
+.wearable-action-connect {
+  padding: 7px 18px;
+  font-size: 13px;
+}
+.wearable-action-connect .wearable-vendor-icon {
+  color: rgba(255, 255, 255, 0.95);
+}
+/* Vendor-branded Connect button — uses --brand-color from inline style.
+   Phase 2b: official sign-in graphics (rendered via .wearable-action-signin)
+   take precedence over this; this variant is the middle tier between the
+   generic accent pill and a fully vendor-supplied button. */
+.wearable-action-branded {
+  background: var(--brand-color);
+  border-color: transparent;
+  color: white;
+  /* Subtle brand-coloured ring on focus for accessibility. */
+}
+.wearable-action-branded:hover:not(:disabled) {
+  background: var(--brand-color);
+  filter: brightness(1.1);
+  border-color: transparent;
+  color: white;
+}
+.wearable-action-branded:focus-visible {
+  outline: 2px solid var(--brand-color);
+  outline-offset: 2px;
+}
+/* Official vendor Sign-in-with-X graphic — render unmodified. Browsers
+   handle the click target; we only constrain max width to keep layout
+   sane. */
+.wearable-action-signin {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  line-height: 0;
+}
+.wearable-action-signin img {
+  height: 36px;
+  width: auto;
+  max-width: 220px;
+  display: block;
+}
+.wearable-action-signin:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+/* Wordmark on a brand-coloured pill — used when the official asset is just
+   the vendor wordmark (not a full badge). The pill provides the corporate
+   colour; the wordmark provides the identity. */
+.wearable-action-signin-branded {
+  background: var(--brand-color);
+  border-radius: 999px;
+  padding: 9px 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: filter 0.15s ease;
+}
+.wearable-action-signin-branded:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+.wearable-action-signin-branded img {
+  height: 18px;
+  width: auto;
+  max-width: 160px;
+}
+/* Wordmark on accent pill — when the vendor's guideline is monochrome
+   (e.g. Oura) so we don't apply a brand colour. */
+.wearable-action-signin-accent {
+  background: var(--accent-gradient);
+  border-radius: 999px;
+  padding: 9px 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: filter 0.15s ease;
+}
+.wearable-action-signin-accent:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+.wearable-action-signin-accent img {
+  height: 18px;
+  width: auto;
+  max-width: 160px;
+}
+/* Vendor mark — uses CSS mask so the SVG silhouette inherits currentColor
+   from its parent. --mark-url and --mark-size are set inline by
+   brandMarkMono(). Same mark file renders white inside a coloured button,
+   muted next to a card heading, accent-coloured on a connected card. */
+.wearable-vendor-mark {
+  display: inline-block;
+  width: var(--mark-size, 18px);
+  height: var(--mark-size, 18px);
+  background-color: currentColor;
+  -webkit-mask: var(--mark-url) center / contain no-repeat;
+  mask: var(--mark-url) center / contain no-repeat;
+  flex-shrink: 0;
+}
+/* Vendor logo IMG (full-colour brand asset on the left side of the row).
+   Fixed height so the row stays a consistent visual rhythm; width follows
+   the SVG's intrinsic aspect ratio. Capped at 90px wide so very long
+   wordmarks (Ultrahuman, Polar) don't push the vendor name off-screen. */
+.wearable-vendor-icon-img {
+  display: block;
+  flex-shrink: 0;
+  height: 18px;
+  width: auto;
+  max-width: 90px;
+  object-fit: contain;
+  object-position: left center;
+}
+/* Ghost link-style action (e.g. "How?" disclosure) — no border, uses accent */
+.wearable-action-link {
+  border: 0;
+  padding: 7px 10px;
+  color: var(--text-muted);
+  background: transparent;
+}
+.wearable-action-link:hover:not(:disabled) {
+  color: var(--accent);
+  background: transparent;
+  border-color: transparent;
+}
+/* Compact disconnected body — drops the padding/gap weight that made
+   Apple Health + 5 OAuth cards a vertical wall of repetition. */
+.wearable-adapter-body-compact {
+  gap: 10px;
+}
+.wearable-adapter-hint-warn { color: var(--red); }
+.wearable-adapter-hint-pending {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+/* Expandable "how does Apple Health file import work?" explainer.
+   Collapsed by default; expanded when card gets .show-help. */
+.wearable-adapter-help {
+  display: none;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+  margin-top: 4px;
+}
+.wearable-adapter-card.show-help .wearable-adapter-help { display: block; }
 
 /* Responsive: 2 cols → 1 col */
 @media (max-width: 900px) {
