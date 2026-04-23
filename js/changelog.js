@@ -5,6 +5,24 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.25.0', date: '2026-04-23', title: 'Polar AccessLink (BETA) — 7 wearable vendors supported',
+    items: [
+      '<b>Polar</b> joins the integrations list. OAuth 2.0 server-side flow (confidential client, no PKCE), self-serve at <a href="https://admin.polaraccesslink.com/" target="_blank" rel="noopener">admin.polaraccesslink.com</a>. Pulls resting heart rate, steps, sleep score, and workout-gated HRV (RMSSD during recorded exercises only).',
+      'Seven wearables supported end-to-end now: Oura, WHOOP, Withings, Ultrahuman, Fitbit, Polar, Apple Health (file-import). Polar is the 6th OAuth2 adapter.',
+      'Polar-specific plumbing: one-time <code>POST /v3/users</code> registration after first connect, exactly-once delivery via AccessLink\'s transactions model (open → read → commit only after IndexedDB write succeeds). If a sync crashes mid-flight, Polar replays the same items next time — your data never goes missing, never duplicates.',
+      'HRV caveat: Polar exposes HRV only from recorded workouts, not daily overnight averages like Oura / WHOOP / Fitbit. Expect the HRV trend to be sparse unless you train with the chest strap or H10.',
+    ]
+  },
+  {
+    version: '1.24.2', date: '2026-04-23', title: 'Wearables polish — Withings error codes, source picker positioning, test coverage',
+    items: [
+      'Withings errors now surface what they mean. Codes 100/101/102/243/283/284 (token dead — reconnect), 293/343/601 (rate limited), 251 (expired authorization code), and ~40 others map to readable messages instead of a bare number.',
+      'Source picker stays on-screen on mobile. Tapping the "via {vendor}" badge near the bottom-right of a small viewport no longer renders the dropdown under the chat FAB — it flips above the badge when it would collide with either the FAB hotspot or the viewport edge.',
+      'Internal: extracted <code>parseEnvLocal</code>, <code>_proxyHostBlocked</code>, and PKCE challenge derivation into exports so they can be unit-tested. 58 node-side assertions added covering SSRF guards, env parsing, and all 10 known vendor hosts; 30+ browser assertions added covering OAUTH_DISPATCH drift, Withings error codes, and PKCE SHA256 against the RFC 7636 Appendix B test vector.',
+      'Updated CLAUDE.md and a few stale code comments still framed around Oura-only. The wearables layer supports 6 vendors now (Oura, WHOOP, Withings, Ultrahuman, Fitbit, Apple Health).',
+    ]
+  },
+  {
     version: '1.24.1', date: '2026-04-22', title: 'Audit pass — a11y, security, Fitbit rate limits, source picker',
     items: [
       '<b>Fitbit backfill 90× faster and no longer 429s</b>. Switched to Fitbit\'s date-range endpoints — one request per metric per backfill instead of one per day. Fitbit\'s 150-req/hour limit used to kill the first connect within minutes.',

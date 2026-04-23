@@ -539,10 +539,31 @@ async function chooseWearableSource(metricId, event) {
   `;
   const rect = event.target.getBoundingClientRect();
   picker.style.position = 'fixed';
-  picker.style.top = `${rect.bottom + 4}px`;
-  picker.style.left = `${Math.max(8, rect.left - 60)}px`;
+  picker.style.visibility = 'hidden';
+  picker.style.top = '0px';
+  picker.style.left = '0px';
   picker.style.zIndex = '10000';
   document.body.appendChild(picker);
+  // Clamp to viewport and flip above if opening below would collide with the
+  // chat FAB hotspot (bottom-right ~72px square) or overflow the viewport. On
+  // mobile the card is full-width, so a naive rect.left-60 can underflow and
+  // the dropdown can disappear under the FAB — measure after insert and nudge.
+  const pw = picker.offsetWidth || 200;
+  const ph = picker.offsetHeight || 180;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const fabHotspot = { left: vw - 88, top: vh - 88 }; // chat-fab 56px + 24px margin + buffer
+  let top = rect.bottom + 4;
+  let left = Math.max(8, rect.left - 60);
+  // Flip above if bottom would overflow viewport OR intrude on FAB hotspot
+  if (top + ph > vh - 8 || (top + ph > fabHotspot.top && left + pw > fabHotspot.left)) {
+    top = Math.max(8, rect.top - ph - 4);
+  }
+  // Clamp right
+  if (left + pw > vw - 8) left = Math.max(8, vw - pw - 8);
+  picker.style.top = `${top}px`;
+  picker.style.left = `${left}px`;
+  picker.style.visibility = '';
 
   // Wire clicks — pick a source, persist override, re-render strip.
   picker.querySelectorAll('[data-source]').forEach(btn => {

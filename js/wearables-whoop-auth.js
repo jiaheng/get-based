@@ -43,6 +43,9 @@ async function sha256Base64Url(str) {
   return base64UrlEncode(new Uint8Array(buf));
 }
 
+// Exposed for test pinning against RFC 7636 Appendix B vector.
+export const deriveCodeChallenge = sha256Base64Url;
+
 // ─────────────────────────────────────────────────────────
 // Authorize
 // ─────────────────────────────────────────────────────────

@@ -660,5 +660,135 @@ return (async function() {
   window.closeModal();
   delete window._labState.importedData.wearableSummary;
 
+  // ═══════════════════════════════════════
+  // 13. OAUTH_DISPATCH registry-vs-dispatch drift
+  // ═══════════════════════════════════════
+  // Catches the bug where someone adds a new OAuth adapter to wearable-adapters.js
+  // but forgets to register its begin/callback/complete/withFreshToken/fetchRange
+  // hooks in wearables-connect.js OAUTH_DISPATCH (or vice versa). apple_health is
+  // the one legitimate exception — file-import, not OAuth.
+  console.log('%c 13. OAUTH_DISPATCH drift ', 'font-weight:bold;color:#f59e0b');
+  const connect = await import('../js/wearables-connect.js');
+  assert('OAUTH_DISPATCH exported', typeof connect.OAUTH_DISPATCH === 'object' && connect.OAUTH_DISPATCH !== null);
+
+  const oauthAdapterIds = reg.ADAPTERS.filter(a => a.authType === 'oauth2').map(a => a.id);
+  const dispatchIds = Object.keys(connect.OAUTH_DISPATCH);
+
+  // 1. Every oauth2 adapter has a dispatch entry
+  for (const id of oauthAdapterIds) {
+    assert(`Adapter '${id}' has OAUTH_DISPATCH entry`, dispatchIds.includes(id),
+      `missing — register hooks in wearables-connect.js`);
+  }
+  // 2. Every dispatch entry has a matching oauth2 adapter (no orphaned dispatch hooks)
+  for (const id of dispatchIds) {
+    const adapter = reg.adapterById(id);
+    assert(`Dispatch entry '${id}' has matching oauth2 adapter`, adapter?.authType === 'oauth2',
+      `orphaned — remove from OAUTH_DISPATCH or add adapter`);
+  }
+  // 3. Each dispatch entry exposes the full hook surface
+  const REQUIRED_HOOKS = ['begin', 'isCallback', 'complete', 'withFreshToken', 'fetchAccountInfo', 'fetchRange', 'displayName'];
+  for (const id of dispatchIds) {
+    const entry = connect.OAUTH_DISPATCH[id];
+    for (const hook of REQUIRED_HOOKS) {
+      assert(`OAUTH_DISPATCH.${id}.${hook} present`, entry && entry[hook] != null);
+    }
+  }
+  // 4. Apple Health is explicitly NOT in dispatch (file-import, no OAuth)
+  assert('apple_health NOT in OAUTH_DISPATCH', !dispatchIds.includes('apple_health'),
+    'apple_health is file-import, should never be registered');
+
+  // ═══════════════════════════════════════
+  // 14. Withings error-code table
+  // ═══════════════════════════════════════
+  console.log('%c 14. Withings error codes ', 'font-weight:bold;color:#f59e0b');
+  const withings = await import('../js/wearables-withings.js');
+  assert('withingsErrorMessage exported', typeof withings.withingsErrorMessage === 'function');
+  assert('maps 100 → token invalid', /token/i.test(withings.withingsErrorMessage(100)));
+  assert('maps 293 → rate limit', /rate/i.test(withings.withingsErrorMessage(293)));
+  assert('maps 284 → token not found', /token not found/i.test(withings.withingsErrorMessage(284)));
+  assert('maps 283 → token used', /token/i.test(withings.withingsErrorMessage(283)));
+  assert('maps 251 → grant invalid', /grant/i.test(withings.withingsErrorMessage(251)));
+  assert('maps 601 → rate limited', /rate/i.test(withings.withingsErrorMessage(601)));
+  assert('unknown code returns null', withings.withingsErrorMessage(99999) === null);
+  assert('non-numeric returns null', withings.withingsErrorMessage('foo') === null);
+  assert('numeric string works', /token/i.test(withings.withingsErrorMessage('100')));
+
+  // ═══════════════════════════════════════
+  // 15. PKCE: code_verifier → code_challenge SHA256 spec compliance
+  // ═══════════════════════════════════════
+  // RFC 7636 §4.2: code_challenge = BASE64URL-ENCODE(SHA256(ASCII(code_verifier))).
+  // WHOOP and Fitbit both use the S256 method; a bug in the derivation silently
+  // breaks the final token exchange with a cryptic 'invalid_grant'. Pin the
+  // exact byte sequence end-to-end against the RFC test vector.
+  console.log('%c 15. PKCE SHA256 pair ', 'font-weight:bold;color:#f59e0b');
+  // Auth modules already imported above (sections 6 + 11); reuse to avoid
+  // top-level identifier collisions in this IIFE's single scope.
+  const fitbitAuthPkce = await import('../js/wearables-fitbit-auth.js');
+  const whoopAuthPkce = await import('../js/wearables-whoop-auth.js');
+
+  // RFC 7636 Appendix B test vector:
+  //   verifier  = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+  //   challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+  const RFC_VERIFIER  = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
+  const RFC_CHALLENGE = 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM';
+
+  // Both auth modules should expose a derivation helper; if not, recreate inline
+  // and make sure the helper names match what's used inside begin*OAuth.
+  {
+    const got = await fitbitAuthPkce.deriveCodeChallenge(RFC_VERIFIER);
+    assert('Fitbit PKCE derives RFC test vector', got === RFC_CHALLENGE, `got ${got}`);
+  }
+  {
+    const got = await whoopAuthPkce.deriveCodeChallenge(RFC_VERIFIER);
+    assert('WHOOP PKCE derives RFC test vector', got === RFC_CHALLENGE, `got ${got}`);
+  }
+
+  // ═══════════════════════════════════════
+  // 16. Polar AccessLink adapter
+  // ═══════════════════════════════════════
+  console.log('%c 16. Polar adapter ', 'font-weight:bold;color:#f59e0b');
+  const polarAdapter = reg.adapterById('polar');
+  assert('Polar adapter registered', polarAdapter?.id === 'polar');
+  assert('Polar displayName', polarAdapter?.displayName === 'Polar');
+  assert('Polar authType oauth2', polarAdapter?.authType === 'oauth2');
+  assert('Polar NOT PKCE (confidential client)', polarAdapter?.oauth?.pkce === false);
+  assert('Polar Client ID pasted (not placeholder)',
+    typeof polarAdapter?.oauth?.clientId === 'string' &&
+    !polarAdapter.oauth.clientId.startsWith('REPLACE_WITH_') &&
+    polarAdapter.oauth.clientId.length > 10);
+  assert('Polar scope is accesslink.read_all',
+    polarAdapter?.oauth?.scopes?.includes('accesslink.read_all'));
+  assert('Polar supports sleep_score', reg.adapterSupportsMetric('polar', 'sleep_score'));
+  assert('Polar supports steps', reg.adapterSupportsMetric('polar', 'steps'));
+  assert('Polar supports rhr', reg.adapterSupportsMetric('polar', 'rhr'));
+  assert('Polar in OAUTH_DISPATCH', 'polar' in connect.OAUTH_DISPATCH);
+  assert('Polar has postConnect hook (one-time /v3/users registration)',
+    typeof connect.OAUTH_DISPATCH.polar?.postConnect === 'function');
+  assert('Polar has commitAfterWrite hook (transactions)',
+    typeof connect.OAUTH_DISPATCH.polar?.commitAfterWrite === 'function');
+
+  const polarAuth = await import('../js/wearables-polar-auth.js');
+  assert('Polar DEFAULT_POLAR_SCOPES exported',
+    Array.isArray(polarAuth.DEFAULT_POLAR_SCOPES) && polarAuth.DEFAULT_POLAR_SCOPES.includes('accesslink.read_all'));
+  const polarAuthUrl = polarAuth.buildAuthorizeUrl({
+    clientId: 'test-client', redirectUri: 'http://localhost:8000/app',
+    scopes: polarAuth.DEFAULT_POLAR_SCOPES, state: 'test-state',
+  });
+  assert('Polar authorize URL points at flow.polar.com',
+    polarAuthUrl.startsWith('https://flow.polar.com/oauth2/authorization'));
+  assert('Polar authorize URL has response_type=code',
+    polarAuthUrl.includes('response_type=code'));
+  assert('Polar authorize URL NOT PKCE',
+    !polarAuthUrl.includes('code_challenge'));
+  assert('Polar authorize URL space-delimits scopes',
+    polarAuthUrl.includes('scope=accesslink.read_all'));
+
+  // Independent: verify the raw WebCrypto pipeline our flow depends on (base64url, not base64).
+  const enc = new TextEncoder().encode(RFC_VERIFIER);
+  const hash = await crypto.subtle.digest('SHA-256', enc);
+  const b64 = btoa(String.fromCharCode(...new Uint8Array(hash)));
+  const b64url = b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  assert('WebCrypto+base64url yields RFC 7636 challenge', b64url === RFC_CHALLENGE, `got ${b64url}`);
+
   console.log(`\nResults: ${pass} passed, ${fail} failed, ${pass + fail} total`);
 })();

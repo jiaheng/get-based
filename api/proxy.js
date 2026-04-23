@@ -17,6 +17,8 @@ const ALLOWED_ORIGINS = [
   'https://partner.ultrahuman.com/',
   'https://wbsapi.withings.net/',
   'https://api.fitbit.com/',
+  'https://www.polaraccesslink.com/',
+  'https://polarremote.com/',
 ];
 
 /// Block literal IPs in private / reserved / cloud-metadata ranges so
@@ -112,6 +114,13 @@ export default async function handler(req) {
   // partner.ultrahuman.com/api/partners/oauth/token.
   if (payload.ultrahuman_token_exchange || payload.ultrahuman_token_refresh) {
     return handleUltrahumanTokenRequest(payload, req);
+  }
+
+  // ─── Polar AccessLink OAuth2 server-side flow ───────────────────
+  // Confidential client. Token endpoint at polarremote.com/v2/oauth2/token,
+  // authentication via Basic auth (base64 clientId:clientSecret).
+  if (payload.polar_token_exchange || payload.polar_token_refresh) {
+    return handlePolarTokenRequest(payload, req);
   }
 
   const { url, headers, body, method: upstreamMethod } = payload;
@@ -360,6 +369,67 @@ async function handleUltrahumanTokenRequest(payload, req) {
     });
   } catch (e) {
     return new Response(JSON.stringify({ error: 'Ultrahuman token endpoint unreachable: ' + e.message }), {
+      status: 502, headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
+    });
+  }
+}
+
+// ─── Polar token handler ───────────────────────────────────────────
+// Polar AccessLink requires HTTP Basic auth (base64 of client_id:client_secret)
+// on every token call. Single place that reads POLAR_CLIENT_SECRET.
+async function handlePolarTokenRequest(payload, req) {
+  const secret = typeof process !== 'undefined' ? process.env?.POLAR_CLIENT_SECRET : undefined;
+  if (!secret) {
+    return new Response(JSON.stringify({ error: 'POLAR_CLIENT_SECRET not configured on this deployment' }), {
+      status: 500, headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
+    });
+  }
+
+  let form, clientId;
+  if (payload.polar_token_exchange) {
+    const { code, redirect_uri, client_id } = payload.polar_token_exchange;
+    if (!code || !redirect_uri || !client_id) {
+      return new Response(JSON.stringify({ error: 'polar_token_exchange requires code, redirect_uri, client_id' }), {
+        status: 400, headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
+      });
+    }
+    clientId = client_id;
+    form = new URLSearchParams({
+      grant_type: 'authorization_code',
+      code, redirect_uri,
+    });
+  } else {
+    const { refresh_token, client_id } = payload.polar_token_refresh;
+    if (!refresh_token || !client_id) {
+      return new Response(JSON.stringify({ error: 'polar_token_refresh requires refresh_token, client_id' }), {
+        status: 400, headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
+      });
+    }
+    clientId = client_id;
+    form = new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token,
+    });
+  }
+
+  const basicAuth = 'Basic ' + btoa(`${clientId}:${secret}`);
+  try {
+    const res = await fetch('https://polarremote.com/v2/oauth2/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'application/json;charset=UTF-8',
+        'Authorization': basicAuth,
+      },
+      body: form.toString(),
+    });
+    const body = await res.text();
+    return new Response(body, {
+      status: res.status,
+      headers: { ...corsHeaders(req), 'Content-Type': res.headers.get('content-type') || 'application/json' },
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: 'Polar token endpoint unreachable: ' + e.message }), {
       status: 502, headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
     });
   }

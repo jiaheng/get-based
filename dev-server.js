@@ -23,16 +23,36 @@ const hasSite = fs.existsSync(SITE_INDEX);
 // Auto-load .env.local (gitignored) before anything else reads process.env.
 // Keeps OAuth client secrets out of shell history and out of git. Values
 // already set in the shell environment take precedence — env still wins.
+export function parseEnvLocal(text) {
+  // Returns {[name]: value} for well-formed KEY=VALUE lines. Supports:
+  //   - leading/trailing whitespace around KEY, =, and VALUE
+  //   - full-line comments (line starts with # after whitespace stripping)
+  //   - inline quoting: "foo" or 'foo' (quotes stripped verbatim)
+  // Intentionally does NOT support:
+  //   - unquoted inline `# comment` (we keep it — quote the value if unwanted)
+  //   - escape sequences inside quotes (no \n unescaping)
+  // Keys must match /^[A-Z_][A-Z0-9_]*$/ — lowercase or numeric-leading keys
+  // are treated as malformed and ignored. Return order = insertion order.
+  const out = Object.create(null);
+  for (const raw of text.split('\n')) {
+    if (raw.trim().startsWith('#')) continue;
+    const m = raw.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/);
+    if (!m) continue;
+    let val = m[2];
+    if ((val.startsWith('"') && val.endsWith('"') && val.length >= 2) ||
+        (val.startsWith("'") && val.endsWith("'") && val.length >= 2)) {
+      val = val.slice(1, -1);
+    }
+    out[m[1]] = val;
+  }
+  return out;
+}
 const ENV_LOCAL = path.join(ROOT, '.env.local');
 if (fs.existsSync(ENV_LOCAL)) {
-  for (const line of fs.readFileSync(ENV_LOCAL, 'utf8').split('\n')) {
-    const m = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*)\s*$/);
-    if (!m || line.trim().startsWith('#')) continue;
-    if (process.env[m[1]]) continue;       // shell export wins
-    let val = m[2];
-    if ((val.startsWith('"') && val.endsWith('"')) ||
-        (val.startsWith("'") && val.endsWith("'"))) val = val.slice(1, -1);
-    process.env[m[1]] = val;
+  const parsed = parseEnvLocal(fs.readFileSync(ENV_LOCAL, 'utf8'));
+  for (const [k, v] of Object.entries(parsed)) {
+    if (process.env[k]) continue; // shell export wins
+    process.env[k] = v;
   }
   console.log(`Loaded .env.local (${Object.keys(process.env).filter(k => k.endsWith('_CLIENT_SECRET')).length} secrets visible)`);
 }
@@ -49,8 +69,10 @@ const _PROXY_ALLOWED_ORIGINS = [
   'https://partner.ultrahuman.com/',
   'https://wbsapi.withings.net/',
   'https://api.fitbit.com/',
+  'https://www.polaraccesslink.com/',
+  'https://polarremote.com/',
 ];
-function _proxyHostBlocked(host) {
+export function _proxyHostBlocked(host) {
   if (!host) return true;
   if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]') return true;
   if (host.endsWith('.local') || host.endsWith('.localhost')) return true;
@@ -73,7 +95,7 @@ function _proxyHostBlocked(host) {
   if (a === 0) return true;
   return false;
 }
-function _isAllowedProxyUrl(url) {
+export function _isAllowedProxyUrl(url) {
   if (_PROXY_ALLOWED_ORIGINS.some(o => url.startsWith(o))) return true;
   try {
     const u = new URL(url);
@@ -373,6 +395,54 @@ const server = http.createServer((req, res) => {
           return;
         }
 
+        // Polar AccessLink OAuth2 token exchange/refresh — Basic auth.
+        if (payload.polar_token_exchange || payload.polar_token_refresh) {
+          const secret = process.env.POLAR_CLIENT_SECRET;
+          if (!secret) {
+            res.writeHead(500, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'POLAR_CLIENT_SECRET not set — add it to .env.local before `node dev-server.js`' }));
+            return;
+          }
+          let form, clientId;
+          if (payload.polar_token_exchange) {
+            const { code, redirect_uri, client_id } = payload.polar_token_exchange;
+            if (!code || !redirect_uri || !client_id) {
+              res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+              res.end('{"error":"polar_token_exchange requires code, redirect_uri, client_id"}'); return;
+            }
+            clientId = client_id;
+            form = new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri });
+          } else {
+            const { refresh_token, client_id } = payload.polar_token_refresh;
+            if (!refresh_token || !client_id) {
+              res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+              res.end('{"error":"polar_token_refresh requires refresh_token, client_id"}'); return;
+            }
+            clientId = client_id;
+            form = new URLSearchParams({ grant_type: 'refresh_token', refresh_token });
+          }
+          const basicAuth = 'Basic ' + Buffer.from(`${clientId}:${secret}`).toString('base64');
+          const tokenReq = https.request('https://polarremote.com/v2/oauth2/token', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+              'Accept': 'application/json;charset=UTF-8',
+              'Authorization': basicAuth,
+            },
+          }, (tokenRes) => {
+            const ct = tokenRes.headers['content-type'] || 'application/json';
+            res.writeHead(tokenRes.statusCode, { 'Content-Type': ct, 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' });
+            tokenRes.pipe(res);
+          });
+          tokenReq.on('error', (e) => {
+            res.writeHead(502, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'Polar token endpoint unreachable: ' + e.message }));
+          });
+          tokenReq.write(form.toString());
+          tokenReq.end();
+          return;
+        }
+
         const { url: targetUrl, headers: fwdHeaders, body: fwdBody, method: upMethod } = payload;
         if (!targetUrl) { res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }); res.end('{"error":"missing url"}'); return; }
         if (!_isAllowedProxyUrl(targetUrl)) {
@@ -506,7 +576,12 @@ const server = http.createServer((req, res) => {
   res.writeHead(404); res.end('Not found');
 });
 
-server.listen(PORT, '127.0.0.1', () => {
+// Only listen when run as a script, not when imported by tests. Compare the
+// fileURL of this module to the fileURL of the entrypoint — equal means
+// `node dev-server.js`, different means `import ... from './dev-server.js'`.
+const _entryUrl = process.argv[1] ? new URL(`file://${path.resolve(process.argv[1])}`).href : '';
+const _isDirectRun = import.meta.url === _entryUrl;
+if (_isDirectRun) server.listen(PORT, '127.0.0.1', () => {
   console.log(`Dev server running at http://127.0.0.1:${PORT}`);
   if (hasSite) {
     console.log(`  /        → landing page (${SITE_DIR})`);

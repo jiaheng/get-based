@@ -121,8 +121,15 @@ export async function refreshTokens({ clientId, refreshToken }) {
     err.status = res.status; throw err;
   }
   if (body?.status !== undefined && body.status !== 0) {
-    const err = new Error(`Withings refresh error ${body.status}: ${body.error || 'unknown'}`);
-    err.status = body.status === 401 ? 401 : 400; throw err;
+    const { withingsErrorMessage } = await import('./wearables-withings.js');
+    const mapped = withingsErrorMessage(body.status);
+    const err = new Error(mapped
+      ? `Withings ${body.status}: ${mapped}`
+      : `Withings refresh error ${body.status}: ${body.error || 'unknown'}`);
+    const authDead = new Set([100, 101, 102, 243, 245, 283, 284]);
+    err.status = authDead.has(Number(body.status)) ? 401 : 400;
+    err.withingsCode = body.status;
+    throw err;
   }
   return normalizeTokenResponse(body.body || body);
 }

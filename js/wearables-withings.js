@@ -28,6 +28,67 @@ const MEAS_TYPES = {
   11: 'rhr',          // bpm (pulse — Withings uses this for resting HR on scale)
 };
 
+// Withings status codes → friendly messages. Source: Withings Developer
+// documentation error-code table (https://developer.withings.com/api-reference/#section/Response-status).
+// We surface the most common ones; unmapped codes fall through to the raw number.
+const WITHINGS_ERROR_MESSAGES = {
+  100: 'Access token invalid or expired — reconnect Withings',
+  101: 'Access token missing from request',
+  102: 'Access token expired — refresh required',
+  200: 'Invalid service — endpoint not recognised',
+  201: 'Invalid parameters — likely an app bug, please report',
+  214: 'Missing required parameter',
+  215: 'Invalid email',
+  216: 'Invalid username or password',
+  217: 'Invalid MAC address',
+  219: 'User not found',
+  220: 'Incorrect hash',
+  221: 'Invalid email or user already exists',
+  223: 'Invalid or expired reset token',
+  225: 'Operation not permitted for this user',
+  227: 'Subscription required for this operation',
+  230: 'Invalid signature — app credentials may be wrong',
+  232: 'This feature is disabled for your account',
+  233: 'Invalid request — action not recognised',
+  234: 'Too many attempts — please wait and try again',
+  235: 'Invalid date',
+  236: 'Password too short',
+  237: 'Invalid model',
+  238: 'Operation not permitted',
+  239: 'Invalid device type',
+  240: 'Device already exists',
+  241: 'Invalid MAC address',
+  242: 'Device not found',
+  243: 'Session has expired — reconnect Withings',
+  244: 'Invalid session',
+  245: 'Invalid code — reconnect Withings',
+  246: 'Too many login attempts — please wait',
+  247: 'Invalid group',
+  248: 'Invalid user agent',
+  250: 'Developer account not associated with this app',
+  251: 'Invalid grant — authorization code may be expired or already used',
+  283: 'Token has already been used — reconnect Withings',
+  284: 'Token not found — reconnect Withings',
+  286: 'Notification is still valid',
+  293: 'Rate limit exceeded — please wait a few minutes',
+  294: 'Invalid scope — missing permission for this data',
+  302: 'Invalid authorization token',
+  303: 'Invalid authorization scope',
+  305: 'Invalid IP',
+  342: 'Signature mismatch',
+  343: 'Too many requests — rate limited',
+  400: 'Bad request',
+  500: 'Withings server error — please try again',
+  503: 'Withings service unavailable — please try again',
+  601: 'Too many requests — rate limited',
+};
+
+export function withingsErrorMessage(code) {
+  const n = Number(code);
+  if (!Number.isFinite(n)) return null;
+  return WITHINGS_ERROR_MESSAGES[n] || null;
+}
+
 async function withingsPOST(action, accessToken, params = {}) {
   // Withings accepts either x-www-form-urlencoded body OR query string. Form
   // body is the documented path; we route through our generic proxy (which
@@ -53,9 +114,17 @@ async function withingsPOST(action, accessToken, params = {}) {
   }
   const payload = await res.json();
   if (payload?.status !== 0) {
-    const e = new Error(`Withings status ${payload?.status}: ${payload?.error || 'unknown'}`);
-    // Withings uses 401 for expired/invalid tokens; mirror in the JS error.
-    e.status = (payload?.status === 401 || payload?.status === 100) ? 401 : 400;
+    const code = payload?.status;
+    const mapped = withingsErrorMessage(code);
+    const msg = mapped
+      ? `Withings ${code}: ${mapped}`
+      : `Withings status ${code}: ${payload?.error || 'unknown'}`;
+    const e = new Error(msg);
+    // Codes 100, 101, 102, 243, 283, 284 all mean "token dead — reconnect"
+    // → surface as 401 so the auth-refresh middleware retries once.
+    const authDead = new Set([100, 101, 102, 243, 245, 283, 284]);
+    e.status = authDead.has(Number(code)) ? 401 : 400;
+    e.withingsCode = code;
     throw e;
   }
   return payload.body || {};

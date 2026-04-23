@@ -110,7 +110,7 @@ export function showDashboard(data) {
   // ── 3b. Focus Card (always render if data exists — shows cached insight even when AI is paused) ──
   html += renderFocusCard();
 
-  // ── 3c. Wearable strip (Oura) — mock-only in this PR, real data pipeline in follow-up ──
+  // ── 3c. Wearable strip (Oura · Withings · Ultrahuman · WHOOP · Fitbit · Apple Health) ──
   html += renderWearableStrip();
 
   // ── 4. Profile Context Cards ──

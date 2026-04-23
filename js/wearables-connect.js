@@ -19,6 +19,8 @@ import { fetchUltrahumanDailyRange, fetchUltrahumanPersonalInfo } from './wearab
 import { beginOAuth as beginUltrahumanOAuth, completeOAuthCallback as completeUltrahumanCallback, isUltrahumanCallback, withFreshToken as ultrahumanWithFreshToken, DEFAULT_ULTRAHUMAN_SCOPES } from './wearables-ultrahuman-auth.js';
 import { fetchWithingsDailyRange, fetchWithingsPersonalInfo } from './wearables-withings.js';
 import { beginOAuth as beginWithingsOAuth, completeOAuthCallback as completeWithingsCallback, isWithingsCallback, withFreshToken as withingsWithFreshToken, DEFAULT_WITHINGS_SCOPES } from './wearables-withings-auth.js';
+import { fetchPolarDailyRange, fetchPolarPersonalInfo, registerPolarUser, commitPolarTransactions } from './wearables-polar.js';
+import { beginOAuth as beginPolarOAuth, completeOAuthCallback as completePolarCallback, isPolarCallback, withFreshToken as polarWithFreshToken, DEFAULT_POLAR_SCOPES } from './wearables-polar-auth.js';
 import { getActiveProfileId } from './profile.js';
 import { isDebugMode, showNotification } from './utils.js';
 
@@ -87,7 +89,7 @@ export function beginConnectOAuth(adapterId) {
 
 // Per-adapter OAuth wiring table. Keeps the orchestrator out of vendor-specific
 // branch logic — new adapters register here once and flow through generically.
-const OAUTH_DISPATCH = {
+export const OAUTH_DISPATCH = {
   oura: {
     begin: (args) => beginOuraOAuth({ ...args, scopes: args.scopes || DEFAULT_OURA_SCOPES }),
     isCallback: isOuraCallback,
@@ -133,6 +135,19 @@ const OAUTH_DISPATCH = {
     fetchRange: fetchFitbitDailyRange,
     displayName: 'Fitbit',
   },
+  polar: {
+    begin: (args) => beginPolarOAuth({ ...args, scopes: args.scopes || DEFAULT_POLAR_SCOPES }),
+    isCallback: isPolarCallback,
+    complete: completePolarCallback,
+    withFreshToken: polarWithFreshToken,
+    fetchAccountInfo: (accessToken, connection) => fetchPolarPersonalInfo(accessToken, connection?.userId),
+    fetchRange: (accessToken, startDate, endDate, connection) => fetchPolarDailyRange(accessToken, startDate, endDate, connection),
+    // Polar-only hooks — invoked by connect/backfill when present; other
+    // adapters don't need them and the orchestrator treats missing as no-op.
+    postConnect: registerPolarUser,
+    commitAfterWrite: commitPolarTransactions,
+    displayName: 'Polar',
+  },
 };
 
 // Called from main.js on page load. Returns true if a callback was handled.
@@ -164,16 +179,33 @@ export async function handleOAuthCallbackOnLoad() {
     return true;
   }
 
-  const info = await disp.fetchAccountInfo(result.tokens.accessToken);
+  // Persist the connection FIRST so fetchAccountInfo (which may need userId)
+  // and any postConnect hook can read the userId the token grant returned.
   saveConnection(adapterId, {
     accessToken: result.tokens.accessToken,
     refreshToken: result.tokens.refreshToken,
     expiresAt: result.tokens.expiresAt,
     scope: result.tokens.scope,
+    userId: result.tokens.userId || null,
     connectedAt: new Date().toISOString(),
-    account: info.ok ? info.account : null,
+    account: null,
     lastSyncAt: 0,
   });
+  const conn0 = getConnection(adapterId);
+  const info = await disp.fetchAccountInfo(result.tokens.accessToken, conn0);
+  saveConnection(adapterId, { ...getConnection(adapterId), account: info.ok ? info.account : null });
+  // Polar-only one-time user registration (409 if already registered — fine).
+  if (typeof disp.postConnect === 'function') {
+    const memberId = `getbased-${activeProfile}-${result.tokens.userId || 'user'}`;
+    try {
+      const reg = await disp.postConnect(result.tokens.accessToken, memberId);
+      if (reg?.ok) {
+        saveConnection(adapterId, { ...getConnection(adapterId), polarRegistered: true });
+      } else if (isDebugMode?.()) {
+        console.warn(`[wearables] ${disp.displayName} postConnect failed:`, reg?.error);
+      }
+    } catch (e) { if (isDebugMode?.()) console.warn(`[wearables] ${disp.displayName} postConnect threw:`, e); }
+  }
   showNotification?.(`${disp.displayName} connected — backfilling 90 days in background…`, 'info', 4000);
   if (window.navigate) window.navigate('dashboard');
   // Snapshot active profile now so the background IIFE writes into the same
@@ -251,6 +283,10 @@ async function fetchRange(adapter, startDate, endDate) {
   if (adapter.id === 'fitbit') {
     return callWithRefresh(adapter, (token) => fetchFitbitDailyRange(token, startDate, endDate));
   }
+  if (adapter.id === 'polar') {
+    // Polar needs the live connection (userId + transaction state).
+    return callWithRefresh(adapter, (token) => fetchPolarDailyRange(token, startDate, endDate, getConnection('polar')));
+  }
   return [];
 }
 
@@ -271,6 +307,7 @@ export async function backfillWearable(adapterId, daysBack = BACKFILL_DAYS) {
   if (isDebugMode?.()) console.log(`[wearables] ${adapterId} backfill ${startDate}..${endDate}: ${rows.length} rows`);
 
   if (rows.length > 0) await upsertDailyBatch(profileId, rows);
+  await commitAfterWriteIfAny(adapterId, rows);
   await setMeta(profileId, `last-sync:${adapterId}`, { at: Date.now(), rows: rows.length, startDate, endDate });
 
   // Re-read the live connection — if it disappeared mid-flight (profile swap,
@@ -281,6 +318,18 @@ export async function backfillWearable(adapterId, daysBack = BACKFILL_DAYS) {
     saveConnection(adapterId, { ...current, lastSyncAt: Date.now(), needsReauth: false });
   }
   return { rows: rows.length, startDate, endDate };
+}
+
+// Adapter-specific post-write hook. Polar uses this to commit open AccessLink
+// transactions once rows safely landed in L1. No-op for every other adapter.
+async function commitAfterWriteIfAny(adapterId, rows) {
+  const disp = OAUTH_DISPATCH[adapterId];
+  const pending = rows?._polarTransactions;
+  if (!disp?.commitAfterWrite || !pending?.length) return;
+  try {
+    const conn = getConnection(adapterId);
+    if (conn?.accessToken) await disp.commitAfterWrite(conn.accessToken, pending);
+  } catch (e) { if (isDebugMode?.()) console.warn(`[wearables] ${adapterId} commit failed:`, e); }
 }
 
 // Incremental sync — pull from the last successful sync day (or 7d back,
@@ -298,6 +347,7 @@ export async function incrementalSyncWearable(adapterId) {
   const adapter = adapterById(adapterId);
   const rows = await fetchRange(adapter, startDate, endDate);
   if (rows.length > 0) await upsertDailyBatch(profileId, rows);
+  await commitAfterWriteIfAny(adapterId, rows);
   await setMeta(profileId, `last-sync:${adapterId}`, { at: Date.now(), rows: rows.length, startDate, endDate });
 
   // Same guard as backfillWearable — never overwrite a full connection with

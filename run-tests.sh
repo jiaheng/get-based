@@ -61,6 +61,7 @@ trap cleanup EXIT
 node "$DIR/tests/test-no-native-dialogs.js" || exit 1
 ensure_server
 node "$DIR/tests/test-lens-local-utils.js" || exit 1
+node "$DIR/tests/test-dev-server-helpers.js" || exit 1
 ensure_server
 # HTTP-reliant test before the Puppeteer suite.
 PORT=$PORT node "$DIR/tests/test-dev-server-origin.js" || exit 1

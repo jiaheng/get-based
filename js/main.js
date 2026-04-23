@@ -83,9 +83,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   const savedImported = await encryptedGetItem(profileStorageKey(state.currentProfile, 'imported'));
   if (savedImported) { try { state.importedData = JSON.parse(savedImported); if (!state.importedData.notes) state.importedData.notes = []; migrateProfileData(state.importedData); } catch(e) {} }
 
-  // Handle Oura OAuth2 callback — must run AFTER profile load so saveConnection
-  // writes to the active profile's state + localStorage. Distinguishable by
-  // presence of a pending state entry in sessionStorage; if handled we skip
+  // Handle wearable OAuth2 callback (Oura / Withings / Ultrahuman / WHOOP / Fitbit) — must run
+  // AFTER profile load so saveConnection writes to the active profile's state + localStorage.
+  // Distinguishable by presence of a pending state entry in sessionStorage; if handled we skip
   // the OpenRouter path below so the same code isn't double-processed.
   const ouraHandled = await handleOAuthCallbackOnLoad();
 

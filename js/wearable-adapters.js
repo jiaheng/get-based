@@ -237,6 +237,41 @@ export const ADAPTERS = [
     },
     accountInfo: { endpoint: 'v2/user', identityField: 'email' },
   },
+
+  {
+    id: 'polar',
+    displayName: 'Polar',
+    authType: 'oauth2',
+    authDocsUrl: 'https://www.polar.com/accesslink-api/',
+    beta: true,
+    oauth: {
+      // Polar AccessLink Client ID (public). The matching client_secret lives
+      // only in POLAR_CLIENT_SECRET (Vercel env + local .env.local). Polar is
+      // a confidential OAuth2 client — no PKCE option offered.
+      clientId: 'd4402bda-aaf6-4b54-be8c-00b789938a1f',
+      redirectUris: [
+        'https://app.getbased.health/',
+        'https://getbased.health/app',
+        'http://localhost:8000/app',
+      ],
+      scopes: ['accesslink.read_all'],
+      pkce: false,
+    },
+    // Polar's AccessLink has two hosts: flow.polar.com for the authorize page,
+    // polarremote.com for the token endpoint, www.polaraccesslink.com for all
+    // reads. apiHost is the read host — our allowlist covers all three.
+    apiHost: 'www.polaraccesslink.com',
+    metrics: {
+      // AccessLink's data model is transactional — you POST to open, GET to
+      // read listed URLs, PUT to commit. Endpoints here are the "list" steps;
+      // wearables-polar.js walks per-item URLs. Fields map post-parse.
+      rhr:         { endpoint: 'v3/users/{uid}/activity-transactions', field: 'heart-rate.average' },
+      steps:       { endpoint: 'v3/users/{uid}/activity-transactions', field: 'active-steps' },
+      sleep_score: { endpoint: 'v3/users/{uid}/sleep',                 field: 'sleep-score' },
+      hrv_rmssd:   { endpoint: 'v3/users/{uid}/exercise-transactions', field: 'heart-rate-variability-avg' }, // workout-gated, may be sparse
+    },
+    accountInfo: { endpoint: 'v3/users/{uid}', identityField: 'polar-user-id' },
+  },
 ];
 
 // ─────────────────────────────────────────────────────────
