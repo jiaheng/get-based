@@ -79,6 +79,11 @@ export function showDashboard(data) {
         </button>
       </div>
     </div>`;
+    // Wearable strip renders even without lab data \u2014 users who connect Oura
+    // etc. before importing any PDFs should still see their HRV / sleep /
+    // RHR trends. renderWearableStrip() returns '' when no wearables are
+    // connected, so it's safe to always call.
+    html += renderWearableStrip();
     const detailsOpen = sessionStorage.getItem('welcome-details-open') === '1';
     html += `<details class="welcome-context-details"${detailsOpen ? ' open' : ''}>
       <summary class="welcome-context-summary" onclick="setTimeout(()=>sessionStorage.setItem('welcome-details-open',document.querySelector('.welcome-context-details')?.open?'1':'0'),0)">Don\u2019t have labs yet? Tell the AI about yourself</summary>`;
