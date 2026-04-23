@@ -5,6 +5,13 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.25.1', date: '2026-04-23', title: 'Wearables strip — empty vendors no longer headline',
+    items: [
+      'Connected vendors that haven\'t returned any rows yet (e.g. Polar after first connect, before a device sync to Polar Flow) no longer appear in the strip header. The header label and coverage count reflect only sources that actually contributed data.',
+      'A new footer line surfaces them instead: "Polar connected — waiting on first device sync." Clear that the connection is healthy without making it look like Polar drove half the displayed numbers.',
+    ]
+  },
+  {
     version: '1.25.0', date: '2026-04-23', title: 'Polar AccessLink (BETA) — 7 wearable vendors supported',
     items: [
       '<b>Polar</b> joins the integrations list. OAuth 2.0 server-side flow (confidential client, no PKCE), self-serve at <a href="https://admin.polaraccesslink.com/" target="_blank" rel="noopener">admin.polaraccesslink.com</a>. Pulls resting heart rate, steps, sleep score, and workout-gated HRV (RMSSD during recorded exercises only).',

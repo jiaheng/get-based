@@ -307,6 +307,24 @@ return (async function() {
   assert('render shows dash marker for zero-baseline delta', /→\s*—/.test(html) || /→—/.test(html));
   delete window._labState.importedData.wearableSummary;
 
+  // ── Zero-coverage source: header drops it, footer surfaces "waiting on first sync" ──
+  const mixedCoverageSummary = {
+    sources: {
+      oura:  { connectedSince: '2026-01-01', lastSyncAt: Date.now(), coverageDays: 15 },
+      polar: { connectedSince: '2026-04-23', lastSyncAt: Date.now(), coverageDays: 0 },
+    },
+    metrics: {
+      hrv_rmssd: { primarySource: 'oura', latest: 39, baseline: 32, baselineP25: 28, baselineP75: 36, rolling: { d7: 39, d30: 33, d90: 32 }, trend30d: 'rising', weekly: [30, 32, 34, 39] },
+    },
+  };
+  window._labState.importedData.wearableSummary = mixedCoverageSummary;
+  const mixedHtml = window.renderWearableStrip();
+  assert('header source label omits zero-coverage vendor', !/wearable-source-label[^>]*>[^<]*Polar/.test(mixedHtml));
+  assert('header source label still shows the data-bearing vendor', /wearable-source-label[^>]*>[^<]*Oura/.test(mixedHtml));
+  assert('coverage label reflects only data-bearing source', /·\s*15d/.test(mixedHtml));
+  assert('footer surfaces waiting hint for zero-coverage vendor', /Polar connected — waiting on first device sync/.test(mixedHtml));
+  delete window._labState.importedData.wearableSummary;
+
   // ═══════════════════════════════════════
   // 9b. Detail modal
   // ═══════════════════════════════════════

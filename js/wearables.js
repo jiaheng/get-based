@@ -18,6 +18,33 @@
 import { escapeHTML, showNotification, showConfirmDialog } from './utils.js';
 import { state } from './state.js';
 import { ADAPTERS, adapterById, canonicalMetric, metricsForSources } from './wearable-adapters.js';
+
+// ─────────────────────────────────────────────────────────
+// Vendor form-factor glyphs (monochrome SVG, currentColor)
+// Phase 1: form-factor icons (ring / wrist / scale / phone), NOT logos.
+// Useful at-a-glance "which kind of device is this?" signal with zero brand
+// licensing exposure. Phase 2 swaps in official "Sign in with X" assets.
+// ─────────────────────────────────────────────────────────
+const VENDOR_FORM_FACTOR = {
+  oura:        'ring',
+  ultrahuman:  'ring',
+  whoop:       'band',
+  fitbit:      'band',
+  polar:       'band',
+  withings:    'scale',
+  apple_health:'phone',
+};
+const FORM_FACTOR_SVG = {
+  ring:  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="3"/></svg>',
+  band:  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="8" width="12" height="8" rx="2"/><path d="M9 8V5h6v3M9 16v3h6v-3"/></svg>',
+  scale: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M12 9v6"/></svg>',
+  phone: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2"/><path d="M9 7l1.5 1.5L9 10l1.5 1.5"/></svg>',
+};
+function vendorIcon(adapterId) {
+  const ff = VENDOR_FORM_FACTOR[adapterId];
+  if (!ff) return '';
+  return `<span class="wearable-vendor-icon" aria-hidden="true">${FORM_FACTOR_SVG[ff] || ''}</span>`;
+}
 import { beginConnectOAuth, backfillWearable, disconnectWearable, syncNow, listConnectedSources, getConnection } from './wearables-connect.js';
 import { syncWearableSummary } from './wearables-summary.js';
 import { getActiveProfileId } from './profile.js';
@@ -249,14 +276,24 @@ export function renderWearableStrip() {
   if (!summary.metrics || Object.keys(summary.metrics).length === 0) return '';
 
   const collapsed = localStorage.getItem('wearables-strip-collapsed') === '1';
-  const metricOrder = metricsForSources(sourceIds);
-  const showSourceBadges = sourceIds.length > 1;
+  // Connected vendors that haven't returned any rows yet (e.g. Polar account
+  // with no recent device sync) shouldn't headline the strip — they make
+  // "Wearables: Oura + Polar · 15d" read like Polar contributed half the data.
+  // Surface them in the footer instead.
+  const sourcesWithData = sourceIds.filter(s => (summary.sources[s].coverageDays || 0) > 0);
+  const sourcesWaiting  = sourceIds.filter(s => (summary.sources[s].coverageDays || 0) === 0);
+  const headerSourceIds = sourcesWithData.length ? sourcesWithData : sourceIds;
+  const metricOrder = metricsForSources(headerSourceIds);
+  const showSourceBadges = headerSourceIds.length > 1;
 
   // Header meta: most recent sync across connected sources + a short coverage label.
   const lastSyncAt = Math.max(0, ...sourceIds.map(s => summary.sources[s].lastSyncAt || 0));
-  const coverageDays = Math.max(0, ...sourceIds.map(s => summary.sources[s].coverageDays || 0));
-  const sourceLabel = sourceIds.map(id => adapterById(id)?.displayName || id).join(' + ');
+  const coverageDays = Math.max(0, ...headerSourceIds.map(s => summary.sources[s].coverageDays || 0));
+  const sourceLabel = headerSourceIds.map(id => adapterById(id)?.displayName || id).join(' + ');
   const coverageLabel = coverageDays > 0 ? ` · ${coverageDays}d` : '';
+  const waitingLabel = sourcesWaiting
+    .map(id => adapterById(id)?.displayName || id)
+    .join(', ');
 
   const isMock = localStorage.getItem('wearables-mock-off') !== '1' &&
     /* mock flag: summary === MOCK_SUMMARY — avoid import cycle by comparing a sentinel */
@@ -266,8 +303,11 @@ export function renderWearableStrip() {
   // actually the primary source driving the HRV card. Otherwise it looks like
   // a generic disclaimer that doesn't apply to the user's current wearable.
   const hrvPrimary = summary.metrics?.hrv_rmssd?.primarySource;
-  const footerNote = hrvPrimary === 'oura'
+  const hrvNote = hrvPrimary === 'oura'
     ? 'Deep HRV (SDNN · pNN50 · HF/LF) needs an ECG chest strap — Oura provides RMSSD only.'
+    : '';
+  const waitingNote = waitingLabel
+    ? `${waitingLabel} connected — waiting on first device sync.`
     : '';
 
   let html = `<section class="wearable-strip" id="wearable-strip">
@@ -278,8 +318,11 @@ export function renderWearableStrip() {
         ${isMock ? '<span class="wearable-strip-demo-pill">demo data</span>' : ''}
       </div>
       <div class="wearable-strip-meta">
-        <span>last synced ${formatAgo(lastSyncAt)}</span>
-        <button type="button" class="wearable-strip-sync" onclick="event.stopPropagation();syncWearableNow();return false">Sync now</button>
+        <span class="wearable-strip-lastsync">last synced ${formatAgo(lastSyncAt)}</span>
+        <button type="button" class="wearable-strip-sync" aria-label="Sync wearables now" onclick="event.stopPropagation();syncWearableNow(this);return false">
+          <svg class="wearable-strip-sync-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 4 21 12 13 12"/></svg>
+          <span>Sync</span>
+        </button>
         <span class="wearable-collapse-arrow${collapsed ? ' collapsed' : ''}" aria-hidden="true">▾</span>
       </div>
     </div>
@@ -294,10 +337,11 @@ export function renderWearableStrip() {
   }
 
   html += `</div>`;
-  if (footerNote) {
-    html += `<div class="wearable-strip-footer${collapsed ? ' hidden' : ''}">
-      <span class="wearable-strip-footer-note">${escapeHTML(footerNote)}</span>
-    </div>`;
+  if (waitingNote || hrvNote) {
+    html += `<div class="wearable-strip-footer${collapsed ? ' hidden' : ''}">`;
+    if (waitingNote) html += `<span class="wearable-strip-footer-note">${escapeHTML(waitingNote)}</span>`;
+    if (hrvNote)     html += `<span class="wearable-strip-footer-note">${escapeHTML(hrvNote)}</span>`;
+    html += `</div>`;
   }
   html += `</section>`;
   return html;
@@ -595,18 +639,27 @@ async function chooseWearableSource(metricId, event) {
   }, 0);
 }
 
-async function syncWearableNow() {
+async function syncWearableNow(triggerEl) {
   const sources = Object.keys(listConnectedSources());
   if (sources.length === 0) {
     showNotification?.('Connect a wearable in Settings → Data first', 'info');
     return;
   }
+  // Spin the inline button icon for the duration of the sync. The button
+  // disables itself so a double-click can't kick off concurrent syncs.
+  const btn = triggerEl || document.querySelector('.wearable-strip-sync');
+  btn?.classList.add('is-syncing');
+  if (btn) btn.disabled = true;
   try {
     showNotification?.('Syncing wearables…', 'info', 1500);
     for (const sid of sources) await syncNow(sid);
     if (window.navigate) window.navigate('dashboard');
     showNotification?.('Wearables synced', 'success', 2000);
   } catch { /* per-source error already surfaced */ }
+  finally {
+    btn?.classList.remove('is-syncing');
+    if (btn) btn.disabled = false;
+  }
 }
 
 // ─────────────────────────────────────────────────────────
@@ -636,9 +689,13 @@ function renderAdapterCard(adapter, isConnected) {
 
   const authBlock = renderAuthBlock(adapter, conn);
 
-  return `<div class="wearable-adapter-card" data-adapter="${escapeHTML(adapter.id)}">
+  return `<div class="wearable-adapter-card${isConnected ? ' is-connected' : ''}" data-adapter="${escapeHTML(adapter.id)}">
     <div class="wearable-adapter-header">
-      <div class="wearable-adapter-name">${escapeHTML(adapter.displayName)} ${betaBadge}</div>
+      <div class="wearable-adapter-name">
+        ${vendorIcon(adapter.id)}
+        <span>${escapeHTML(adapter.displayName)}</span>
+        ${betaBadge}
+      </div>
       ${statusChip}
     </div>
     ${authBlock}
