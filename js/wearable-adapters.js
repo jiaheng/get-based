@@ -71,6 +71,8 @@ export const ADAPTERS = [
       redirectUris: [
         'https://app.getbased.health/',
         'https://getbased.health/app',
+        'https://beta.getbased.health/',
+        'https://beta.getbased.health/app',
         'http://localhost:8000/app',
       ],
       scopes: ['personal', 'daily', 'heartrate', 'session', 'spo2', 'stress', 'heart_health'],
@@ -110,6 +112,8 @@ export const ADAPTERS = [
       redirectUris: [
         'https://app.getbased.health/',
         'https://getbased.health/app',
+        'https://beta.getbased.health/',
+        'https://beta.getbased.health/app',
         'http://localhost:8000/app',
       ],
       scopes: ['profile', 'ring_data', 'cgm_data'],
@@ -145,6 +149,8 @@ export const ADAPTERS = [
       redirectUris: [
         'https://app.getbased.health/',
         'https://getbased.health/app',
+        'https://beta.getbased.health/',
+        'https://beta.getbased.health/app',
         'http://localhost:8000/app',
       ],
       scopes: ['read:recovery', 'read:sleep', 'read:workout', 'read:cycles', 'read:profile', 'offline'],
@@ -176,6 +182,8 @@ export const ADAPTERS = [
       redirectUris: [
         'https://app.getbased.health/',
         'https://getbased.health/app',
+        'https://beta.getbased.health/',
+        'https://beta.getbased.health/app',
         'http://localhost:8000/app',
       ],
       scopes: ['profile', 'activity', 'heartrate', 'sleep', 'oxygen_saturation', 'respiratory_rate', 'temperature', 'weight'],
@@ -208,6 +216,8 @@ export const ADAPTERS = [
       redirectUris: [
         'https://app.getbased.health/',
         'https://getbased.health/app',
+        'https://beta.getbased.health/',
+        'https://beta.getbased.health/app',
         'http://localhost:8000/app',
       ],
       scopes: ['user.info', 'user.metrics', 'user.activity', 'user.sleepevents'],
@@ -238,6 +248,8 @@ export const ADAPTERS = [
       redirectUris: [
         'https://app.getbased.health/',
         'https://getbased.health/app',
+        'https://beta.getbased.health/',
+        'https://beta.getbased.health/app',
         'http://localhost:8000/app',
       ],
       scopes: ['accesslink.read_all'],
