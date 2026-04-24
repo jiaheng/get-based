@@ -223,10 +223,30 @@ export function shouldWriteL2(newSummary, oldSummary) {
 
   // Per-metric thresholds
   let trippedReason = null;
+
+  // 0a. Metric removed entirely (was in old, gone in new) — fires when the
+  // last value for a metric is deleted, so the card disappears from the
+  // strip. Without this guard the gate ignores removals and the stale
+  // summary persists forever.
+  for (const metricId of Object.keys(oldSummary.metrics || {})) {
+    if (!newSummary.metrics?.[metricId]) {
+      trippedReason = trippedReason || `metric-removed:${metricId}`;
+      break;
+    }
+  }
+
   for (const metricId of Object.keys(newSummary.metrics || {})) {
     const neu = newSummary.metrics[metricId];
     const old = oldSummary.metrics?.[metricId];
     if (!old) { trippedReason = trippedReason || `new-metric:${metricId}`; continue; }
+
+    // 0b. Primary source flipped (e.g. deleted all manual rhr → Oura takes
+    // over). The d7 number may not cross the shift threshold but the source
+    // label on the card definitely changes, and the user expects their
+    // deletion to show up immediately.
+    if (old.primarySource !== neu.primarySource) {
+      trippedReason = trippedReason || `source-flip:${metricId}`;
+    }
 
     // 1. d7 rolling-mean delta
     const oldD7 = old.rolling?.d7, newD7 = neu.rolling?.d7;
