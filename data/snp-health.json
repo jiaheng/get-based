@@ -280,8 +280,8 @@
     "references": ["https://pubmed.ncbi.nlm.nih.gov/20579540/"],
     "genotypes": {
       "GG": { "effect": "none", "note": "Normal PCSK9 function" },
-      "GT": { "effect": "significant", "note": "PCSK9 loss-of-function; ~15% lower LDL, ~25% lower Lp(a); protective" },
-      "TT": { "effect": "significant", "note": "Very rare; very low LDL; strong protective effect" }
+      "GT": { "effect": "significant", "valence": "protective", "note": "PCSK9 loss-of-function; ~15% lower LDL, ~25% lower Lp(a); protective" },
+      "TT": { "effect": "significant", "valence": "protective", "note": "Very rare; very low LDL; strong protective effect" }
     }
   },
   "rs708272": {
@@ -293,7 +293,7 @@
     "genotypes": {
       "GG": { "effect": "moderate", "note": "Highest CETP activity; lowest HDL (B2B2)" },
       "GA": { "effect": "moderate", "note": "Intermediate HDL (B1B2)" },
-      "AA": { "effect": "moderate", "note": "Lowest CETP activity; highest HDL; ~24% lower MI risk per A allele (B1B1)" }
+      "AA": { "effect": "moderate", "valence": "protective", "note": "Lowest CETP activity; highest HDL; ~24% lower MI risk per A allele (B1B1)" }
     }
   },
   "rs1800588": {
@@ -303,8 +303,8 @@
     "references": ["https://pubmed.ncbi.nlm.nih.gov/9486964/"],
     "genotypes": {
       "CC": { "effect": "none", "note": "Normal hepatic lipase activity" },
-      "CT": { "effect": "moderate", "note": "Mildly higher HDL; slightly larger LDL particles" },
-      "TT": { "effect": "moderate", "note": "Highest HDL; larger, more buoyant LDL particles" }
+      "CT": { "effect": "moderate", "valence": "protective", "note": "Mildly higher HDL; slightly larger LDL particles" },
+      "TT": { "effect": "moderate", "valence": "protective", "note": "Highest HDL; larger, more buoyant LDL particles" }
     }
   },
 
@@ -397,8 +397,8 @@
     "references": ["https://pubmed.ncbi.nlm.nih.gov/18776911/"],
     "genotypes": {
       "GG": { "effect": "none", "note": "Secretor (wild-type); normal gut microbiome composition and intrinsic-factor B12 uptake" },
-      "GA": { "effect": "mild", "note": "Heterozygous secretor; intermediate B12 levels, typically clinically unremarkable" },
-      "AA": { "effect": "moderate", "note": "Non-secretor; higher total B12 (lab artifact from haptocorrin); does not indicate better B12 status — check functional markers (homocysteine, MMA) rather than trusting serum B12" }
+      "GA": { "effect": "mild", "valence": "neutral", "note": "Heterozygous secretor; intermediate B12 levels, typically clinically unremarkable" },
+      "AA": { "effect": "moderate", "valence": "neutral", "note": "Non-secretor; higher total B12 (lab artifact from haptocorrin); does not indicate better B12 status — check functional markers (homocysteine, MMA) rather than trusting serum B12" }
     },
     "snpHints": {
       "GA": {
@@ -694,8 +694,8 @@
     "references": ["https://pubmed.ncbi.nlm.nih.gov/10973253/"],
     "genotypes": {
       "CC": { "effect": "none", "note": "Standard PPAR\u03B32; highest insulin resistance risk" },
-      "CG": { "effect": "moderate", "note": "Improved insulin sensitivity; reduced T2D risk (protective)" },
-      "GG": { "effect": "moderate", "note": "Best insulin sensitivity; lowest T2D risk (protective)" }
+      "CG": { "effect": "moderate", "valence": "protective", "note": "Improved insulin sensitivity; reduced T2D risk (protective)" },
+      "GG": { "effect": "moderate", "valence": "protective", "note": "Best insulin sensitivity; lowest T2D risk (protective)" }
     }
   },
   "rs2241766": {
@@ -918,8 +918,8 @@
     "references": ["https://pubmed.ncbi.nlm.nih.gov/14563833/", "https://pubmed.ncbi.nlm.nih.gov/29420005/"],
     "genotypes": {
       "AA": { "effect": "none", "note": "Standard CETP activity; baseline HDL" },
-      "AG": { "effect": "mild", "note": "Slightly higher HDL; modestly improved cognitive aging in some cohorts" },
-      "GG": { "effect": "moderate", "note": "Lowest CETP activity; highest HDL; in the Ashkenazi centenarian study associated with larger HDL/LDL particles, lower cardiovascular and dementia incidence, exceptional longevity. Replication in non-Ashkenazi cohorts is mixed — effect smaller but directionally consistent." }
+      "AG": { "effect": "mild", "valence": "protective", "note": "Slightly higher HDL; modestly improved cognitive aging in some cohorts" },
+      "GG": { "effect": "moderate", "valence": "protective", "note": "Lowest CETP activity; highest HDL; in the Ashkenazi centenarian study associated with larger HDL/LDL particles, lower cardiovascular and dementia incidence, exceptional longevity. Replication in non-Ashkenazi cohorts is mixed — effect smaller but directionally consistent." }
     }
   }
 }

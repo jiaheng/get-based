@@ -5,6 +5,15 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.22.1', date: '2026-04-24', title: 'Genetics dashboard tells you what is good news',
+    items: [
+      'New <b>orange dot</b> for mild-effect genotypes — previously these silently had no indicator. MTR, MTHFR A1298C heterozygous, ADIPOQ heterozygous, and others now visibly appear on the dashboard.',
+      '<b>Beneficial variants</b> (PCSK9 R46L, CETP I405V, CETP TaqIB B1B1, LIPC -514T, PPARG Pro12Ala) now show a <b>green dot</b> instead of being indistinguishable from risk variants. You can finally tell at a glance whether a "moderate" finding is something to celebrate or watch.',
+      'FUT2 W154X non-secretor and heterozygous variants now show a <b>white dot</b> — neither risky nor protective, just a lab-interpretation flag (high serum B12 doesn\'t mean better B12 status).',
+      'New <b>legend</b> at the top of the genetics findings explaining the dot scheme.',
+    ]
+  },
+  {
     version: '1.22.0', date: '2026-04-24', title: '5 new SNPs across alcohol, caffeine, body composition',
     items: [
       'Added <b>ALDH2 Glu504Lys (rs671)</b> — alcohol flush + esophageal-cancer risk. Up to 45% allele frequency in East Asian populations; near-absolute alcohol intolerance for AA carriers.',

@@ -421,7 +421,7 @@ export function renderGeneticsSection() {
     if (!info || info.effect === 'none') continue;
     const cat = entry.category || 'other';
     if (!byCat[cat]) byCat[cat] = [];
-    byCat[cat].push({ rsid, gene: stored.gene, variant: stored.variant, genotype: stored.genotype, effect: info.effect, note: info.note, references: entry.references || [] });
+    byCat[cat].push({ rsid, gene: stored.gene, variant: stored.variant, genotype: stored.genotype, effect: info.effect, valence: info.valence || 'risk', note: info.note, references: entry.references || [] });
   }
 
   // Sort categories: those with significant findings first
@@ -432,7 +432,18 @@ export function renderGeneticsSection() {
   });
   const totalFindings = catOrder.reduce((n, [, fs]) => n + fs.length, 0);
 
-  const effectIcon = { significant: '\uD83D\uDD34', moderate: '\uD83D\uDFE1' };
+  // Two-axis dot: severity x valence. Protective = green regardless of magnitude;
+  // neutral = white circle (lab-artifact / informational, neither bad nor good).
+  // Risk severity scales by warmth (significant -> red, moderate -> yellow, mild -> orange).
+  const dotFor = (effect, valence) => {
+    if (effect === 'none') return '';
+    if (valence === 'protective') return '\uD83D\uDFE2';
+    if (valence === 'neutral') return '\u26AA';
+    if (effect === 'significant') return '\uD83D\uDD34';
+    if (effect === 'moderate') return '\uD83D\uDFE1';
+    if (effect === 'mild') return '\uD83D\uDFE0';
+    return '';
+  };
   const catLabels = { methylation: 'Methylation', iron: 'Iron', lipids: 'Lipids', vitaminD: 'Vitamin D', vitaminB12: 'Vitamin B12', bilirubin: 'Bilirubin', thyroid: 'Thyroid', fattyAcids: 'Fatty Acids', bloodSugar: 'Blood Sugar', sexHormones: 'Sex Hormones', alcohol: 'Alcohol', caffeine: 'Caffeine', bodyComposition: 'Body Composition' };
 
   const metaParts = [];
@@ -480,6 +491,14 @@ export function renderGeneticsSection() {
     let shown = 0;
     const INITIAL_LIMIT = 8;
     html += `<div class="genetics-findings">`;
+    // Legend — explain the dot scheme so users can read severity AND valence at a glance.
+    html += `<div class="genetics-legend" title="What the dots mean">
+      <span><span class="genetics-legend-dot">🔴</span> significant risk</span>
+      <span><span class="genetics-legend-dot">🟡</span> moderate risk</span>
+      <span><span class="genetics-legend-dot">🟠</span> mild risk</span>
+      <span><span class="genetics-legend-dot">🟢</span> beneficial</span>
+      <span><span class="genetics-legend-dot">⚪</span> informational</span>
+    </div>`;
     for (const [cat, findings] of catOrder) {
       // Sort significant first within category
       findings.sort((a, b) => (a.effect === 'significant' ? 0 : 1) - (b.effect === 'significant' ? 0 : 1));
@@ -492,7 +511,7 @@ export function renderGeneticsSection() {
         const refLink = f.references.length > 0 && /^https?:/.test(f.references[0]) ? ` <a href="${f.references[0].replace(/"/g, '&quot;')}" target="_blank" rel="noopener" class="detail-genetics-ref" title="Primary study (PubMed)">primary study</a>` : '';
         const snpediaLink = ` <a href="https://www.snpedia.com/index.php/${f.rsid.charAt(0).toUpperCase() + f.rsid.slice(1)}" target="_blank" rel="noopener" class="detail-genetics-ref" title="All studies (SNPedia)">more studies</a>`;
         html += `<div class="genetics-finding-row${isExtra && !startHidden ? ' genetics-extra' : ''}">
-          <span>${effectIcon[f.effect] || ''}</span>
+          <span>${dotFor(f.effect, f.valence)}</span>
           <span class="genetics-finding-gene">${escapeHTML(f.gene)} ${escapeHTML(f.variant)}</span>
           <span class="genetics-finding-genotype">${escapeHTML(f.genotype)}</span>
           <span class="genetics-finding-note">${escapeHTML(f.note)}${refLink}${snpediaLink}</span>
