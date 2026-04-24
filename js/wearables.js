@@ -299,8 +299,39 @@ export function renderWearableStrip() {
   const sourcesWithData = sourceIds.filter(s => (summary.sources[s].coverageDays || 0) > 0);
   const sourcesWaiting  = sourceIds.filter(s => (summary.sources[s].coverageDays || 0) === 0);
   const headerSourceIds = sourcesWithData.length ? sourcesWithData : sourceIds;
-  const metricOrder = metricsForSources(headerSourceIds);
+  const baseMetricOrder = metricsForSources(headerSourceIds);
   const showSourceBadges = headerSourceIds.length > 1;
+
+  // Merge populated + empty manual cards into one ordered list so the user
+  // can reorder across all of them, not just per-category. Empty cards for
+  // weight/bp_systolic/rhr fill in wherever they're not already present.
+  const MANUAL_EMPTY_METRICS = ['weight', 'bp_systolic', 'rhr'];
+  const displayOrder = [];
+  const seenDisplay = new Set();
+  for (const id of baseMetricOrder) {
+    if (summary.metrics?.[id]) { displayOrder.push({ id, empty: false }); seenDisplay.add(id); }
+  }
+  for (const id of MANUAL_EMPTY_METRICS) {
+    if (!seenDisplay.has(id) && canonicalMetric(id)) {
+      displayOrder.push({ id, empty: true }); seenDisplay.add(id);
+    }
+  }
+  // Apply the user's saved card order: items present in the saved order
+  // render first (in that order), anything new appends at the end. New
+  // metrics added in a future version auto-surface without a migration.
+  const savedOrder = Array.isArray(state.importedData?.wearableCardOrder)
+    ? state.importedData.wearableCardOrder : null;
+  const finalOrder = savedOrder && savedOrder.length
+    ? (() => {
+        const byId = new Map(displayOrder.map(d => [d.id, d]));
+        const out = [];
+        for (const id of savedOrder) { if (byId.has(id)) { out.push(byId.get(id)); byId.delete(id); } }
+        for (const d of displayOrder) if (byId.has(d.id)) out.push(d);
+        return out;
+      })()
+    : displayOrder;
+
+  const reorderMode = !!state._wearableReorderMode;
 
   // Header meta: most recent sync across connected sources + a short coverage label.
   const lastSyncAt = Math.max(0, ...sourceIds.map(s => summary.sources[s].lastSyncAt || 0));
@@ -339,37 +370,46 @@ export function renderWearableStrip() {
           <svg class="wearable-strip-sync-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 4 21 12 13 12"/></svg>
           <span>Sync</span>
         </button>
+        <button type="button" class="wearable-strip-reorder${reorderMode ? ' active' : ''}" aria-label="${reorderMode ? 'Done reordering' : 'Reorder cards'}" onclick="event.stopPropagation();toggleWearableReorder()">
+          ${reorderMode ? 'Done' : '⇄'}
+        </button>
         <span class="wearable-collapse-arrow${collapsed ? ' collapsed' : ''}" aria-hidden="true">▾</span>
       </div>
     </div>
     <div class="wearable-card-grid${collapsed ? ' hidden' : ''}">`;
 
-  for (const metricId of metricOrder) {
-    const metric = summary.metrics[metricId];
-    if (!metric) continue;
+  // Unified render loop — both populated and empty cards flow in the
+  // user-defined order (finalOrder). In reorder mode each card gains ◀ ▶
+  // arrow handles and detail-modal clicks are suppressed.
+  for (let i = 0; i < finalOrder.length; i++) {
+    const { id: metricId, empty } = finalOrder[i];
     const canon = canonicalMetric(metricId);
     if (!canon) continue;
-    // Show the "via {vendor}" badge only when ≥2 connected vendors actually
-    // expose THIS metric (not just when ≥2 vendors are connected). Avoids
-    // fake-interactive badges on uniquely-sourced metrics like Withings
-    // weight or WHOOP strain.
-    const providersForMetric = headerSourceIds.filter(sid =>
-      adapterById(sid)?.metrics?.[metricId]
-    );
-    const showBadgeForThisMetric = providersForMetric.length > 1;
-    html += renderCard(metricId, canon, metric, showBadgeForThisMetric);
-  }
-
-  // Empty-state cards for manual-capable metrics with no data yet — so the
-  // user sees a "+ log weight" affordance even when no wearable provides it.
-  // bp_diastolic is folded into the bp_systolic empty card (one BP prompt,
-  // two fields) rather than rendering as a second empty card.
-  const MANUAL_EMPTY_METRICS = ['weight', 'bp_systolic', 'rhr'];
-  for (const metricId of MANUAL_EMPTY_METRICS) {
-    if (summary.metrics?.[metricId]) continue; // already rendered with data
-    const canon = canonicalMetric(metricId);
-    if (!canon) continue;
-    html += renderEmptyManualCard(metricId, canon);
+    let cardHtml;
+    if (empty) {
+      cardHtml = renderEmptyManualCard(metricId, canon);
+    } else {
+      const metric = summary.metrics[metricId];
+      if (!metric) continue;
+      const providersForMetric = headerSourceIds.filter(sid =>
+        adapterById(sid)?.metrics?.[metricId]
+      );
+      const showBadgeForThisMetric = providersForMetric.length > 1;
+      cardHtml = renderCard(metricId, canon, metric, showBadgeForThisMetric);
+    }
+    if (reorderMode) {
+      // Wrap the card, disable its intrinsic click/drilldown, stamp arrows.
+      const canLeft = i > 0;
+      const canRight = i < finalOrder.length - 1;
+      cardHtml = `<div class="wearable-card-reorder-wrap" data-reorder-metric="${escapeHTML(metricId)}">
+        ${cardHtml.replace(/ onclick="[^"]*"/, '').replace(/ onkeydown="[^"]*"/, '').replace(/ tabindex="0"/, '')}
+        <div class="wearable-reorder-arrows">
+          <button type="button" class="wearable-reorder-arrow" aria-label="Move ${escapeHTML(canon.label)} left" ${canLeft ? '' : 'disabled'} onclick="event.stopPropagation();moveWearableCard('${escapeHTML(metricId)}',-1)">◀</button>
+          <button type="button" class="wearable-reorder-arrow" aria-label="Move ${escapeHTML(canon.label)} right" ${canRight ? '' : 'disabled'} onclick="event.stopPropagation();moveWearableCard('${escapeHTML(metricId)}',1)">▶</button>
+        </div>
+      </div>`;
+    }
+    html += cardHtml;
   }
 
   html += `</div>`;
@@ -976,6 +1016,55 @@ function renderRowDetail(adapter, conn, { isPendingClient, isFileImport }) {
 // Brand asset registry + render helpers stay intact in js/brand-assets.js for
 // landing-site reuse.
 
+// Reorder mode — toggle + per-card move handlers. Keeps the reorder flag
+// ephemeral (state._wearableReorderMode) so it auto-resets on reload; the
+// card ORDER itself is persisted per-profile in importedData.wearableCardOrder.
+function toggleWearableReorder() {
+  state._wearableReorderMode = !state._wearableReorderMode;
+  if (window.navigate) window.navigate('dashboard');
+}
+
+async function moveWearableCard(metricId, delta) {
+  const summary = state.importedData?.wearableSummary;
+  if (!summary) return;
+  // Rebuild the CURRENT display order the same way renderWearableStrip does,
+  // so a move reflects exactly what the user sees (populated + empty cards
+  // combined, then the saved order applied).
+  const sourceIds = Object.keys(summary.sources || {})
+    .sort((a, b) => {
+      const ai = ADAPTERS.findIndex(x => x.id === a);
+      const bi = ADAPTERS.findIndex(x => x.id === b);
+      return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+    });
+  const headerSourceIds = sourceIds.filter(s => (summary.sources[s].coverageDays || 0) > 0);
+  const baseOrder = metricsForSources(headerSourceIds.length ? headerSourceIds : sourceIds);
+  const MANUAL_EMPTY_METRICS_LOCAL = ['weight', 'bp_systolic', 'rhr'];
+  const display = [];
+  const seen = new Set();
+  for (const id of baseOrder) {
+    if (summary.metrics?.[id]) { display.push(id); seen.add(id); }
+  }
+  for (const id of MANUAL_EMPTY_METRICS_LOCAL) {
+    if (!seen.has(id)) { display.push(id); seen.add(id); }
+  }
+  const savedOrder = Array.isArray(state.importedData?.wearableCardOrder)
+    ? state.importedData.wearableCardOrder : [];
+  const ordered = [];
+  for (const id of savedOrder) if (display.includes(id)) ordered.push(id);
+  for (const id of display) if (!ordered.includes(id)) ordered.push(id);
+  const idx = ordered.indexOf(metricId);
+  if (idx === -1) return;
+  const target = idx + delta;
+  if (target < 0 || target >= ordered.length) return;
+  const tmp = ordered[idx];
+  ordered[idx] = ordered[target];
+  ordered[target] = tmp;
+  state.importedData.wearableCardOrder = ordered;
+  const { saveImportedData } = await import('./data.js');
+  await saveImportedData();
+  if (window.navigate) window.navigate('dashboard');
+}
+
 // Detail-modal "+ Add reading" — opens an inline form inside the manual-add
 // slot. Unlike the dashboard empty-card form, the date picker here isn't
 // locked to today — users can backfill a past reading they forgot to log.
@@ -1399,6 +1488,8 @@ Object.assign(window, {
   closeManualAddFromDetail,
   saveManualEntryFromDetail,
   deleteManualEntryFromDetail,
+  toggleWearableReorder,
+  moveWearableCard,
   hasWearableSummary,
   renderWearablesSettingsSection,
   handleWearableConnect,

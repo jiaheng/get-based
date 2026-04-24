@@ -4085,6 +4085,47 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
 .wearable-manual-add-form .wearable-log-date { max-width: 140px; }
 .wearable-manual-add-form-bp .wearable-log-bp-row { gap: 2px; }
 
+/* Reorder mode — tiny ⇄ button in the strip header toggles it; cards gain
+   ◀ ▶ arrows overlaid on their top-right. Works on mouse + touch without
+   drag-and-drop, so no vendored sortable library needed. */
+.wearable-strip-reorder {
+  padding: 3px 9px; font-size: 11px; font-weight: 600;
+  background: transparent; border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text-muted); cursor: pointer;
+  display: inline-flex; align-items: center; gap: 4px;
+  transition: all 0.12s ease;
+}
+.wearable-strip-reorder:hover { color: var(--text-primary); border-color: var(--text-muted); }
+.wearable-strip-reorder.active {
+  background: var(--accent); color: #fff; border-color: var(--accent);
+}
+.wearable-card-reorder-wrap {
+  position: relative; display: flex; flex-direction: column;
+  min-width: 0;
+}
+.wearable-card-reorder-wrap > .wearable-card {
+  cursor: default;
+  pointer-events: none; /* suppress clicks/badges on underlying card while reordering */
+  opacity: 0.92;
+}
+.wearable-card-reorder-wrap > .wearable-card:hover {
+  border-color: var(--border); transform: none; /* cancel hover-lift */
+}
+.wearable-reorder-arrows {
+  position: absolute; top: 6px; right: 6px;
+  display: flex; gap: 2px; z-index: 2;
+}
+.wearable-reorder-arrow {
+  padding: 2px 6px; font-size: 11px; line-height: 1;
+  background: var(--bg-secondary); color: var(--text-primary);
+  border: 1px solid var(--border); border-radius: 4px;
+  cursor: pointer;
+}
+.wearable-reorder-arrow:hover:not(:disabled) {
+  background: var(--accent); color: #fff; border-color: var(--accent);
+}
+.wearable-reorder-arrow:disabled { opacity: 0.35; cursor: not-allowed; }
+
 .wearable-card-top {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
 }
