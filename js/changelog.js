@@ -5,6 +5,17 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.22.0', date: '2026-04-24', title: '5 new SNPs across alcohol, caffeine, body composition',
+    items: [
+      'Added <b>ALDH2 Glu504Lys (rs671)</b> — alcohol flush + esophageal-cancer risk. Up to 45% allele frequency in East Asian populations; near-absolute alcohol intolerance for AA carriers.',
+      'Added <b>CYP1A2 *1F (rs762551)</b> — fast vs slow caffeine metabolism. Slow metabolizers (CC) face higher non-fatal MI risk with >2 cups/day in under-50 adults.',
+      'Added <b>MTNR1B (rs10830963)</b> — melatonin-insulin axis. Risk allele couples late-night eating to elevated fasting glucose; finishing dinner ≥3 hours before bed is one of the highest-leverage HbA1c interventions for carriers.',
+      'Added <b>FTO (rs9939609)</b> — most-replicated obesity SNP. Regular exercise cancels ~30% of the genetic effect (Kilpeläinen meta, n=218k).',
+      'Added <b>CETP I405V (rs5882)</b> — complements existing CETP TaqIB. GG genotype is the variant from the Ashkenazi centenarian study linked to exceptional longevity and lower dementia risk.',
+      'Three new categories surface in the genetics dashboard: <i>Alcohol</i>, <i>Caffeine</i>, <i>Body Composition</i>. Total curated set: <b>42 → 47 SNPs</b>.',
+    ]
+  },
+  {
     version: '1.21.11', date: '2026-04-24', title: 'DNA interpretation recalibrated',
     items: [
       'Re-read the 2020s literature on every variant in the DNA table and quietly corrected five entries where the effect label was inflated versus what modern meta-analyses actually show. MTHFR A1298C (solo), MTR A2756G (heterozygous), VDR FokI, and ADIPOQ +45 all drop from <i>moderate</i> to <i>mild</i>; compound-het and homozygous cases still read as meaningful where they are.',

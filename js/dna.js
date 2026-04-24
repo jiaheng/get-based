@@ -433,7 +433,7 @@ export function renderGeneticsSection() {
   const totalFindings = catOrder.reduce((n, [, fs]) => n + fs.length, 0);
 
   const effectIcon = { significant: '\uD83D\uDD34', moderate: '\uD83D\uDFE1' };
-  const catLabels = { methylation: 'Methylation', iron: 'Iron', lipids: 'Lipids', vitaminD: 'Vitamin D', vitaminB12: 'Vitamin B12', bilirubin: 'Bilirubin', thyroid: 'Thyroid', fattyAcids: 'Fatty Acids', bloodSugar: 'Blood Sugar', sexHormones: 'Sex Hormones' };
+  const catLabels = { methylation: 'Methylation', iron: 'Iron', lipids: 'Lipids', vitaminD: 'Vitamin D', vitaminB12: 'Vitamin B12', bilirubin: 'Bilirubin', thyroid: 'Thyroid', fattyAcids: 'Fatty Acids', bloodSugar: 'Blood Sugar', sexHormones: 'Sex Hormones', alcohol: 'Alcohol', caffeine: 'Caffeine', bodyComposition: 'Body Composition' };
 
   const metaParts = [];
   if (genetics.source) metaParts.push(escapeHTML(genetics.source));

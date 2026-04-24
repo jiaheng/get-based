@@ -819,5 +819,107 @@
         "ref": "https://pubmed.ncbi.nlm.nih.gov/10910054/"
       }
     }
+  },
+  "rs671": {
+    "gene": "ALDH2", "variant": "Glu504Lys", "category": "alcohol",
+    "markers": ["biochemistry.ggt", "biochemistry.ast", "biochemistry.alt"],
+    "contextCards": ["diet", "loveLife", "diagnoses"],
+    "strandNote": "dbSNP forward: G(ref Glu504) / A(alt Lys504 = ALDH2*2). 0% in Europeans/Africans; ~28–45% allele frequency in East Asians — one of the most population-stratified clinically relevant SNPs.",
+    "references": ["https://pubmed.ncbi.nlm.nih.gov/19724652/", "https://pubmed.ncbi.nlm.nih.gov/29553379/"],
+    "genotypes": {
+      "GG": { "effect": "none", "note": "Normal ALDH2; standard acetaldehyde clearance" },
+      "GA": { "effect": "significant", "note": "~6% residual enzyme activity (dominant-negative tetramer); facial flush with alcohol; ~6–10× elevated esophageal squamous-cell carcinoma risk if drinking; lower alcohol tolerance" },
+      "AA": { "effect": "significant", "note": "~1% activity; severe flush and nausea even with small doses; near-absolute alcohol intolerance and very high cancer risk if drinking despite reaction" }
+    },
+    "snpHints": {
+      "GA": {
+        "slotKey": "biochemistry.ggt",
+        "direction": "avoid",
+        "text": "Your ALDH2 Glu504Lys (heterozygous) means acetaldehyde clears slowly — minimizing alcohol significantly lowers esophageal cancer and liver-enzyme elevation risk",
+        "ref": "https://pubmed.ncbi.nlm.nih.gov/19724652/"
+      },
+      "AA": {
+        "slotKey": "biochemistry.ggt",
+        "direction": "avoid",
+        "text": "Your ALDH2 Glu504Lys (homozygous) means near-absolute alcohol intolerance — drinking despite the flush response is strongly linked to esophageal cancer; abstinence is the actionable path",
+        "ref": "https://pubmed.ncbi.nlm.nih.gov/19724652/"
+      }
+    }
+  },
+  "rs762551": {
+    "gene": "CYP1A2", "variant": "-163C>A (*1F)", "category": "caffeine",
+    "markers": ["lipids.cholesterol", "lipids.ldl", "proteins.hsCRP", "biochemistry.glucose"],
+    "contextCards": ["diet", "sleepRest", "stress"],
+    "strandNote": "dbSNP forward: A(ref, fast inducible) / C(alt, slow). 23andMe / Ancestry / Illumina report A/C. C ≈ 0.32 globally, fairly even across populations.",
+    "references": ["https://pubmed.ncbi.nlm.nih.gov/16522833/", "https://pubmed.ncbi.nlm.nih.gov/29570621/"],
+    "genotypes": {
+      "AA": { "effect": "none", "note": "Fast metabolizer (*1F/*1F); rapid caffeine clearance; strongly inducible by smoking and cruciferous vegetables" },
+      "AC": { "effect": "mild", "note": "Intermediate metabolizer; caffeine cleared at moderate rate" },
+      "CC": { "effect": "moderate", "note": "Slow metabolizer; coffee >2 cups/day associated with ~64% increased non-fatal MI risk in <50yo (Cornelis 2006, replicated). Also linked to higher BP response and worse glucose control after caffeine." }
+    },
+    "snpHints": {
+      "AC": {
+        "slotKey": "lipids.cholesterol",
+        "direction": "avoid",
+        "text": "Your CYP1A2 *1F (heterozygous) clears caffeine at an intermediate rate — moderate coffee intake is fine; avoid drinking after 4pm to preserve sleep",
+        "ref": "https://pubmed.ncbi.nlm.nih.gov/16522833/"
+      },
+      "CC": {
+        "slotKey": "lipids.cholesterol",
+        "direction": "avoid",
+        "text": "Your CYP1A2 *1F (homozygous slow) means caffeine lingers 6+ hours — limiting coffee to 1–2 cups before noon reduces cardiovascular and sleep impact measurably",
+        "ref": "https://pubmed.ncbi.nlm.nih.gov/16522833/"
+      }
+    }
+  },
+  "rs10830963": {
+    "gene": "MTNR1B", "variant": "intron 1 (G>C)", "category": "bloodSugar",
+    "markers": ["biochemistry.glucose", "diabetes.hba1c", "hormones.insulin", "diabetes.homaIR"],
+    "contextCards": ["sleepRest", "lightCircadian", "diet"],
+    "strandNote": "dbSNP forward: C(ref) / G(alt = risk allele). G ≈ 0.30 globally. 23andMe / Ancestry / Illumina report C/G.",
+    "references": ["https://pubmed.ncbi.nlm.nih.gov/19060907/", "https://pubmed.ncbi.nlm.nih.gov/35105993/"],
+    "genotypes": {
+      "CC": { "effect": "none", "note": "Standard fasting glucose; normal melatonin–insulin coupling" },
+      "CG": { "effect": "moderate", "note": "~0.06–0.07 mmol/L higher fasting glucose per G allele; modestly higher T2D and gestational-diabetes risk. Late-night eating amplifies the effect." },
+      "GG": { "effect": "moderate", "note": "~0.12 mmol/L higher fasting glucose; ~1.4× T2D risk; impaired insulin secretion when eating during the melatonin window (late dinner, shift work, midnight snacks)" }
+    },
+    "snpHints": {
+      "CG": {
+        "slotKey": "biochemistry.glucose",
+        "direction": "avoid",
+        "text": "Your MTNR1B (heterozygous risk) means melatonin suppresses insulin release — eating carbs within 2–3 hours of bedtime spikes glucose more than for other people. Earlier dinners help.",
+        "ref": "https://pubmed.ncbi.nlm.nih.gov/35105993/"
+      },
+      "GG": {
+        "slotKey": "biochemistry.glucose",
+        "direction": "avoid",
+        "text": "Your MTNR1B (homozygous risk) strongly couples late eating to elevated fasting glucose — finishing dinner ≥3 hours before bed is one of the most effective things you can do for HbA1c",
+        "ref": "https://pubmed.ncbi.nlm.nih.gov/35105993/"
+      }
+    }
+  },
+  "rs9939609": {
+    "gene": "FTO", "variant": "intron 1", "category": "bodyComposition",
+    "markers": ["bodyComposition.bodyFatPct", "bodyComposition.bmiDexa", "bodyComposition.fatMass", "diabetes.hba1c"],
+    "contextCards": ["diet", "exercise"],
+    "strandNote": "dbSNP forward: T(ref, protective) / A(alt, risk). A ≈ 0.42 in Europeans, ~0.16 in East Asians, ~0.5 in Africans (weaker effect). 23andMe / Ancestry report T/A.",
+    "references": ["https://pubmed.ncbi.nlm.nih.gov/17434869/", "https://pubmed.ncbi.nlm.nih.gov/22087105/"],
+    "genotypes": {
+      "TT": { "effect": "none", "note": "Lower satiety-disruption risk; standard appetite regulation" },
+      "AT": { "effect": "mild", "note": "~+1 kg average weight effect; modest appetite-regulation impact" },
+      "AA": { "effect": "moderate", "note": "~+3 kg average weight (~1.7 BMI units); ~1.7× obesity risk. Regular physical activity attenuates ~30% of the genetic effect — exercise matters more here than for most people." }
+    }
+  },
+  "rs5882": {
+    "gene": "CETP", "variant": "I405V", "category": "lipids",
+    "markers": ["lipids.hdl", "lipids.ldl", "lipids.cholesterol"],
+    "contextCards": ["diet", "healthGoals"],
+    "strandNote": "dbSNP forward: A(ref Ile) / G(alt Val). G ≈ 0.32 globally. Complements existing rs708272 TaqIB (partially correlated, r² ≈ 0.5 in CEU — not redundant).",
+    "references": ["https://pubmed.ncbi.nlm.nih.gov/14563833/", "https://pubmed.ncbi.nlm.nih.gov/29420005/"],
+    "genotypes": {
+      "AA": { "effect": "none", "note": "Standard CETP activity; baseline HDL" },
+      "AG": { "effect": "mild", "note": "Slightly higher HDL; modestly improved cognitive aging in some cohorts" },
+      "GG": { "effect": "moderate", "note": "Lowest CETP activity; highest HDL; in the Ashkenazi centenarian study associated with larger HDL/LDL particles, lower cardiovascular and dementia incidence, exceptional longevity. Replication in non-Ashkenazi cohorts is mixed — effect smaller but directionally consistent." }
+    }
   }
 }
