@@ -893,6 +893,22 @@ function renderRowDetail(adapter, conn, { isPendingClient, isFileImport }) {
   if (isPendingClient) {
     return `<p class="wearable-adapter-hint">${escapeHTML(adapter.displayName)} support is in progress — we're waiting on partner credentials. Check back soon or watch the changelog.</p>`;
   }
+  // Manual source — entry counts + entry points + disconnect. Unlike OAuth,
+  // manual has no credential to reconnect; "disconnect" means wipe all rows.
+  if (conn && adapter.authType === 'manual') {
+    return `<div class="wearable-adapter-identity">Entered manually on this device</div>
+      <div class="wearable-adapter-meta" id="wearable-manual-counts" data-role="manual-counts">
+        <span class="muted">Counting readings…</span>
+      </div>
+      <p class="wearable-adapter-hint" style="margin-top:4px;font-size:12px">
+        Log, edit, or delete individual entries from the dashboard — tap any
+        weight / BP / resting HR card to open its detail view.
+      </p>
+      <div class="wearable-adapter-actions">
+        <button class="wearable-action wearable-action-primary" onclick="handleManualOpenDashboard()">Open dashboard</button>
+        <button class="wearable-action wearable-action-danger" onclick="handleManualDisconnect()">Delete all manual entries</button>
+      </div>`;
+  }
   // Disconnected OAuth (default) — no detail to expand. The Connect button
   // in the row action is enough; row stays flat.
   return null;
@@ -902,6 +918,84 @@ function renderRowDetail(adapter, conn, { isPendingClient, isFileImport }) {
 // Connect pills — Settings now uses uniform ghost buttons via renderRowAction.
 // Brand asset registry + render helpers stay intact in js/brand-assets.js for
 // landing-site reuse.
+
+// Manual source — UI handlers. Settings → Integrations → Manual exposes a
+// single-click path to (a) go log/manage on the dashboard and (b) nuke all
+// manual data. Per-reading delete lives on the dashboard detail modal.
+function handleManualOpenDashboard() {
+  // Settings modal is an overlay; let the caller close it by dispatching the
+  // same Escape path the close button uses. We just navigate the underlying
+  // dashboard — the user hits Escape / closes Settings manually.
+  if (window.closeSettings) window.closeSettings();
+  if (window.navigate) window.navigate('dashboard');
+  requestAnimationFrame(() => {
+    document.getElementById('wearable-strip')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+}
+
+async function handleManualDisconnect() {
+  if (typeof window.showConfirmDialog !== 'function') return;
+  const ok = await window.showConfirmDialog(
+    'Delete all manual entries?',
+    'This removes every weight / BP / pulse entry you\'ve logged manually. Any data from connected wearables (Oura, Withings, etc.) is untouched. Can\'t be undone.',
+    'Delete all manual entries',
+    'Cancel'
+  );
+  if (!ok) return;
+  try {
+    const { clearSource } = await import('./wearables-store.js');
+    const { refreshManualSummary } = await import('./wearables-manual.js');
+    const profileId = getActiveProfileId();
+    await clearSource(profileId, 'manual');
+    // Drop the connection record too — the row disappears from the strip
+    // source header and the Settings integrations list.
+    if (state.importedData.wearableConnections) {
+      delete state.importedData.wearableConnections.manual;
+      const { saveImportedData } = await import('./data.js');
+      await saveImportedData();
+    }
+    await refreshManualSummary(profileId);
+    showNotification?.('All manual entries deleted', 'success');
+    // Re-render the Settings section + dashboard strip.
+    const section = document.querySelector('[data-wearables-settings-host]') ||
+                    document.querySelector('.wearables-adapter-list')?.parentElement;
+    if (section) section.innerHTML = renderWearablesSettingsSection();
+    if (window.navigate) window.navigate('dashboard');
+  } catch (e) {
+    showNotification?.(`Couldn't delete: ${e.message}`, 'error', 4000);
+  }
+}
+
+// Populate the "X weight, Y BP, Z pulse" counts line in the manual
+// detail-drawer — async because it reads from IndexedDB. Called when the
+// Settings section is rendered and whenever the drawer opens.
+async function _updateManualCounts() {
+  const el = document.querySelector('[data-role="manual-counts"]');
+  if (!el) return;
+  try {
+    const { getDailyRange } = await import('./wearables-store.js');
+    const profileId = getActiveProfileId();
+    const rows = await getDailyRange(profileId, 'manual', '2000-01-01', '2099-12-31');
+    let weightN = 0, bpN = 0, rhrN = 0;
+    for (const r of rows) {
+      if (typeof r.weight === 'number') weightN++;
+      if (typeof r.bp_systolic === 'number' || typeof r.bp_diastolic === 'number') bpN++;
+      if (typeof r.rhr === 'number') rhrN++;
+    }
+    const parts = [];
+    if (weightN) parts.push(`${weightN} weight`);
+    if (bpN) parts.push(`${bpN} blood pressure`);
+    if (rhrN) parts.push(`${rhrN} pulse`);
+    el.textContent = parts.length ? parts.join(' · ') + ' readings' : 'No manual entries yet';
+  } catch { /* non-fatal */ }
+}
+// Fire when the details element opens (delegated — the Settings section is
+// re-rendered on demand so we can't bind once at module load).
+document.addEventListener('toggle', (e) => {
+  if (e.target?.matches?.('details.wearable-row[data-adapter="manual"]') && e.target.open) {
+    _updateManualCounts();
+  }
+}, true);
 
 function handleWearableConnect(adapterId) {
   try {
@@ -1131,6 +1225,8 @@ Object.assign(window, {
   saveManualLog,
   cancelManualLog,
   toggleManualLogChip,
+  handleManualOpenDashboard,
+  handleManualDisconnect,
   hasWearableSummary,
   renderWearablesSettingsSection,
   handleWearableConnect,
