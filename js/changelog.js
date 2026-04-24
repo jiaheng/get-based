@@ -807,6 +807,18 @@ function markChangelogSeen() {
   localStorage.setItem('labcharts-changelog-seen', String(window.APP_VERSION));
 }
 
+// Changelog items are authored in source code (CHANGELOG above) — trusted.
+// We escape everything by default and then re-allow a small whitelist of
+// inline emphasis tags so <b>/<i>/<em>/<strong>/<code> render as styling
+// instead of literal text. Anything else (script, img, links, etc.) stays
+// escaped — defense-in-depth in case an entry ever incorporates user content.
+function renderChangelogItem(item) {
+  return escapeHTML(item).replace(
+    /&lt;(\/?)(b|i|em|strong|code)&gt;/g,
+    '<$1$2>'
+  );
+}
+
 export function openChangelog(showAll) {
   const overlay = document.getElementById('changelog-modal-overlay');
   const modal = document.getElementById('changelog-modal');
@@ -822,7 +834,7 @@ export function openChangelog(showAll) {
     html += `<div class="changelog-header"><span class="changelog-version">v${escapeHTML(entry.version)} — ${escapeHTML(entry.title)}</span><span class="changelog-date">${escapeHTML(entry.date)}</span></div>`;
     html += '<ul class="changelog-items">';
     for (const item of entry.items) {
-      html += `<li class="changelog-item">${escapeHTML(item)}</li>`;
+      html += `<li class="changelog-item">${renderChangelogItem(item)}</li>`;
     }
     html += '</ul></div>';
   }

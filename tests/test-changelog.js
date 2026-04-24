@@ -176,6 +176,27 @@ return (async function() {
   assert('closeChangelog removes show class', ovAfterClose && !ovAfterClose.classList.contains('show'));
   assert('closeChangelog marks version as seen', localStorage.getItem('labcharts-changelog-seen') !== null);
 
+  // ═══════════════════════════════════════
+  // Inline-tag whitelist in changelog items
+  // ═══════════════════════════════════════
+  // Items use <b>/<i>/<em>/<strong>/<code> for emphasis. Verify the renderer
+  // both renders those AND keeps escaping anything else.
+  window.openChangelog(true);
+  const tagModal = document.getElementById('changelog-modal');
+  const itemsHTML = tagModal?.innerHTML || '';
+  assert('changelog renders <b> as bold (not literal text)',
+    itemsHTML.includes('<b>') && !itemsHTML.includes('&lt;b&gt;'));
+  assert('expected bold span "5 new SNPs" present',
+    /<b>5 new SNPs<\/b>/.test(itemsHTML));
+  assert('changelog renders <code> as code (not literal text)',
+    !itemsHTML.includes('&lt;code&gt;'));
+  // Defense: source-code regex limits the whitelist. A wildcard or a
+  // direct innerHTML on the raw item would be a security regression.
+  const renderSrc = await fetch('js/changelog.js').then(r => r.text());
+  assert('renderChangelogItem whitelist limited to b/i/em/strong/code',
+    /\(b\|i\|em\|strong\|code\)/.test(renderSrc));
+  window.closeChangelog();
+
   // Clean up
   localStorage.removeItem('labcharts-changelog-seen');
 
