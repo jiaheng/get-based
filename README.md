@@ -13,7 +13,7 @@
 - **AI-powered PDF import** — drop any lab report (any format, language, or country) and AI extracts and maps results to 287+ known biomarkers automatically. Batch import, direct image import (JPG/PNG/WebP), auto image mode for scanned PDFs
 - **Biomarker trend charts** — interactive line charts with proportional time scale, reference bands, optimal ranges, and trend detection across 17 standard categories
 - **AI chat** — ask questions about your results with full health context, image attachments, multiple personalities, conversation threads
-- **DNA import** — upload raw data from AncestryDNA, 23andMe, MyHeritage, FTDNA, or Living DNA. 42 curated SNPs across 10 categories (methylation, iron, lipids, vitamin D, etc.) with APOE haplotype resolution. Genetic factors shown on dashboard, detail modals, and in AI context
+- **DNA import** — upload raw data from AncestryDNA, 23andMe, MyHeritage, FTDNA, Living DNA, or Illumina GenomeStudio (DNAEra and other clinical labs). 47 curated SNPs across 13 categories (methylation, iron, lipids, vitamin D, alcohol, caffeine, body composition, etc.) with APOE haplotype resolution and 39 mtDNA haplogroups including 11 sub-clades. Genetic factors shown on dashboard, detail modals, and in AI context
 - **Specialty lab adapters** — OAT (165 markers), fatty acids (Spadia, ZinZino, OmegaQuant), Metabolomix+. Any other specialty test imports through the custom marker pipeline
 - **Biological age** — PhenoAge (Levine 2018) + Bortz Age (Bortz 2023) combined into a unified Biological Age marker with component breakdown
 - **Calculated markers** — HOMA-IR, BUN/Creatinine ratio, free water deficit, lipid ratios (TG/HDL, LDL/HDL, ApoB/ApoA-I), NLR, PLR, De Ritis ratio, hs-CRP/HDL cardiovascular risk ratio
@@ -75,7 +75,7 @@ Switch providers anytime. All non-AI features work without a provider configured
 | Lab import | Any PDF, any format, any language | Specific labs/formats only |
 | Biomarkers | 287+ standard + unlimited custom | Limited set |
 | Specialty labs | OAT, fatty acids + custom marker pipeline for any test | Blood only |
-| DNA raw data | 42 curated SNPs, APOE, 5 providers | No |
+| DNA raw data | 47 curated SNPs, APOE, 39 mtDNA haplogroups, 6 providers | No |
 | Lifestyle context | 9 cards inform all AI analysis | None or basic |
 | Custom knowledge base | Bring-your-own knowledge source endpoint, any documents | No |
 | Account required | No | Yes |

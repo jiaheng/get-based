@@ -23,6 +23,10 @@ export function detectDNAFile(text) {
     return '23andme';
   }
   if (first.includes('# Living DNA customer genotype data download file version')) return 'livingdna';
+  // Illumina GenomeStudio export (DNAEra and other clinical labs running Illumina arrays):
+  // BOM-prefixed [Header] block with GSGT Version, then [Data] block with comma-separated
+  // "Sample Name,SNP Name,Chr,Position,Allele1 - Plus,Allele2 - Plus" rows.
+  if (first.includes('GSGT Version,')) return 'illumina-gsgt';
   // CSV formats — no comment lines, start with header
   const firstLine = first.split(/\r?\n/)[0].trim();
   if (/^RSID,CHROMOSOME,POSITION,RESULT$/i.test(firstLine)) return 'csv'; // MyHeritage or FTDNA
@@ -49,6 +53,7 @@ export function isDNAFile(file) {
   if (name.includes('livingdna') || name.includes('living_dna')) return true;
   if (name.includes('genome') || name.includes('genotype') || name.includes('raw_dna') || name.includes('rawdna')) return true;
   if (name.includes('mtdna') || name.includes('mt-dna') || name.includes('mt_dna')) return true;
+  if (name.includes('dnaera')) return true;
   return false;
 }
 
@@ -76,6 +81,10 @@ self.onmessage = async function(e) {
   const matches = {};
   let totalData = 0;
   let detectedFormat = format;
+  // Illumina GSGT files have a [Header] block that must be skipped — flip
+  // this true once we hit [Data] and discard the column-header line that
+  // follows it.
+  let illuminaInData = false;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -87,7 +96,32 @@ self.onmessage = async function(e) {
 
     let rsid, genotype;
 
-    if (detectedFormat === 'ancestry') {
+    if (detectedFormat === 'illumina-gsgt') {
+      // Walk the [Header] block until [Data], then skip the column-header
+      // line ("Sample Name,SNP Name,Chr,Position,Allele1 - Plus,Allele2 - Plus")
+      // before any rows are eligible.
+      const trimmed = line.trim();
+      if (!illuminaInData) {
+        // Note the double-escape: the worker code is in a template literal,
+        // so doubled backslashes here render as single backslashes in the
+        // worker source, giving a regex that matches literal "[Data]".
+        if (/^\\[Data\\]/i.test(trimmed)) illuminaInData = true;
+        continue;
+      }
+      if (/^Sample Name/i.test(trimmed)) continue;
+      const parts = trimmed.split(',');
+      if (parts.length < 6) continue;
+      rsid = parts[1].trim();           // SNP Name
+      // Illumina probes wrap rsids many ways: seq-rs1234, GSA-rs1234,
+      // ilmnseq_rs1234_ilmnTOP_5AT, BOT-rs1234, dup-seq-rs1234, etc.
+      // Extract the bare rsid so a wrapped probe still hits the lookup.
+      const m = rsid.match(/(rs\\d+)/);
+      if (m) rsid = m[1];
+      const a1 = parts[4].trim();        // Allele1 - Plus
+      const a2 = parts[5].trim();        // Allele2 - Plus
+      if (a1 === '-' || a2 === '-' || a1 === '0' || a2 === '0') { totalData++; continue; }
+      genotype = a1 + a2;
+    } else if (detectedFormat === 'ancestry') {
       // Tab-separated: rsid, chromosome, position, allele1, allele2
       const parts = line.split('\\t');
       if (parts.length < 5) continue;
@@ -119,7 +153,11 @@ self.onmessage = async function(e) {
 
     totalData++;
 
-    if (lookupSet.has(rsid)) {
+    if (lookupSet.has(rsid) && !matches[rsid]) {
+      // First non-missing call wins. Illumina chips often have multiple
+      // probes for the same SNP (seq-rsX + seq-rsX.1 + seq-rsX.2). They
+      // usually agree, but if a later probe failed, keeping the first
+      // valid call is safer than overwriting it.
       matches[rsid] = genotype;
     }
   }
@@ -212,7 +250,7 @@ function sortAlleles(genotype) {
 }
 
 function formatSourceName(format) {
-  const names = { ancestry: 'AncestryDNA', '23andme': '23andMe', livingdna: 'Living DNA', csv: 'MyHeritage/FTDNA' };
+  const names = { ancestry: 'AncestryDNA', '23andme': '23andMe', livingdna: 'Living DNA', csv: 'MyHeritage/FTDNA', 'illumina-gsgt': 'Illumina GenomeStudio (DNAEra)' };
   return names[format] || format;
 }
 
@@ -386,7 +424,7 @@ export function renderGeneticsSection() {
     if (!info || info.effect === 'none') continue;
     const cat = entry.category || 'other';
     if (!byCat[cat]) byCat[cat] = [];
-    byCat[cat].push({ rsid, gene: stored.gene, variant: stored.variant, genotype: stored.genotype, effect: info.effect, note: info.note, references: entry.references || [] });
+    byCat[cat].push({ rsid, gene: stored.gene, variant: stored.variant, genotype: stored.genotype, effect: info.effect, valence: info.valence || 'risk', note: info.note, references: entry.references || [] });
   }
 
   // Sort categories: those with significant findings first
@@ -397,8 +435,19 @@ export function renderGeneticsSection() {
   });
   const totalFindings = catOrder.reduce((n, [, fs]) => n + fs.length, 0);
 
-  const effectIcon = { significant: '\uD83D\uDD34', moderate: '\uD83D\uDFE1' };
-  const catLabels = { methylation: 'Methylation', iron: 'Iron', lipids: 'Lipids', vitaminD: 'Vitamin D', vitaminB12: 'Vitamin B12', bilirubin: 'Bilirubin', thyroid: 'Thyroid', fattyAcids: 'Fatty Acids', bloodSugar: 'Blood Sugar', sexHormones: 'Sex Hormones' };
+  // Two-axis dot: severity x valence. Protective = green regardless of magnitude;
+  // neutral = white circle (lab-artifact / informational, neither bad nor good).
+  // Risk severity scales by warmth (significant -> red, moderate -> yellow, mild -> orange).
+  const dotFor = (effect, valence) => {
+    if (effect === 'none') return '';
+    if (valence === 'protective') return '\uD83D\uDFE2';
+    if (valence === 'neutral') return '\u26AA';
+    if (effect === 'significant') return '\uD83D\uDD34';
+    if (effect === 'moderate') return '\uD83D\uDFE1';
+    if (effect === 'mild') return '\uD83D\uDFE0';
+    return '';
+  };
+  const catLabels = { methylation: 'Methylation', iron: 'Iron', lipids: 'Lipids', vitaminD: 'Vitamin D', vitaminB12: 'Vitamin B12', bilirubin: 'Bilirubin', thyroid: 'Thyroid', fattyAcids: 'Fatty Acids', bloodSugar: 'Blood Sugar', sexHormones: 'Sex Hormones', alcohol: 'Alcohol', caffeine: 'Caffeine', bodyComposition: 'Body Composition' };
 
   const metaParts = [];
   if (genetics.source) metaParts.push(escapeHTML(genetics.source));
@@ -445,6 +494,14 @@ export function renderGeneticsSection() {
     let shown = 0;
     const INITIAL_LIMIT = 8;
     html += `<div class="genetics-findings">`;
+    // Legend — explain the dot scheme so users can read severity AND valence at a glance.
+    html += `<div class="genetics-legend" title="What the dots mean">
+      <span><span class="genetics-legend-dot">🔴</span> significant risk</span>
+      <span><span class="genetics-legend-dot">🟡</span> moderate risk</span>
+      <span><span class="genetics-legend-dot">🟠</span> mild risk</span>
+      <span><span class="genetics-legend-dot">🟢</span> beneficial</span>
+      <span><span class="genetics-legend-dot">⚪</span> informational</span>
+    </div>`;
     for (const [cat, findings] of catOrder) {
       // Sort significant first within category
       findings.sort((a, b) => (a.effect === 'significant' ? 0 : 1) - (b.effect === 'significant' ? 0 : 1));
@@ -457,7 +514,7 @@ export function renderGeneticsSection() {
         const refLink = f.references.length > 0 && /^https?:/.test(f.references[0]) ? ` <a href="${f.references[0].replace(/"/g, '&quot;')}" target="_blank" rel="noopener" class="detail-genetics-ref" title="Primary study (PubMed)">primary study</a>` : '';
         const snpediaLink = ` <a href="https://www.snpedia.com/index.php/${f.rsid.charAt(0).toUpperCase() + f.rsid.slice(1)}" target="_blank" rel="noopener" class="detail-genetics-ref" title="All studies (SNPedia)">more studies</a>`;
         html += `<div class="genetics-finding-row${isExtra && !startHidden ? ' genetics-extra' : ''}">
-          <span>${effectIcon[f.effect] || ''}</span>
+          <span>${dotFor(f.effect, f.valence)}</span>
           <span class="genetics-finding-gene">${escapeHTML(f.gene)} ${escapeHTML(f.variant)}</span>
           <span class="genetics-finding-genotype">${escapeHTML(f.genotype)}</span>
           <span class="genetics-finding-note">${escapeHTML(f.note)}${refLink}${snpediaLink}</span>
@@ -698,7 +755,7 @@ function getRelevantSNPs(dotKey) {
 let _haplogroupTable = null;
 let _haplogroupTablePromise = null;
 
-function loadHaplogroupTable() {
+export function loadHaplogroupTable() {
   if (_haplogroupTable) return Promise.resolve(_haplogroupTable);
   if (!_haplogroupTablePromise) {
     _haplogroupTablePromise = fetch('data/haplogroups.json')
@@ -713,7 +770,7 @@ export function ensureHaplogroupTable() {
   if (state.importedData?.genetics?.mtdna) loadHaplogroupTable();
 }
 
-function parseMtDNAMutations(text) {
+export function parseMtDNAMutations(text) {
   const mutations = [];
   for (const line of text.split(/\r?\n/)) {
     const trimmed = line.trim();
@@ -732,18 +789,25 @@ function parseMtDNAMutations(text) {
   return mutations;
 }
 
-function resolveHaplogroup(mutations, hapTable) {
+export function resolveHaplogroup(mutations, hapTable) {
   const mutationSet = new Set(mutations.map(m => m.raw));
   let bestMatch = null;
   let bestScore = 0;
+  let bestMatchedCount = 0;
 
   for (const [hg, data] of Object.entries(hapTable.haplogroups)) {
     if (data.isReference) continue; // H is reference — handle separately
     const diag = data.mutations;
     const matched = diag.filter(m => mutationSet.has(m));
     const score = matched.length / diag.length;
-    if (score > bestScore && matched.length >= 2 && score >= 0.6) {
+    // Tiebreaker: when scores are equal, prefer the haplogroup with more
+    // matched mutations. Sub-clades store parent+derived markers together
+    // (cumulative inheritance), so a true H1 carrier matches 3/3 on H1 and
+    // 2/2 on H — both score 1.0, but H1 has the larger matched count.
+    const better = score > bestScore || (score === bestScore && matched.length > bestMatchedCount);
+    if (better && matched.length >= 2 && score >= 0.6) {
       bestScore = score;
+      bestMatchedCount = matched.length;
       bestMatch = { haplogroup: hg, confidence: score, matchedMutations: matched.length, totalDiagnostic: diag.length };
     }
   }
