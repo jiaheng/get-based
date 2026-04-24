@@ -215,10 +215,23 @@ export function openSettingsModal(tab) {
 function loadSettingsCommitHash() {
   const el = document.getElementById('settings-commit-hash');
   if (!el) return;
-  fetch('https://api.github.com/repos/elkimek/get-based/commits/main', { headers: { Accept: 'application/vnd.github.sha' } })
-    .then(r => r.ok ? r.text() : Promise.reject())
-    .then(sha => { const short = sha.slice(0, 7); const e = document.getElementById('settings-commit-hash'); if (e) e.innerHTML = `<a href="https://github.com/elkimek/get-based/commit/${short}" target="_blank" rel="noopener" style="color:var(--text-muted);text-decoration:none">${short}</a>`; })
-    .catch(() => { const e = document.getElementById('settings-commit-hash'); if (e) e.textContent = ''; });
+  const render = (sha, ref) => {
+    const short = sha.slice(0, 7);
+    const e = document.getElementById('settings-commit-hash');
+    if (!e) return;
+    // Show branch suffix on previews so BETA testers can tell main from a feature branch.
+    const suffix = ref && ref !== 'main' ? ` <span style="color:var(--text-muted);opacity:0.7">(${ref})</span>` : '';
+    e.innerHTML = `<a href="https://github.com/elkimek/get-based/commit/${short}" target="_blank" rel="noopener" style="color:var(--text-muted);text-decoration:none">${short}</a>${suffix}`;
+  };
+  // Prefer the deployed SHA from Vercel (truthful on previews). Fall back to
+  // main HEAD via GitHub when /api/commit isn't available (local dev, etc).
+  fetch('/api/commit')
+    .then(r => r.ok ? r.json() : Promise.reject())
+    .then(({ sha, ref }) => render(sha, ref))
+    .catch(() => fetch('https://api.github.com/repos/elkimek/get-based/commits/main', { headers: { Accept: 'application/vnd.github.sha' } })
+      .then(r => r.ok ? r.text() : Promise.reject())
+      .then(sha => render(sha, 'main'))
+      .catch(() => { const e = document.getElementById('settings-commit-hash'); if (e) e.textContent = ''; }));
 }
 
 export function switchSettingsTab(tabId) {
