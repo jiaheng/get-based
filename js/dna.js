@@ -23,6 +23,10 @@ export function detectDNAFile(text) {
     return '23andme';
   }
   if (first.includes('# Living DNA customer genotype data download file version')) return 'livingdna';
+  // Illumina GenomeStudio export (DNAEra and other clinical labs running Illumina arrays):
+  // BOM-prefixed [Header] block with GSGT Version, then [Data] block with comma-separated
+  // "Sample Name,SNP Name,Chr,Position,Allele1 - Plus,Allele2 - Plus" rows.
+  if (first.includes('GSGT Version,')) return 'illumina-gsgt';
   // CSV formats — no comment lines, start with header
   const firstLine = first.split(/\r?\n/)[0].trim();
   if (/^RSID,CHROMOSOME,POSITION,RESULT$/i.test(firstLine)) return 'csv'; // MyHeritage or FTDNA
@@ -49,6 +53,7 @@ export function isDNAFile(file) {
   if (name.includes('livingdna') || name.includes('living_dna')) return true;
   if (name.includes('genome') || name.includes('genotype') || name.includes('raw_dna') || name.includes('rawdna')) return true;
   if (name.includes('mtdna') || name.includes('mt-dna') || name.includes('mt_dna')) return true;
+  if (name.includes('dnaera')) return true;
   return false;
 }
 
@@ -76,6 +81,10 @@ self.onmessage = async function(e) {
   const matches = {};
   let totalData = 0;
   let detectedFormat = format;
+  // Illumina GSGT files have a [Header] block that must be skipped — flip
+  // this true once we hit [Data] and discard the column-header line that
+  // follows it.
+  let illuminaInData = false;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -87,7 +96,29 @@ self.onmessage = async function(e) {
 
     let rsid, genotype;
 
-    if (detectedFormat === 'ancestry') {
+    if (detectedFormat === 'illumina-gsgt') {
+      // Walk the [Header] block until [Data], then skip the column-header
+      // line ("Sample Name,SNP Name,Chr,Position,Allele1 - Plus,Allele2 - Plus")
+      // before any rows are eligible.
+      const trimmed = line.trim();
+      if (!illuminaInData) {
+        if (/^\[Data\]/i.test(trimmed)) illuminaInData = true;
+        continue;
+      }
+      if (/^Sample Name/i.test(trimmed)) continue;
+      const parts = trimmed.split(',');
+      if (parts.length < 6) continue;
+      rsid = parts[1].trim();           // SNP Name
+      // Illumina probes wrap rsids many ways: seq-rs1234, GSA-rs1234,
+      // ilmnseq_rs1234_ilmnTOP_5AT, BOT-rs1234, dup-seq-rs1234, etc.
+      // Extract the bare rsid so a wrapped probe still hits the lookup.
+      const m = rsid.match(/(rs\\d+)/);
+      if (m) rsid = m[1];
+      const a1 = parts[4].trim();        // Allele1 - Plus
+      const a2 = parts[5].trim();        // Allele2 - Plus
+      if (a1 === '-' || a2 === '-' || a1 === '0' || a2 === '0') { totalData++; continue; }
+      genotype = a1 + a2;
+    } else if (detectedFormat === 'ancestry') {
       // Tab-separated: rsid, chromosome, position, allele1, allele2
       const parts = line.split('\\t');
       if (parts.length < 5) continue;
@@ -119,7 +150,11 @@ self.onmessage = async function(e) {
 
     totalData++;
 
-    if (lookupSet.has(rsid)) {
+    if (lookupSet.has(rsid) && !matches[rsid]) {
+      // First non-missing call wins. Illumina chips often have multiple
+      // probes for the same SNP (seq-rsX + seq-rsX.1 + seq-rsX.2). They
+      // usually agree, but if a later probe failed, keeping the first
+      // valid call is safer than overwriting it.
       matches[rsid] = genotype;
     }
   }
@@ -212,7 +247,7 @@ function sortAlleles(genotype) {
 }
 
 function formatSourceName(format) {
-  const names = { ancestry: 'AncestryDNA', '23andme': '23andMe', livingdna: 'Living DNA', csv: 'MyHeritage/FTDNA' };
+  const names = { ancestry: 'AncestryDNA', '23andme': '23andMe', livingdna: 'Living DNA', csv: 'MyHeritage/FTDNA', 'illumina-gsgt': 'Illumina GenomeStudio (DNAEra)' };
   return names[format] || format;
 }
 

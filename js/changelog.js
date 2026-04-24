@@ -5,6 +5,16 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.21.11', date: '2026-04-24', title: 'DNA interpretation recalibrated',
+    items: [
+      'Re-read the 2020s literature on every variant in the DNA table and quietly corrected five entries where the effect label was inflated versus what modern meta-analyses actually show. MTHFR A1298C (solo), MTR A2756G (heterozygous), VDR FokI, and ADIPOQ +45 all drop from <i>moderate</i> to <i>mild</i>; compound-het and homozygous cases still read as meaningful where they are.',
+      'Fixed a logic bug in FUT2 W154X: the secretor (GG) genotype was flagged as <i>moderate</i> with an actionable hint, but GG is the wild-type phenotype — corrected to <i>none</i>, hint removed.',
+      'Rewrote the TCF7L2 notes so the T2D-risk language doesn\'t read as a verdict — lifestyle genuinely matters more than genotype here.',
+      'Added Illumina GenomeStudio (DNAEra, clinical chip exports) as a supported DNA format; parser now recognizes wrapped probe names like <code>seq-rsXXX</code>, <code>GSA-rsXXX</code>, <code>ilmnseq_rsXXX</code>.',
+      'Fixed CETP TaqIB: table was keyed on old reverse-strand alleles (G/T) from 2002-era papers, but every modern DNA vendor reports forward-strand (G/A). Every user with a heterozygous CETP TaqIB call silently hit "genotype not in lookup" until today.',
+    ]
+  },
+  {
     version: '1.21.10', date: '2026-04-24', title: 'Newest models recommended',
     items: [
       'Claude Opus 4.7 and GPT-5.5 are now flagged as recommended on OpenRouter, PPQ, Routstr, and Venice — they show up in the recommended section of the model picker as soon as your provider serves them.',

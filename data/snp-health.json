@@ -42,8 +42,8 @@
     "references": ["https://pubmed.ncbi.nlm.nih.gov/9545395/"],
     "genotypes": {
       "TT": { "effect": "none", "note": "Normal BH4 production" },
-      "TG": { "effect": "moderate", "note": "Mildly reduced BH4 synthesis; homocysteine usually normal" },
-      "GG": { "effect": "moderate", "note": "Reduced BH4; impacts dopamine/serotonin cofactor synthesis" }
+      "TG": { "effect": "mild", "note": "Mildly reduced BH4 synthesis; homocysteine usually normal unless compound-het with C677T" },
+      "GG": { "effect": "mild", "note": "Reduced BH4; solo effect on homocysteine small in adequate-folate populations — compound-het with C677T is where clinically meaningful impairment appears" }
     },
     "snpHints": {
       "TG": {
@@ -67,7 +67,7 @@
     "references": ["https://pubmed.ncbi.nlm.nih.gov/9327029/"],
     "genotypes": {
       "AA": { "effect": "none", "note": "Normal methionine synthase activity" },
-      "AG": { "effect": "moderate", "note": "Mildly reduced MTR activity" },
+      "AG": { "effect": "mild", "note": "Mildly reduced MTR activity; small heterozygous effect on homocysteine in modern meta-analyses" },
       "GG": { "effect": "moderate", "note": "Reduced methionine synthase; may elevate homocysteine especially with low B12" }
     },
     "snpHints": {
@@ -288,11 +288,12 @@
     "gene": "CETP", "variant": "TaqIB", "category": "lipids",
     "markers": ["lipids.hdl", "lipids.ldl"],
     "contextCards": ["diet"],
+    "strandNote": "dbSNP forward alleles G/A (= classical B2/B1). Old literature uses G/T (reverse strand) — A allele here is the same as the T allele in older papers.",
     "references": ["https://pubmed.ncbi.nlm.nih.gov/11888533/"],
     "genotypes": {
-      "GG": { "effect": "moderate", "note": "Highest CETP activity; lowest HDL" },
-      "GT": { "effect": "moderate", "note": "Intermediate HDL" },
-      "TT": { "effect": "moderate", "note": "Lowest CETP activity; highest HDL; ~24% lower MI risk per T allele" }
+      "GG": { "effect": "moderate", "note": "Highest CETP activity; lowest HDL (B2B2)" },
+      "GA": { "effect": "moderate", "note": "Intermediate HDL (B1B2)" },
+      "AA": { "effect": "moderate", "note": "Lowest CETP activity; highest HDL; ~24% lower MI risk per A allele (B1B1)" }
     }
   },
   "rs1800588": {
@@ -364,8 +365,8 @@
     "contextCards": ["lightCircadian"],
     "references": ["https://pubmed.ncbi.nlm.nih.gov/8970885/"],
     "genotypes": {
-      "AA": { "effect": "moderate", "note": "Longer VDR isoform; slightly lower receptor efficiency" },
-      "AG": { "effect": "moderate", "note": "Intermediate receptor activity" },
+      "AA": { "effect": "mild", "note": "Longer VDR isoform; slightly lower receptor efficiency. Downstream 25(OH)D levels largely unaffected per Jolliffe meta-analysis — phenotypic effect on bone density and supplementation response is small." },
+      "AG": { "effect": "mild", "note": "Intermediate receptor activity" },
       "GG": { "effect": "none", "note": "Shorter VDR isoform; more transcriptionally active" }
     },
     "snpHints": {
@@ -395,17 +396,11 @@
     "contextCards": ["diet"],
     "references": ["https://pubmed.ncbi.nlm.nih.gov/18776911/"],
     "genotypes": {
-      "GG": { "effect": "moderate", "note": "Secretor; lower total B12 but cellular B12 likely normal" },
-      "GA": { "effect": "moderate", "note": "Heterozygous secretor; intermediate B12 levels" },
-      "AA": { "effect": "moderate", "note": "Non-secretor; higher total B12 (lab artifact from haptocorrin); does not indicate better B12 status" }
+      "GG": { "effect": "none", "note": "Secretor (wild-type); normal gut microbiome composition and intrinsic-factor B12 uptake" },
+      "GA": { "effect": "mild", "note": "Heterozygous secretor; intermediate B12 levels, typically clinically unremarkable" },
+      "AA": { "effect": "moderate", "note": "Non-secretor; higher total B12 (lab artifact from haptocorrin); does not indicate better B12 status — check functional markers (homocysteine, MMA) rather than trusting serum B12" }
     },
     "snpHints": {
-      "GG": {
-        "slotKey": "vitamins.vitaminB12",
-        "direction": "form",
-        "text": "Your FUT2 W154X (secretor) suggests monitoring functional B12 markers (homocysteine, MMA) \u2014 sublingual B12 may offer better bioavailability",
-        "ref": "https://pubmed.ncbi.nlm.nih.gov/18776911/"
-      },
       "GA": {
         "slotKey": "vitamins.vitaminB12",
         "direction": "form",
@@ -674,20 +669,20 @@
     "references": ["https://pubmed.ncbi.nlm.nih.gov/16415884/"],
     "genotypes": {
       "CC": { "effect": "none", "note": "Normal beta cell incretin response" },
-      "CT": { "effect": "significant", "note": "~39% increased T2D risk; impaired insulin secretion" },
-      "TT": { "effect": "significant", "note": "~60-100% increased T2D risk; impaired post-prandial insulin release" }
+      "CT": { "effect": "significant", "note": "~1.5\u00d7 lifetime T2D risk; mildly impaired insulin secretion. Absolute risk depends heavily on weight, diet, and activity." },
+      "TT": { "effect": "significant", "note": "~2\u00d7 lifetime T2D risk; impaired post-prandial insulin release. Absolute risk still depends heavily on weight, diet, and activity \u2014 lifestyle matters more than genotype." }
     },
     "snpHints": {
       "CT": {
         "slotKey": "biochemistry.glucose",
         "direction": "increase",
-        "text": "Your TCF7L2 (heterozygous) suggests a higher need for blood sugar management \u2014 berberine, chromium, and post-meal walks",
+        "text": "Your TCF7L2 (heterozygous) is a tendency toward harder blood-sugar control \u2014 post-meal walks, lower glycemic load, and berberine can each help",
         "ref": "https://pubmed.ncbi.nlm.nih.gov/16415884/"
       },
       "TT": {
         "slotKey": "biochemistry.glucose",
         "direction": "increase",
-        "text": "Your TCF7L2 (homozygous) suggests a significantly higher need for blood sugar management \u2014 consider berberine and strict carb control",
+        "text": "Your TCF7L2 (homozygous) is a tendency toward harder blood-sugar control \u2014 post-meal walks, lower glycemic load, and berberine are worth trying. Lifestyle matters more than this genotype.",
         "ref": "https://pubmed.ncbi.nlm.nih.gov/16415884/"
       }
     }
@@ -710,8 +705,8 @@
     "references": ["https://pubmed.ncbi.nlm.nih.gov/11812766/"],
     "genotypes": {
       "TT": { "effect": "none", "note": "Standard adiponectin levels" },
-      "TG": { "effect": "moderate", "note": "Modestly altered adiponectin; effects population-dependent" },
-      "GG": { "effect": "moderate", "note": "Altered adiponectin; effects on insulin sensitivity are population/diet-dependent" }
+      "TG": { "effect": "mild", "note": "Modestly altered adiponectin; effect on insulin sensitivity is modest and mainly documented in Asian populations" },
+      "GG": { "effect": "mild", "note": "Altered adiponectin; insulin-resistance effect is population-stratified — meaningful in Asian cohorts, weak elsewhere" }
     }
   },
   "rs1501299": {
