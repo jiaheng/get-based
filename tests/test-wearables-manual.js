@@ -48,14 +48,22 @@ return (async function() {
   assert('wearables.js MANUAL_EMPTY_METRICS covers weight/bp/rhr',
     /MANUAL_EMPTY_METRICS\s*=\s*\[[^\]]*weight[^\]]*bp_systolic[^\]]*rhr/.test(wearablesSrc));
 
-  // Client-list Edit Client modal dual-writes via these helpers; verify the
-  // wiring is present in source so a future refactor can't silently drop it.
+  // Phase 4 retired the Edit Client modal's weight/BP/pulse inputs — the
+  // dashboard strip is now the single entry point. Regression-guard that
+  // the old form elements are gone and the "go to Health Metrics" link
+  // replaced them. BMI calc must read weight from the wearables summary,
+  // not from the legacy biometrics store.
   const clSrc = await fetch('js/client-list.js').then(r => r.text());
-  assert('_clAddBioEntry dual-writes via logManualMetric', clSrc.includes('logManualMetric'));
-  assert('_clAddBioEntry dual-writes via logManualBP', clSrc.includes('logManualBP'));
-  assert('_clDeleteBioEntry mirrors delete into wearables store',
-    clSrc.includes('deleteManualMetric'));
-  assert('client-list refreshes summary after write', clSrc.includes('refreshManualSummary'));
+  assert('Edit Client modal no longer renders the cl-bio-weight container',
+    !clSrc.includes('id="cl-bio-weight"'));
+  assert('Edit Client modal no longer renders the cl-bio-bp container',
+    !clSrc.includes('id="cl-bio-bp"'));
+  assert('Edit Client modal no longer renders the cl-bio-pulse container',
+    !clSrc.includes('id="cl-bio-pulse"'));
+  assert('Edit Client modal links out to Health Metrics on the dashboard',
+    clSrc.includes('_clGoToHealthMetrics'));
+  assert('_clUpdateBMI reads weight from wearableSummary (single source of truth)',
+    clSrc.includes('wearableSummary?.metrics?.weight'));
 
   // ═══════════════════════════════════════
   // 2. 'manual' adapter registered
