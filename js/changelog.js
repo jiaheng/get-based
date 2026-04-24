@@ -5,60 +5,16 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
-    version: '1.23.0', date: '2026-04-24', title: 'mtDNA: 11 sub-haplogroups + smarter matcher',
+    version: '1.23.0', date: '2026-04-24', title: 'DNA + mtDNA overhaul: 5 new SNPs, 11 sub-haplogroups, valence-aware UI',
     items: [
-      'Added <b>11 mtDNA sub-haplogroups</b> (H1, H3, J1, J2, K1, T1, T2, U5a, U5b, U6, A2). Most consumer mtDNA tests (23andMe, FTDNA) report at this resolution — until now the app rolled them all up to the parent haplogroup (H/J/K/T/U/A) and lost meaningful clinical detail.',
-      '<b>Matcher upgrade:</b> when a sample matches both a parent and a sub-clade equally well, the more-specific sub-clade now wins (tiebreaker on matched mutation count). Carries the U5a-vs-U6 and J1-vs-J2 distinctions cleanly.',
-      'New phenotype info per sub-clade: H1 (Iberian post-LGM, sepsis-survival signal), J1 (centenarian enrichment, LHON 11778 modifier), K1 (Ashkenazi K1a1b1a founder), U5b (oldest verified European mtDNA, ~50% of Saami), U6 (North African back-migration, distinct from U5), and more.',
-      '<b>Cleanup:</b> trimmed three universal control-region mutations (199C/204C/250C) from haplogroup I that were noise rather than diagnostic; softened haplogroup B\'s high-altitude pulmonary edema claim to reflect that nuclear ADH7 variants are the stronger HAPE signal.',
-      'Total haplogroups: 27 → 39.',
-    ]
-  },
-  {
-    version: '1.22.2', date: '2026-04-24', title: 'Supplement mito-effects: 6 additions + mechanism updates',
-    items: [
-      'Added <b>6 missing mitochondrial compounds</b> to the supplement warning system: Urolithin A (mitophagy, Auwerx lab), Methylene Blue (Complex IV electron carrier, biphasic), Spermidine (autophagy inducer), Fisetin (top senolytic per Mayo), Caffeine (exercise-mimetic biogenesis), and Ethanol (the biggest mitotoxin we were missing).',
-      '<b>Metformin</b> effect note updated: the "Complex I inhibitor" framing is the textbook view but has been contested by 2018-2024 literature. Now notes mGPDH (Madiraju 2014) and lysosomal AMPK (Cameron 2018) as candidate primary low-dose targets, with Complex I inhibition only at supratherapeutic doses.',
-      '<b>Aspirin</b>: clarified that OXPHOS uncoupling is a high-dose effect only — 81 mg cardioprotective dose has no measurable mitochondrial impact.',
-      '<b>Resveratrol</b>: direct SIRT1 binding has been contested (Pacholec 2010); the biogenesis effect holds but is likely upstream via AMPK.',
-      '<b>Melatonin</b>: reframed from "enhances Complex I/III/IV activity" to "protects Complex I/III/IV from ROS damage" — the protective effect is real, but it\'s an antioxidant story, not a direct activity boost.',
-      'Total compounds: 108 → 114.',
-    ]
-  },
-  {
-    version: '1.22.1', date: '2026-04-24', title: 'Genetics dashboard tells you what is good news',
-    items: [
-      'New <b>orange dot</b> for mild-effect genotypes — previously these silently had no indicator. MTR, MTHFR A1298C heterozygous, ADIPOQ heterozygous, and others now visibly appear on the dashboard.',
-      '<b>Beneficial variants</b> (PCSK9 R46L, CETP I405V, CETP TaqIB B1B1, LIPC -514T, PPARG Pro12Ala) now show a <b>green dot</b> instead of being indistinguishable from risk variants. You can finally tell at a glance whether a "moderate" finding is something to celebrate or watch.',
-      'FUT2 W154X non-secretor and heterozygous variants now show a <b>white dot</b> — neither risky nor protective, just a lab-interpretation flag (high serum B12 doesn\'t mean better B12 status).',
-      'New <b>legend</b> at the top of the genetics findings explaining the dot scheme.',
-    ]
-  },
-  {
-    version: '1.22.0', date: '2026-04-24', title: '5 new SNPs across alcohol, caffeine, body composition',
-    items: [
-      'Added <b>ALDH2 Glu504Lys (rs671)</b> — alcohol flush + esophageal-cancer risk. Up to 45% allele frequency in East Asian populations; near-absolute alcohol intolerance for AA carriers.',
-      'Added <b>CYP1A2 *1F (rs762551)</b> — fast vs slow caffeine metabolism. Slow metabolizers (CC) face higher non-fatal MI risk with >2 cups/day in under-50 adults.',
-      'Added <b>MTNR1B (rs10830963)</b> — melatonin-insulin axis. Risk allele couples late-night eating to elevated fasting glucose; finishing dinner ≥3 hours before bed is one of the highest-leverage HbA1c interventions for carriers.',
-      'Added <b>FTO (rs9939609)</b> — most-replicated obesity SNP. Regular exercise cancels ~30% of the genetic effect (Kilpeläinen meta, n=218k).',
-      'Added <b>CETP I405V (rs5882)</b> — complements existing CETP TaqIB. GG genotype is the variant from the Ashkenazi centenarian study linked to exceptional longevity and lower dementia risk.',
-      'Three new categories surface in the genetics dashboard: <i>Alcohol</i>, <i>Caffeine</i>, <i>Body Composition</i>. Total curated set: <b>42 → 47 SNPs</b>.',
-    ]
-  },
-  {
-    version: '1.21.11', date: '2026-04-24', title: 'DNA interpretation recalibrated',
-    items: [
-      'Re-read the 2020s literature on every variant in the DNA table and quietly corrected five entries where the effect label was inflated versus what modern meta-analyses actually show. MTHFR A1298C (solo), MTR A2756G (heterozygous), VDR FokI, and ADIPOQ +45 all drop from <i>moderate</i> to <i>mild</i>; compound-het and homozygous cases still read as meaningful where they are.',
-      'Fixed a logic bug in FUT2 W154X: the secretor (GG) genotype was flagged as <i>moderate</i> with an actionable hint, but GG is the wild-type phenotype — corrected to <i>none</i>, hint removed.',
-      'Rewrote the TCF7L2 notes so the T2D-risk language doesn\'t read as a verdict — lifestyle genuinely matters more than genotype here.',
-      'Added Illumina GenomeStudio (DNAEra, clinical chip exports) as a supported DNA format; parser now recognizes wrapped probe names like <code>seq-rsXXX</code>, <code>GSA-rsXXX</code>, <code>ilmnseq_rsXXX</code>.',
-      'Fixed CETP TaqIB: table was keyed on old reverse-strand alleles (G/T) from 2002-era papers, but every modern DNA vendor reports forward-strand (G/A). Every user with a heterozygous CETP TaqIB call silently hit "genotype not in lookup" until today.',
-    ]
-  },
-  {
-    version: '1.21.10', date: '2026-04-24', title: 'Newest models recommended',
-    items: [
-      'Claude Opus 4.7 and GPT-5.5 are now flagged as recommended on OpenRouter, PPQ, Routstr, and Venice — they show up in the recommended section of the model picker as soon as your provider serves them.',
+      '<b>5 new SNPs</b> across three new categories: ALDH2 (alcohol flush + cancer risk), CYP1A2 (caffeine metabolism), MTNR1B (late-eating glucose impact), FTO (obesity, exercise-attenuated), and CETP I405V (longevity variant). Curated set: 42 → 47.',
+      '<b>11 new mtDNA sub-haplogroups</b> (H1, H3, J1, J2, K1, T1, T2, U5a, U5b, U6, A2) so consumer mtDNA tests resolve to the level they were measured at — not rolled up to the parent. Total: 27 → 39 haplogroups. Smarter matcher picks the more-specific sub-clade on equal scores.',
+      '<b>Genetics dashboard tells you what is good news.</b> New orange dot for mild effects (previously invisible), green dot for beneficial variants (PCSK9, CETP, LIPC, PPARG protective), white dot for informational/lab-artifact findings (FUT2 secretor status). Legend explains the scheme at the top of the section.',
+      '<b>DNA interpretation recalibrated</b> against 2020s literature: MTHFR A1298C, MTR, VDR FokI, ADIPOQ +45 effect labels tightened from <i>moderate</i> to <i>mild</i> where modern meta-analyses show only modest effects. FUT2 wild-type (GG) corrected from <i>moderate</i> to <i>none</i>. CETP TaqIB strand fix: table was keyed on old reverse-strand alleles (G/T) from 2002 papers; every modern DNA vendor reports forward-strand (G/A), so every heterozygous CETP TaqIB call silently mis-matched until today. TCF7L2 notes softened from verdict-language to tendency-language.',
+      '<b>Illumina GenomeStudio (DNAEra) DNA format</b> now supported. Parser handles all the wrapped probe-name variants (<code>seq-rsXXX</code>, <code>GSA-rsXXX</code>, <code>ilmnseq_rsXXX</code>, <code>BOT-</code>, <code>TOP-</code>, etc.) so wrapped probes still hit the SNP lookup. First-non-missing call wins on duplicate probes.',
+      '<b>Supplement mito-effect database refreshed:</b> added Urolithin A, Methylene Blue, Spermidine, Fisetin, Caffeine, and Ethanol — the most conspicuous omissions. Mechanism notes updated for Metformin (Complex I primacy contested by 2018-2024 mGPDH/AMPK research), Aspirin (uncoupling is high-dose only), Resveratrol (SIRT1 binding contested), and Melatonin (protective antioxidant, not direct activity boost). Total compounds: 108 → 114.',
+      '<b>Recommended models bumped:</b> Claude Opus 4.7 and GPT-5.5 now surface in the recommended section across OpenRouter, PPQ, Routstr, and Venice as soon as each provider catches up.',
+      '<b>Existing imports keep working,</b> but <b>re-import your DNA / mtDNA file once</b> to populate the 5 new autosomal SNPs and the 11 new sub-haplogroup resolutions — recalibrations and the dot-color refresh happen automatically.',
     ]
   },
   {
