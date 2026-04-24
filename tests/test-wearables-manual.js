@@ -30,6 +30,17 @@ return (async function() {
     manual.MANUAL_METRICS.includes('bp_systolic') &&
     manual.MANUAL_METRICS.includes('bp_diastolic') &&
     manual.MANUAL_METRICS.includes('rhr'));
+  assert('deleteManualMetric exported', typeof manual.deleteManualMetric === 'function');
+  assert('refreshManualSummary exported', typeof manual.refreshManualSummary === 'function');
+
+  // Client-list Edit Client modal dual-writes via these helpers; verify the
+  // wiring is present in source so a future refactor can't silently drop it.
+  const clSrc = await fetch('js/client-list.js').then(r => r.text());
+  assert('_clAddBioEntry dual-writes via logManualMetric', clSrc.includes('logManualMetric'));
+  assert('_clAddBioEntry dual-writes via logManualBP', clSrc.includes('logManualBP'));
+  assert('_clDeleteBioEntry mirrors delete into wearables store',
+    clSrc.includes('deleteManualMetric'));
+  assert('client-list refreshes summary after write', clSrc.includes('refreshManualSummary'));
 
   // ═══════════════════════════════════════
   // 2. 'manual' adapter registered
@@ -155,6 +166,41 @@ return (async function() {
     const EMPTY_PROFILE = 'test-empty-' + Math.random().toString(36).slice(2, 8);
     const emptyRes = await manual.migrateBiometricsToManual(EMPTY_PROFILE, null);
     assert('migration handles null biometrics', emptyRes.skipped === 'no-biometrics');
+
+    // ═══════════════════════════════════════
+    // 7. deleteManualMetric
+    // ═══════════════════════════════════════
+    console.log('%c 7. deleteManualMetric ', 'font-weight:bold;color:#f59e0b');
+
+    const DEL_PROFILE = 'test-del-' + Math.random().toString(36).slice(2, 8);
+    window._labState.currentProfile = DEL_PROFILE;
+    window._labState.importedData = { wearableConnections: {} };
+    // Seed: weight + BP + pulse on same date
+    await manual.logManualMetric(DEL_PROFILE, 'weight', { date: '2026-04-24', value: 82 });
+    await manual.logManualBP(DEL_PROFILE, { date: '2026-04-24', systolic: 118, diastolic: 76, pulse: 64 });
+
+    // Delete just weight — BP + pulse must remain
+    await manual.deleteManualMetric(DEL_PROFILE, 'weight', '2026-04-24');
+    const afterWeightDel = await store.getDaily(DEL_PROFILE, 'manual', '2026-04-24');
+    assert('weight deleted but row kept (BP remains)',
+      afterWeightDel?.weight == null && afterWeightDel?.bp_systolic === 118);
+
+    // Delete remaining metrics — row gets stubbed to empty
+    await manual.deleteManualMetric(DEL_PROFILE, 'bp_systolic', '2026-04-24');
+    await manual.deleteManualMetric(DEL_PROFILE, 'bp_diastolic', '2026-04-24');
+    await manual.deleteManualMetric(DEL_PROFILE, 'rhr', '2026-04-24');
+    const afterAllDel = await store.getDaily(DEL_PROFILE, 'manual', '2026-04-24');
+    const hasAnyMetric = manual.MANUAL_METRICS.some((m) => afterAllDel?.[m] != null);
+    assert('all-metrics-deleted row has no metric fields (stub-empty)',
+      !hasAnyMetric);
+
+    // Unknown-metric and no-row cases
+    let threwDel = false;
+    try { await manual.deleteManualMetric(DEL_PROFILE, 'bogus', '2026-04-24'); }
+    catch { threwDel = true; }
+    assert('deleteManualMetric rejects unknown metric', threwDel);
+    await manual.deleteManualMetric(DEL_PROFILE, 'weight', '2099-01-01'); // no-op
+    assert('deleteManualMetric on missing date is a no-op', true);
 
   } finally {
     // Restore live profile

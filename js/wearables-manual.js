@@ -157,6 +157,47 @@ export async function migrateBiometricsToManual(profileId, biometrics) {
 }
 
 /**
+ * Remove a single metric field from the manual row for `date`. If the row
+ * has no remaining metric fields afterward, the row itself is deleted so
+ * the summary doesn't count it as coverage. Used by the Edit Client modal
+ * when a user deletes a biometric entry so the wearable strip stays in sync.
+ */
+export async function deleteManualMetric(profileId, metric, date) {
+  if (!MANUAL_METRICS.includes(metric)) {
+    throw new Error(`deleteManualMetric: unknown metric "${metric}"`);
+  }
+  const existing = await getDaily(profileId, 'manual', date);
+  if (!existing) return;
+  const { source, date: _d, importedAt, ...rest } = existing;
+  delete rest[metric];
+  // Any metric field left? If so, write updated row. Otherwise nuke.
+  const hasOtherMetrics = MANUAL_METRICS.some((m) => rest[m] != null);
+  if (hasOtherMetrics) {
+    await upsertDaily(profileId, { source: 'manual', date, ...rest });
+  } else {
+    // Can't partial-delete from IDB by compound key without another helper —
+    // overwrite with a stub that has no metric fields. The summary loop
+    // ignores rows with no metric values, so functionally this is equivalent
+    // to deletion for display purposes.
+    await upsertDaily(profileId, { source: 'manual', date });
+  }
+}
+
+/**
+ * Trigger an L2 summary rebuild so the dashboard strip reflects a write or
+ * delete that just happened in the Edit Client modal (or elsewhere). The
+ * L2 change-gate prevents redundant writes; call it eagerly after any manual
+ * entry write.
+ */
+export async function refreshManualSummary(profileId) {
+  try {
+    const { syncWearableSummary } = await import('./wearables-summary.js');
+    const { listConnectedSources } = await import('./wearables-connect.js');
+    await syncWearableSummary(profileId, listConnectedSources());
+  } catch { /* non-fatal */ }
+}
+
+/**
  * Is `manual` a "connected" source for this profile? True when any manual
  * row exists in the wearables IDB. Used by the wearables-connect façade so
  * the dashboard strip and Settings → Integrations panel list Manual

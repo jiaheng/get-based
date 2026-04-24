@@ -811,6 +811,11 @@ function _clBioHistory(entries, type) {
 
 function _clAddBioEntry(type) {
   const bio = _getBio();
+  // Dual-write shape: `manualWrite` holds the wearables-IDB payload the async
+  // hook at the end of this function ships into the manual source. The
+  // in-memory biometrics update above keeps working as-is so the modal UI
+  // renders synchronously; the IDB write catches up and refreshes the strip.
+  let manualWrite = null;
   if (type === 'weight') {
     const val = parseFloat(document.getElementById('cl-bio-weight-val')?.value);
     const unit = document.getElementById('cl-bio-weight-unit')?.value || 'kg';
@@ -821,6 +826,9 @@ function _clAddBioEntry(type) {
     bio.weight = bio.weight.filter(e => e.date !== date);
     bio.weight.push({ date, value: val, unit, source: 'manual' });
     bio.weight.sort((a, b) => a.date.localeCompare(b.date));
+    // Canonicalize to kg for the wearables store.
+    const kg = unit === 'lbs' ? val / 2.20462 : val;
+    manualWrite = { kind: 'metric', metric: 'weight', date, value: kg };
   } else if (type === 'bp') {
     const sys = parseInt(document.getElementById('cl-bio-bp-sys')?.value);
     const dia = parseInt(document.getElementById('cl-bio-bp-dia')?.value);
@@ -831,6 +839,7 @@ function _clAddBioEntry(type) {
     bio.bp = bio.bp.filter(e => e.date !== date);
     bio.bp.push({ date, sys, dia, source: 'manual' });
     bio.bp.sort((a, b) => a.date.localeCompare(b.date));
+    manualWrite = { kind: 'bp', date, systolic: sys, diastolic: dia };
   } else if (type === 'pulse') {
     const val = parseInt(document.getElementById('cl-bio-pulse-val')?.value);
     const date = document.getElementById('cl-bio-pulse-date')?.value;
@@ -839,12 +848,32 @@ function _clAddBioEntry(type) {
     bio.pulse = bio.pulse.filter(e => e.date !== date);
     bio.pulse.push({ date, value: val, source: 'manual' });
     bio.pulse.sort((a, b) => a.date.localeCompare(b.date));
+    manualWrite = { kind: 'metric', metric: 'rhr', date, value: val };
   }
   if (window.recordChange) window.recordChange('biometrics');
   window.saveImportedData();
   _clRenderBioField(type);
   _clUpdateBMI();
   _clUpdateBioSummary();
+
+  // Dual-write into the wearables IDB so the dashboard strip reflects the
+  // new entry alongside Oura/Withings/etc. Fire-and-forget — the modal UI
+  // doesn't block on it. Summary resync happens after the write lands.
+  if (manualWrite) {
+    (async () => {
+      try {
+        const { logManualMetric, logManualBP, refreshManualSummary } = await import('./wearables-manual.js');
+        if (manualWrite.kind === 'metric') {
+          await logManualMetric(state.currentProfile, manualWrite.metric, { date: manualWrite.date, value: manualWrite.value });
+        } else if (manualWrite.kind === 'bp') {
+          await logManualBP(state.currentProfile, { date: manualWrite.date, systolic: manualWrite.systolic, diastolic: manualWrite.diastolic });
+        }
+        await refreshManualSummary(state.currentProfile);
+      } catch (e) {
+        if (window.isDebugMode?.()) console.warn('[client-list] manual dual-write failed:', e.message);
+      }
+    })();
+  }
 }
 
 function _clDeleteBioEntry(type, date) {
@@ -857,6 +886,22 @@ function _clDeleteBioEntry(type, date) {
     _clUpdateBMI();
     _clUpdateBioSummary();
   }
+  // Mirror the delete into the wearables store so the dashboard strip stays
+  // in sync. `bp` deletions clear both systolic and diastolic for that date.
+  (async () => {
+    try {
+      const { deleteManualMetric, refreshManualSummary } = await import('./wearables-manual.js');
+      if (type === 'weight') await deleteManualMetric(state.currentProfile, 'weight', date);
+      else if (type === 'pulse') await deleteManualMetric(state.currentProfile, 'rhr', date);
+      else if (type === 'bp') {
+        await deleteManualMetric(state.currentProfile, 'bp_systolic', date);
+        await deleteManualMetric(state.currentProfile, 'bp_diastolic', date);
+      }
+      await refreshManualSummary(state.currentProfile);
+    } catch (e) {
+      if (window.isDebugMode?.()) console.warn('[client-list] manual delete mirror failed:', e.message);
+    }
+  })();
 }
 
 function _clBioShowAll(type) {
