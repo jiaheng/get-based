@@ -240,9 +240,34 @@ return (async function() {
   }
 
   // ═══════════════════════════════════════
-  // 14. VENDOR FILES
+  // 14. WEARABLE CONNECTIONS PRESERVE
   // ═══════════════════════════════════════
-  console.log('%c 14. Vendor Files ', 'font-weight:bold;color:#f59e0b');
+  console.log('%c 14. Wearable Connections Preserve ', 'font-weight:bold;color:#f59e0b');
+
+  // Push side: stripWearableCredentials removes wearableConnections from the payload
+  assert('buildSyncPayload strips wearableConnections', syncSrc.includes('stripWearableCredentials(importedData)'));
+  assert('stripWearableCredentials drops wearableConnections key', syncSrc.includes('{ wearableConnections, ...rest } = importedData'));
+
+  // Pull side: must re-inject local wearableConnections into incoming blob so it isn't clobbered.
+  // The stripped remote payload arrives with no wearableConnections; without this preserve step
+  // the overwrite at setItem(localKey, importedJson) would wipe every device's OAuth tokens.
+  assert('Pull preserves local wearableConnections (active profile)',
+    syncSrc.includes('state.importedData?.wearableConnections'));
+  assert('Pull preserves local wearableConnections (inactive profile)',
+    syncSrc.includes('parsed?.wearableConnections'));
+  assert('Pull re-injects preserved wearableConnections into pulled blob',
+    syncSrc.includes('importedData.wearableConnections = localWearableConnections'));
+
+  // Guard: preserve branch must run before the localStorage write (otherwise stale)
+  const preserveIdx = syncSrc.indexOf('importedData.wearableConnections = localWearableConnections');
+  const writeIdx = syncSrc.indexOf('setItem(localKey, importedJson)');
+  assert('Preserve runs before localStorage write', preserveIdx > 0 && preserveIdx < writeIdx,
+    `preserve at ${preserveIdx}, write at ${writeIdx}`);
+
+  // ═══════════════════════════════════════
+  // 15. VENDOR FILES
+  // ═══════════════════════════════════════
+  console.log('%c 15. Vendor Files ', 'font-weight:bold;color:#f59e0b');
 
   const vendorFiles = ['vendor/evolu/evolu-bundle.js', 'vendor/evolu/Db.worker.js', 'vendor/evolu/sqlite3.wasm'];
   for (const f of vendorFiles) {

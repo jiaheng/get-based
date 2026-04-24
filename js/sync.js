@@ -725,6 +725,30 @@ async function onSyncReceived() {
         // Validate importedData shape
         if (!importedData || typeof importedData !== 'object') continue;
 
+        // Preserve local wearableConnections — they're stripped from the push
+        // payload (tokens stay per-device), so the remote blob never carries
+        // them. Without this merge the pull would wipe this device's OAuth
+        // tokens and silently disconnect every connected vendor.
+        let localWearableConnections = null;
+        if (profileId === state.currentProfile) {
+          localWearableConnections = state.importedData?.wearableConnections || null;
+        } else {
+          try {
+            const rawLocal = getEncryptionEnabled()
+              ? await encryptedGetItem(localKey)
+              : localStorage.getItem(localKey);
+            if (rawLocal) {
+              const parsed = JSON.parse(rawLocal);
+              localWearableConnections = parsed?.wearableConnections || null;
+            }
+          } catch (e) {
+            dbg('Could not read local wearableConnections for preserve:', e.message);
+          }
+        }
+        if (localWearableConnections) {
+          importedData.wearableConnections = localWearableConnections;
+        }
+
         // Update importedData in localStorage
         const importedJson = JSON.stringify(importedData);
         if (getEncryptionEnabled()) {
