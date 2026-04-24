@@ -4024,6 +4024,7 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
   padding: 1px 6px; border-radius: 6px;
   background: rgba(128,128,128,0.08);
   text-transform: none; letter-spacing: 0;
+  white-space: nowrap; flex-shrink: 0;
 }
 .wearable-trend-bad       { color: var(--red);   background: var(--red-bg); }
 .wearable-trend-good      { color: var(--green); background: var(--green-bg); }
@@ -4034,6 +4035,8 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
   text-transform: uppercase; letter-spacing: 0.05em;
   padding: 1px 5px; border-radius: 4px;
   background: rgba(128,128,128,0.08);
+  min-width: 0; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
 .wearable-strip-footer {
