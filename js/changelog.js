@@ -5,6 +5,16 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.23.0', date: '2026-04-24', title: 'mtDNA: 11 sub-haplogroups + smarter matcher',
+    items: [
+      'Added <b>11 mtDNA sub-haplogroups</b> (H1, H3, J1, J2, K1, T1, T2, U5a, U5b, U6, A2). Most consumer mtDNA tests (23andMe, FTDNA) report at this resolution — until now the app rolled them all up to the parent haplogroup (H/J/K/T/U/A) and lost meaningful clinical detail.',
+      '<b>Matcher upgrade:</b> when a sample matches both a parent and a sub-clade equally well, the more-specific sub-clade now wins (tiebreaker on matched mutation count). Carries the U5a-vs-U6 and J1-vs-J2 distinctions cleanly.',
+      'New phenotype info per sub-clade: H1 (Iberian post-LGM, sepsis-survival signal), J1 (centenarian enrichment, LHON 11778 modifier), K1 (Ashkenazi K1a1b1a founder), U5b (oldest verified European mtDNA, ~50% of Saami), U6 (North African back-migration, distinct from U5), and more.',
+      '<b>Cleanup:</b> trimmed three universal control-region mutations (199C/204C/250C) from haplogroup I that were noise rather than diagnostic; softened haplogroup B\'s high-altitude pulmonary edema claim to reflect that nuclear ADH7 variants are the stronger HAPE signal.',
+      'Total haplogroups: 27 → 39.',
+    ]
+  },
+  {
     version: '1.22.2', date: '2026-04-24', title: 'Supplement mito-effects: 6 additions + mechanism updates',
     items: [
       'Added <b>6 missing mitochondrial compounds</b> to the supplement warning system: Urolithin A (mitophagy, Auwerx lab), Methylene Blue (Complex IV electron carrier, biphasic), Spermidine (autophagy inducer), Fisetin (top senolytic per Mayo), Caffeine (exercise-mimetic biogenesis), and Ethanol (the biggest mitotoxin we were missing).',

@@ -187,10 +187,17 @@ return (async function() {
     return dna.renderGeneticsSection();
   }
 
-  // Protective: PCSK9 GT → green dot (🟢 = U+1F7E2 surrogate pair D83D DFE2)
+  // Helper: extract just the finding-row HTML (excludes the legend, which always
+  // contains every dot character for explanatory purposes).
+  const findingRowDots = (html) => {
+    const rows = html.match(/<div class="genetics-finding-row[^"]*"[^>]*>[\s\S]*?<\/div>/g) || [];
+    return rows.join('').match(/[🔴🟡🟠🟢⚪]/g)?.join('') || '';
+  };
+
+  // Protective: PCSK9 GT → green dot in the finding row, no red dot in the row
   let html = mockAndRender({ rs11591147: { genotype: 'GT', gene: 'PCSK9', variant: 'R46L' } });
-  assert('Protective genotype renders green dot', html.includes('🟢'));
-  assert('Protective genotype does NOT render red dot', !html.includes('🔴'));
+  assert('Protective finding row has green dot', findingRowDots(html).includes('🟢'));
+  assert('Protective finding row has NO red dot', !findingRowDots(html).includes('🔴'));
 
   // Significant risk: MTHFR C677T AA → red dot
   html = mockAndRender({ rs1801133: { genotype: 'AA', gene: 'MTHFR', variant: 'C677T' } });

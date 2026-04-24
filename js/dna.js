@@ -102,7 +102,10 @@ self.onmessage = async function(e) {
       // before any rows are eligible.
       const trimmed = line.trim();
       if (!illuminaInData) {
-        if (/^\[Data\]/i.test(trimmed)) illuminaInData = true;
+        // Note the double-escape: the worker code is in a template literal,
+        // so doubled backslashes here render as single backslashes in the
+        // worker source, giving a regex that matches literal "[Data]".
+        if (/^\\[Data\\]/i.test(trimmed)) illuminaInData = true;
         continue;
       }
       if (/^Sample Name/i.test(trimmed)) continue;
@@ -752,7 +755,7 @@ function getRelevantSNPs(dotKey) {
 let _haplogroupTable = null;
 let _haplogroupTablePromise = null;
 
-function loadHaplogroupTable() {
+export function loadHaplogroupTable() {
   if (_haplogroupTable) return Promise.resolve(_haplogroupTable);
   if (!_haplogroupTablePromise) {
     _haplogroupTablePromise = fetch('data/haplogroups.json')
@@ -767,7 +770,7 @@ export function ensureHaplogroupTable() {
   if (state.importedData?.genetics?.mtdna) loadHaplogroupTable();
 }
 
-function parseMtDNAMutations(text) {
+export function parseMtDNAMutations(text) {
   const mutations = [];
   for (const line of text.split(/\r?\n/)) {
     const trimmed = line.trim();
@@ -786,18 +789,25 @@ function parseMtDNAMutations(text) {
   return mutations;
 }
 
-function resolveHaplogroup(mutations, hapTable) {
+export function resolveHaplogroup(mutations, hapTable) {
   const mutationSet = new Set(mutations.map(m => m.raw));
   let bestMatch = null;
   let bestScore = 0;
+  let bestMatchedCount = 0;
 
   for (const [hg, data] of Object.entries(hapTable.haplogroups)) {
     if (data.isReference) continue; // H is reference — handle separately
     const diag = data.mutations;
     const matched = diag.filter(m => mutationSet.has(m));
     const score = matched.length / diag.length;
-    if (score > bestScore && matched.length >= 2 && score >= 0.6) {
+    // Tiebreaker: when scores are equal, prefer the haplogroup with more
+    // matched mutations. Sub-clades store parent+derived markers together
+    // (cumulative inheritance), so a true H1 carrier matches 3/3 on H1 and
+    // 2/2 on H — both score 1.0, but H1 has the larger matched count.
+    const better = score > bestScore || (score === bestScore && matched.length > bestMatchedCount);
+    if (better && matched.length >= 2 && score >= 0.6) {
       bestScore = score;
+      bestMatchedCount = matched.length;
       bestMatch = { haplogroup: hg, confidence: score, matchedMutations: matched.length, totalDiagnostic: diag.length };
     }
   }
