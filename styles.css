@@ -4023,6 +4023,68 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
   font-weight: 600;
 }
 
+/* Manual entries list in the detail modal — per-row delete + add form */
+.wearable-manual-entries {
+  margin-top: 14px; padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.wearable-manual-entries-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 8px;
+}
+.wearable-manual-entries-title {
+  font-size: 13px; font-weight: 600; color: var(--text-primary);
+}
+.wearable-manual-entries-count {
+  display: inline-block; margin-left: 6px; padding: 1px 6px;
+  font-size: 10px; font-weight: 500; color: var(--text-muted);
+  background: var(--bg-tertiary, rgba(128,128,128,0.08)); border-radius: 8px;
+}
+.wearable-manual-add-btn {
+  padding: 4px 10px; font-size: 11px; font-weight: 600;
+  background: transparent; color: var(--accent);
+  border: 1px solid var(--accent); border-radius: 6px;
+  cursor: pointer;
+}
+.wearable-manual-add-btn:hover { background: var(--accent-faded, rgba(99,102,241,0.12)); }
+.wearable-manual-entries-empty {
+  font-size: 12px; color: var(--text-muted); padding: 6px 0;
+}
+.wearable-manual-entries-list {
+  list-style: none; padding: 0; margin: 0;
+  max-height: 240px; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: 6px;
+}
+.wearable-manual-entry {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 10px; font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.wearable-manual-entry:last-child { border-bottom: 0; }
+.wearable-manual-entry-date { color: var(--text-muted); min-width: 84px; font-variant-numeric: tabular-nums; }
+.wearable-manual-entry-val { font-weight: 600; font-variant-numeric: tabular-nums; }
+.wearable-manual-entry-unit { font-weight: 400; color: var(--text-muted); font-size: 11px; }
+.wearable-manual-entry-tags { display: inline-flex; gap: 3px; flex-wrap: wrap; }
+.wearable-manual-entry-tag {
+  font-size: 9px; padding: 1px 5px; border-radius: 8px;
+  background: var(--bg-tertiary, rgba(128,128,128,0.08));
+  color: var(--text-muted); text-transform: lowercase;
+}
+.wearable-manual-entry-del {
+  margin-left: auto; padding: 2px 7px; font-size: 13px; line-height: 1;
+  background: transparent; border: 0; color: var(--text-muted);
+  cursor: pointer; border-radius: 4px;
+}
+.wearable-manual-entry-del:hover { color: var(--red, #ef4444); background: var(--bg-tertiary, rgba(239,68,68,0.08)); }
+.wearable-manual-add-form {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 8px 10px; margin-bottom: 8px;
+  background: var(--bg-tertiary, rgba(128,128,128,0.06)); border-radius: 6px;
+}
+.wearable-manual-add-form .wearable-log-input { max-width: 110px; }
+.wearable-manual-add-form .wearable-log-date { max-width: 140px; }
+.wearable-manual-add-form-bp .wearable-log-bp-row { gap: 2px; }
+
 .wearable-card-top {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
 }
