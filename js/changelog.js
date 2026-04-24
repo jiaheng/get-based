@@ -18,16 +18,17 @@ const CHANGELOG = [
     ]
   },
   {
-    // NOTE: this entry will be re-versioned at merge time (likely v1.24.0 or similar)
-    // — left at 1.22.0 here to preserve the original authored date/content.
-    version: '1.22.0', date: '2026-04-23', title: 'Wearables — connect 7 devices, see all your metrics in one place',
+    version: '1.24.0', date: '2026-04-24', title: 'Health Metrics — wearables + manual entry in one unified dashboard strip',
     items: [
-      '<b>Seven wearable integrations.</b> Connect Oura, WHOOP, Withings, Ultrahuman, Fitbit, Polar, or Apple Health (file import). Each one syncs the metrics it exposes — HRV, resting heart rate, sleep, readiness, activity, steps, and more — into a single dashboard view alongside your blood work.',
-      '<b>Wearable strip on the dashboard</b> with cards for each metric. Click any card for the full 90-day chart. If you have more than one wearable connected, tap the tiny <i>via {vendor}</i> badge to choose which one drives that metric.',
-      '<b>Settings → Integrations panel</b> for managing connections. Real vendor logos, one click to connect, expand a row to sync, re-sync 90 days, or disconnect. Works in light and dark themes.',
-      '<b>Settings → AI → AI Context</b> has a toggle to include or exclude wearable data from the AI chat context. On by default; turn it off to keep wearable metrics out of every chat prompt.',
-      '<b>Privacy by design.</b> Wearable data stays on your device. Only a compact summary plus anomaly events sync to your other devices via the existing Evolu CRDT. We never see your raw HRV / sleep / heart-rate data.',
-      '<b>Notes.</b> Polar exposes HRV only from recorded workouts (not overnight averages like Oura / WHOOP / Fitbit). Apple Health is file-import — export from your iPhone and drop the zip in. All seven integrations are <i>beta</i> — please report issues.',
+      '<b>Seven wearable integrations.</b> Connect Oura, WHOOP, Withings, Ultrahuman, Fitbit, Polar, or Apple Health (file import). Each one syncs the metrics it exposes — HRV, resting heart rate, sleep, readiness, activity, steps, weight, blood pressure, and more — into a single dashboard view alongside your blood work.',
+      '<b>Manual entry is a first-class source.</b> Weight, blood pressure, and resting heart rate moved from the Edit Client modal to the dashboard strip. Empty cards appear with a <code>+ log</code> affordance — tap to open an inline form (number field + date picker + optional context chips like <i>post-workout</i> or <i>morning-fasted</i>), Enter to save. Same card shape as wearable-synced metrics, labeled <i>via Manual</i>. Existing biometrics data migrates automatically on first load.',
+      '<b>Per-metric source picker.</b> When two sources cover the same metric (e.g. Oura + manual both provide resting HR), tap the <i>via {vendor}</i> badge to switch which one drives the card. Per-metric, persisted, overridable.',
+      '<b>Manage every reading individually.</b> Tap any card → detail modal now lists every manual entry for that metric with per-row delete and a <code>+ Add reading</code> button that accepts backfilled dates. No more "all or nothing" — fix a typo without wiping history.',
+      '<b>Reorder your strip.</b> Tap the ⇄ button in the strip header → each card grows ◀ ▶ arrows → one click moves that card one slot. Works the same on mouse and touch. Order persists per-profile.',
+      '<b>Settings → Integrations panel</b> for managing connections. Real vendor logos, one-click connect, expand a row to sync / re-sync 90 days / disconnect. Manual is in the same list — expand it for entry counts + a <i>Delete all manual entries</i> escape hatch (wearable data untouched).',
+      '<b>Settings → AI → AI Context</b> has a toggle to include or exclude wearable data from the AI chat context. On by default; turn it off to keep metrics out of every prompt.',
+      '<b>Privacy by design.</b> Wearable data stays on your device. Only a compact summary plus anomaly events sync to your other devices via the existing Evolu CRDT. We never see your raw HRV / sleep / heart-rate data. OAuth tokens stay per-device — never sync.',
+      '<b>Notes.</b> Polar exposes HRV only from recorded workouts (not overnight averages like Oura / WHOOP / Fitbit). Apple Health is file-import — export from your iPhone and drop the zip in. All seven integrations are <i>beta</i>; WHOOP and Ultrahuman are waiting on partner credentials for the OAuth handshake.',
     ]
   },
   {

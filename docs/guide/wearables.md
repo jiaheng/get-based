@@ -1,10 +1,12 @@
 # Wearable Integrations
 
-getbased connects to seven wearable / device platforms and surfaces their daily metrics on the dashboard alongside your blood-work data.
+getbased connects to seven wearable / device platforms and also treats your own **manual entries** as a first-class source. Everything surfaces on one dashboard strip alongside your blood-work data.
 
 ## What you get
 
-A wearable strip on the dashboard with a card per metric: HRV, resting heart rate, sleep score, readiness, activity, steps, weight, blood pressure, SpO₂, body-temperature delta, and more. Click any card for the full 90-day chart. If you have more than one wearable connected, tap the small *via {vendor}* badge on a card to choose which vendor drives that specific metric.
+A dashboard strip with a card per metric: HRV, resting heart rate, sleep score, readiness, activity, steps, weight, blood pressure, SpO₂, body-temperature delta, and more. Tap any card for the 90-day chart + statistics + the full list of readings (with per-row delete for manual entries you logged yourself).
+
+If you have more than one source for a metric, tap the small *via {vendor}* badge on a card to choose which one drives the displayed value. You can also **reorder the strip** — tap the ⇄ button in the header → each card gets ◀ ▶ arrows → one click moves that card one slot. Order is saved per-profile.
 
 ## Vendors
 
@@ -17,6 +19,7 @@ A wearable strip on the dashboard with a card per metric: HRV, resting heart rat
 | **Withings** | OAuth 2.0 | One-click. Need a Withings account + scale / BPM / Scanwatch. |
 | **Polar** | OAuth 2.0 | One-click. Need a Polar account and **at least one device sync to Polar Flow first** — Polar AccessLink uses a transactions model that returns nothing until the device has uploaded data. HRV is workout-only (recorded with a chest strap), not overnight. |
 | **Apple Health** | File import (no OAuth) | Export from your iPhone Health app and drop the `.zip` here. |
+| **Manual** | No auth — you type the value | Built-in. Tap any empty weight / blood pressure / resting HR card on the dashboard → inline form → Enter to save. Context chips (post-workout, morning-fasted, etc.) optional. See [Manual entry](#manual-entry) below. |
 
 ## How to connect
 
@@ -31,6 +34,23 @@ The OAuth-based vendors open the vendor's authorise page. After you approve, you
 3. Drop the zip onto the Apple Health row in Settings → Integrations
 
 Parsing runs entirely in your browser — no server contact.
+
+## Manual entry
+
+Weight, blood pressure, and resting heart rate can be logged without any wearable. The dashboard strip shows an empty card for each of those metrics when nothing else provides them.
+
+**To log a reading:**
+
+1. Tap the empty card (e.g. the `Weight –` card with a `+ log` affordance at the bottom)
+2. Type the number into the inline input (weight in kg, BP as sys/dia/optional pulse, RHR in bpm)
+3. Optionally tap one of the **context chips** — `resting`, `morning-fasted`, `post-workout`, `stress`. These help the AI interpret the number correctly (a BP of 140/90 resting is very different from 140/90 post-workout).
+4. Hit **Enter** or tap **Save**. The card populates; the reading appears with a *via Manual* badge.
+
+**To manage past readings:** tap any card to open its detail modal. Scroll down past the chart + stats — you'll see a **Manual entries** list showing every reading you've logged for that metric, with a **×** delete button on each row and a **+ Add reading** button at the top that accepts backfilled dates. Fix a typo by deleting the old reading and logging the correct value — edits are "delete + re-add" rather than in-place for simplicity.
+
+**To delete everything:** Settings → Integrations → expand the **Manual** row → **Delete all manual entries**. Wearable data from Oura / Withings / etc. is untouched.
+
+Manual entries sync to your other devices via the same Evolu CRDT summary layer as wearable data — the raw readings stay local, only a compact summary propagates.
 
 ## Privacy
 
