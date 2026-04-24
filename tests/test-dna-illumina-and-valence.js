@@ -34,6 +34,21 @@ return (async function() {
   assert('Filename "DNAEra-orig-XXX.csv" recognized', dna.isDNAFile({ name: 'DNAEra-orig-41220311706341.csv' }));
   assert('Filename without dnaera/ancestry/etc not recognized', !dna.isDNAFile({ name: 'random-data.csv' }));
 
+  // Regression guard: the worker's [Data]-block detection regex must use
+  // double-escaped brackets in the template literal (\\[Data\\]) so the
+  // worker source has a regex matching the literal string [Data]. A single
+  // escape would silently render `/^[Data]/i` (a character class matching
+  // D/a/t) — the parser would never advance past the [Header] block. This
+  // bit us once during development. The dna.js source must contain `\\[Data\\]`.
+  const dnaSrcForRegex = await fetch('js/dna.js').then(r => r.text());
+  assert('Worker [Data] regex uses double-escaped brackets',
+    dnaSrcForRegex.includes('/^\\\\[Data\\\\]/i'),
+    'should match `\\\\[Data\\\\]` in source so worker sees \\[Data\\]');
+  // Sanity: prove the rendered worker-source regex does match the literal "[Data]".
+  // /^\[Data\]/i matches "[Data]"; /^[Data]/i (the broken version) does NOT.
+  assert('Properly-escaped regex matches literal [Data]', /^\[Data\]/i.test('[Data]'));
+  assert('Single-escape would NOT match (proves the bug is real)', !/^[Data]/i.test('[Data]'));
+
   // ═══════════════════════════════════════
   // 2. Illumina GSGT parser end-to-end
   // ═══════════════════════════════════════

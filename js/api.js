@@ -219,6 +219,11 @@ export function isRecommendedModel(provider, modelId) {
   if (provider === 'openrouter') return OPENROUTER_RECOMMENDED.some(function(prefix) { return modelId.startsWith(prefix); });
   if (provider === 'venice') {
     if (modelId.startsWith('e2ee-')) return /qwen3-5-122b|gpt-oss-120b|qwen3-30b|glm-5/.test(modelId);
+    // claude-(sonnet-4-6|opus-4-7) is intentionally narrow — Anthropic ships
+    // each model as its own version. When sonnet-4-7 / opus-4-8 land, broaden
+    // the alternation rather than back to (sonnet|opus)-4-X (would over-match
+    // older versions). gpt-5[2345] tracks 5.2/5.3/5.4/5.5 — extend digits as
+    // OpenAI ships new minor versions.
     return /^(claude-(sonnet-4-6|opus-4-7)|openai-gpt-5[2345](-codex)?|gemini-3(-1)?-pro|grok-4[1-9]?)(-|$)/.test(modelId);
   }
   if (provider === 'routstr') return ROUTSTR_RECOMMENDED.some(function(r) { return modelId === r || modelId.startsWith(r); });
