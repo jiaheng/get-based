@@ -2,7 +2,7 @@
   "_meta": {
     "version": "1.0.0",
     "description": "mtDNA haplogroup diagnostic mutations and mitochondrial coupling classification. Based on Doug Wallace's mitochondrial paradigm. Diagnostic mutations from MITOMAP/PhyloTree Build 17.",
-    "haplogroupCount": 26,
+    "haplogroupCount": 39,
     "caveat": "The coupling/uncoupling classification is a research framework supported by cybrid studies and epidemiological data, but not universally accepted. Individual variation within haplogroups is large.",
     "references": [
       { "pmid": 26406369, "desc": "Wallace 2015 (Cell) — Mitochondrial DNA variation in human radiation and disease" },
@@ -98,7 +98,7 @@
       "coupling": "coupled_intermediate",
       "origin": "Southeast Asia / Pacific",
       "climate": "Tropical / Temperate",
-      "etc": "Classic 9bp deletion at 8271-8289. Polynesian, Pacific coastal. Risk factor for high-altitude pulmonary edema"
+      "etc": "Classic 9bp deletion at 8271-8289 (not yet representable in the current mutation schema). Polynesian, Pacific coastal. Studied in altitude adaptation contexts; specific HAPE signal is weaker than nuclear variants like ADH7"
     },
     "C": {
       "mutations": ["3552A", "9545G", "13263G", "14318C", "15487T", "16298C", "16327T"],
@@ -151,7 +151,7 @@
       "etc": "Parent of H and V"
     },
     "I": {
-      "mutations": ["199C", "204C", "250C", "1719A", "4529T", "8251A", "10398G", "15043A", "16391A"],
+      "mutations": ["1719A", "4529T", "8251A", "10398G", "15043A", "16391A"],
       "coupling": "moderately_uncoupled",
       "origin": "West Asia / Near East",
       "climate": "Temperate / Cold",
@@ -212,6 +212,94 @@
       "origin": "Central/Northeast Asia",
       "climate": "Cold / Temperate",
       "etc": "M8 descendant (shares ancestry with C). Sami, Finns, Central Asians, Siberia"
+    },
+    "H1": {
+      "parentHg": "H",
+      "mutations": ["2706A", "7028C", "3010A"],
+      "coupling": "mildly_uncoupled",
+      "origin": "Iberian Peninsula / Franco-Cantabrian refugium",
+      "climate": "Temperate",
+      "etc": "Post-LGM expansion clade. ~25% of Iberian mtDNA, ~13% W. European H. Sepsis-survival advantage in ICU cohorts (Baudouin 2010, PMID 18852894)"
+    },
+    "H3": {
+      "parentHg": "H",
+      "mutations": ["2706A", "7028C", "6776C"],
+      "coupling": "mildly_uncoupled",
+      "origin": "Iberian Peninsula",
+      "climate": "Temperate",
+      "etc": "Sister of H1 in Franco-Cantabrian post-glacial expansion. Protective signal for ischemic cardiomyopathy and Parkinson's in Spanish cohorts (Pereira 2005, PMID 16401464)"
+    },
+    "J1": {
+      "parentHg": "J",
+      "mutations": ["295T", "489C", "4216C", "10398G", "11251G", "12612G", "13708A", "16069T", "16126C", "3010A", "462T", "16261T"],
+      "coupling": "uncoupled",
+      "origin": "Near East → Northern Europe / Arabia",
+      "climate": "Cold (Northern European)",
+      "etc": "J1c sub-clade enriched in centenarians (Italian, Irish cohorts). LHON 11778 penetrance modifier — elevates vision-loss risk in 11778G>A carriers (Hudson 2007, PMID 19234490)"
+    },
+    "J2": {
+      "parentHg": "J",
+      "mutations": ["295T", "489C", "4216C", "10398G", "11251G", "12612G", "13708A", "16069T", "16126C", "7476T", "15257A", "150T"],
+      "coupling": "uncoupled",
+      "origin": "Near East / Caucasus",
+      "climate": "Temperate",
+      "etc": "Higher LHON 14484 penetrance than J1. MS susceptibility modifier in some European cohorts. Less common than J1"
+    },
+    "K1": {
+      "parentHg": "K",
+      "mutations": ["1189C", "1811G", "3480G", "9055A", "9698C", "10550G", "11467G", "12308G", "12372A", "14798C", "16224C", "497T", "3992T"],
+      "coupling": "moderately_uncoupled",
+      "origin": "Near East",
+      "climate": "Temperate",
+      "etc": "Most common K branch in Europe (~5%). K1a1b1a sub-sub-clade is the dominant Ashkenazi Jewish founder lineage (~32% of AJ mtDNA, Behar 2006 PMID 16404693)"
+    },
+    "T1": {
+      "parentHg": "T",
+      "mutations": ["709A", "1888A", "4216C", "4917G", "8697A", "10463C", "13368A", "14905A", "15607G", "15928A", "16126C", "16294T", "12633A", "9899C", "16163G"],
+      "coupling": "uncoupled",
+      "origin": "Near East → Eastern Europe / Caucasus",
+      "climate": "Temperate / Cold",
+      "etc": "T1a peaks in Eastern Europe and Caucasus (~3-8%). Asthenozoospermia association (sperm motility differential — Ruiz-Pesini 2000 originally on T, refined to T1)"
+    },
+    "T2": {
+      "parentHg": "T",
+      "mutations": ["709A", "1888A", "4216C", "4917G", "8697A", "10463C", "13368A", "14905A", "15607G", "15928A", "16126C", "16294T", "11812G", "14233G", "150T"],
+      "coupling": "uncoupled",
+      "origin": "Near East → Europe",
+      "climate": "Temperate",
+      "etc": "Dominant T sub-clade in Europe (~75% of all T). T2b especially common in British Isles. Reported AD/PD signals in some cohorts — evidence weakly replicated, treat with caution"
+    },
+    "U5a": {
+      "parentHg": "U",
+      "mutations": ["11467G", "12308G", "12372A", "3197C", "9477A", "13617C", "16270T", "14793G", "16256T"],
+      "coupling": "moderately_uncoupled",
+      "origin": "Mesolithic Northern Europe",
+      "climate": "Cold / Temperate",
+      "etc": "Mesolithic European hunter-gatherer founder. U5a1a1 over-represented in Italian centenarians (Raule 2014). Vitamin D synthesis efficiency hypothesis — lighter pigmentation co-evolved on U5 backgrounds"
+    },
+    "U5b": {
+      "parentHg": "U",
+      "mutations": ["11467G", "12308G", "12372A", "3197C", "9477A", "13617C", "16270T", "5656G", "7768G", "150T"],
+      "coupling": "moderately_uncoupled",
+      "origin": "Mesolithic Europe — oldest verified European mtDNA branch",
+      "climate": "Cold / Subarctic",
+      "etc": "Oldest dated European lineage (~30 kya, La Braña hunter-gatherer). Up to ~50% of Saami mtDNA; ~30% of Finns. Strong cold-adaptation signal"
+    },
+    "U6": {
+      "parentHg": "U",
+      "mutations": ["11467G", "12308G", "12372A", "3348G", "16172C", "16219G"],
+      "coupling": "mildly_uncoupled",
+      "origin": "North Africa (back-migration from Near East ~30 kya)",
+      "climate": "Subtropical / Temperate (Mediterranean N. Africa)",
+      "etc": "Defining mtDNA of indigenous North African populations (~10-20% in Berber groups; ~30% Canary Islands Guanches). Distinct from U5 — separate Levantine back-migration lineage"
+    },
+    "A2": {
+      "parentHg": "A",
+      "mutations": ["235G", "663G", "1736G", "4248C", "4824G", "8794T", "16290T", "16319A", "64T", "153G", "8027A"],
+      "coupling": "intermediate_uncoupled",
+      "origin": "Beringia → Americas",
+      "climate": "Cold / Subarctic / variable post-expansion",
+      "etc": "One of the four founding Native American mtDNA lineages. Coastal Pacific migration route. Highest frequencies in Na-Dene (~30%) and Eskimo-Aleut (~70%) populations"
     }
   },
   "couplingLevels": {
