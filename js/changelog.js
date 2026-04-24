@@ -5,6 +5,12 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.21.10', date: '2026-04-24', title: 'Newest models recommended',
+    items: [
+      'Claude Opus 4.7 and GPT-5.5 are now flagged as recommended on OpenRouter, PPQ, Routstr, and Venice — they show up in the recommended section of the model picker as soon as your provider serves them.',
+    ]
+  },
+  {
     version: '1.21.7–9', date: '2026-04-20', title: 'Code hygiene',
     items: [
       'Dead code removed, internal architecture doc trimmed, chat panel split into smaller modules. No user-visible change.',

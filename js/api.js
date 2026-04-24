@@ -202,24 +202,24 @@ const OPENROUTER_CURATED = [
 // To check current IDs, run in console:
 //   JSON.parse(localStorage.getItem('labcharts-openrouter-models')||'[]').map(m=>m.id)
 const OPENROUTER_RECOMMENDED = [
-  'anthropic/claude-sonnet-4.6', 'anthropic/claude-opus-4.6',
-  'openai/gpt-5.4',
+  'anthropic/claude-sonnet-4.6', 'anthropic/claude-opus-4.7',
+  'openai/gpt-5.5', 'openai/gpt-5.4',
   'google/gemini-3.1-pro',
   'x-ai/grok-4',
 ];
 // Routstr uses bare model IDs (no provider prefix, dots: claude-sonnet-4.6)
 const ROUTSTR_CURATED = ['claude-', 'gpt-5', 'gpt-4', 'gemini-3', 'gemini-2', 'grok-4', 'grok-3', 'llama-', 'qwen', 'deepseek-', 'mistral-', 'mimo-'];
-const ROUTSTR_RECOMMENDED = ['claude-sonnet-4.6', 'claude-opus-4.6', 'gpt-5.4', 'gemini-3.1-pro', 'grok-4'];
+const ROUTSTR_RECOMMENDED = ['claude-sonnet-4.6', 'claude-opus-4.7', 'gpt-5.5', 'gpt-5.4', 'gemini-3.1-pro', 'grok-4'];
 // PPQ uses bare model IDs (same as Routstr)
 // private/ models (Tinfoil TEE) listed in API but require EHBP protocol, not standard completions
 const PPQ_CURATED = ['claude-', 'gpt-5', 'gpt-4', 'gpt-oss', 'gemini-3', 'gemini-2', 'grok-', 'llama-', 'qwen', 'deepseek-', 'mistral-', 'kimi', 'perplexity'];
-const PPQ_RECOMMENDED = ['claude-sonnet-4.6', 'claude-opus-4.6', 'gpt-5.4', 'gemini-3-flash-preview', 'grok-4'];
+const PPQ_RECOMMENDED = ['claude-sonnet-4.6', 'claude-opus-4.7', 'gpt-5.5', 'gpt-5.4', 'gemini-3-flash-preview', 'grok-4'];
 const PPQ_EXCLUDE = ['codex', 'audio', 'image', 'embed', 'tts', 'whisper', 'video', 'nano-banana'];
 export function isRecommendedModel(provider, modelId) {
   if (provider === 'openrouter') return OPENROUTER_RECOMMENDED.some(function(prefix) { return modelId.startsWith(prefix); });
   if (provider === 'venice') {
     if (modelId.startsWith('e2ee-')) return /qwen3-5-122b|gpt-oss-120b|qwen3-30b|glm-5/.test(modelId);
-    return /^(claude-(sonnet|opus)-4-6|openai-gpt-5[234](-codex)?|gemini-3(-1)?-pro|grok-4[1-9]?)(-|$)/.test(modelId);
+    return /^(claude-(sonnet-4-6|opus-4-7)|openai-gpt-5[2345](-codex)?|gemini-3(-1)?-pro|grok-4[1-9]?)(-|$)/.test(modelId);
   }
   if (provider === 'routstr') return ROUTSTR_RECOMMENDED.some(function(r) { return modelId === r || modelId.startsWith(r); });
   if (provider === 'ppq') return PPQ_RECOMMENDED.some(function(r) { return modelId === r || modelId.startsWith(r); });
