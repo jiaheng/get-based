@@ -214,14 +214,16 @@ return (async function() {
     assert('weight deleted but row kept (BP remains)',
       afterWeightDel?.weight == null && afterWeightDel?.bp_systolic === 118);
 
-    // Delete remaining metrics — row gets stubbed to empty
+    // Delete remaining metrics — last delete should nuke the row outright
+    // (not stub it) so IDB quota + summary coverageDays stay accurate.
+    // Tags on the row are also gone — they annotated a reading that no
+    // longer exists.
     await manual.deleteManualMetric(DEL_PROFILE, 'bp_systolic', '2026-04-24');
     await manual.deleteManualMetric(DEL_PROFILE, 'bp_diastolic', '2026-04-24');
     await manual.deleteManualMetric(DEL_PROFILE, 'rhr', '2026-04-24');
     const afterAllDel = await store.getDaily(DEL_PROFILE, 'manual', '2026-04-24');
-    const hasAnyMetric = manual.MANUAL_METRICS.some((m) => afterAllDel?.[m] != null);
-    assert('all-metrics-deleted row has no metric fields (stub-empty)',
-      !hasAnyMetric);
+    assert('all-metrics-deleted row is removed from IDB (no stub)',
+      afterAllDel == null);
 
     // Unknown-metric and no-row cases
     let threwDel = false;

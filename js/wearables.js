@@ -34,6 +34,7 @@ import { beginConnectOAuth, backfillWearable, disconnectWearable, syncNow, listC
 import { syncWearableSummary } from './wearables-summary.js';
 import { getActiveProfileId } from './profile.js';
 import { getDailyRange } from './wearables-store.js';
+import { MANUAL_METRICS } from './wearables-manual.js';
 import { getChartColors } from './theme.js';
 
 // ─────────────────────────────────────────────────────────
@@ -520,7 +521,6 @@ async function openWearableDetail(metricId) {
 // Only renders when `manualEntries` is non-empty OR the metric is manual-
 // capable (weight/BP/RHR). Returns a fully-formed <section>.
 function buildManualEntriesSection(metricId, manualEntries) {
-  const { MANUAL_METRICS } = { MANUAL_METRICS: ['weight', 'bp_systolic', 'bp_diastolic', 'rhr'] };
   if (!MANUAL_METRICS.includes(metricId)) return '';
   if (manualEntries.length === 0) {
     return `<section class="wearable-manual-entries">
@@ -1112,7 +1112,13 @@ function closeManualAddFromDetail() {
   if (slot) slot.innerHTML = '';
 }
 
+// Monotonic op token — rapid double-clicks on Save / × Delete fire duplicate
+// writes and flashes of "Saved" / "Deleted" toasts before the re-render
+// settles. IDB serializes so data is safe, but the paint is ugly.
+let _manualEntryOp = 0;
+
 async function saveManualEntryFromDetail(metricId, kind) {
+  const op = ++_manualEntryOp;
   const { logManualMetric, logManualBP, refreshManualSummary } = await import('./wearables-manual.js');
   const profileId = getActiveProfileId();
   const date = document.getElementById('wlad-date')?.value;
@@ -1138,6 +1144,7 @@ async function saveManualEntryFromDetail(metricId, kind) {
       await logManualBP(profileId, { date, systolic: sys, diastolic: dia, pulse: isFinite(pulse) && pulse > 0 ? pulse : undefined });
     }
     await refreshManualSummary(profileId);
+    if (op !== _manualEntryOp) return; // superseded by a later click — bail
     showNotification?.('Saved', 'success');
     // Re-render the dashboard strip so the populated card reflects the new
     // value, then re-open the detail modal on top with the refreshed list.
@@ -1149,6 +1156,7 @@ async function saveManualEntryFromDetail(metricId, kind) {
 }
 
 async function deleteManualEntryFromDetail(metricId, date) {
+  const op = ++_manualEntryOp;
   if (typeof window.showConfirmDialog !== 'function') return;
   const canon = canonicalMetric(metricId);
   const label = canon?.label || metricId;
@@ -1171,6 +1179,7 @@ async function deleteManualEntryFromDetail(metricId, date) {
       await deleteManualMetric(profileId, metricId, date);
     }
     await refreshManualSummary(profileId);
+    if (op !== _manualEntryOp) return; // superseded by a later click — bail
     showNotification?.('Deleted', 'success');
     // Re-render the dashboard strip first so the card visibly updates (or
     // disappears if that was the last reading). If the metric still has

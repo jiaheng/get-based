@@ -266,8 +266,6 @@ export function openClientForm(profileId) {
   const heightData = p ? getProfileHeight(p.id) : { height: null, unit: 'cm' };
   const heightUnit = heightData.unit || 'cm';
   const heightDisplay = heightData.height ? (heightUnit === 'in' ? (heightData.height / 2.54).toFixed(1) : heightData.height) : '';
-  const _bio = state.importedData?.biometrics;
-  const hasBioData = heightData.height || (_bio && (_bio.weight?.length || _bio.bp?.length || _bio.pulse?.length));
 
   const avatarColor = getAvatarColor(p ? p.id : 'new');
   const avatarInitial = (name || '?')[0].toUpperCase();

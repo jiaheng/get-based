@@ -9,7 +9,7 @@
 // migration. The dashboard strip, per-metric source picker, and AI context
 // layer all pick up 'manual' rows via the existing generic summary logic.
 
-import { upsertDaily, upsertDailyBatch, countSource, getDaily, getMeta, setMeta } from './wearables-store.js';
+import { upsertDaily, upsertDailyBatch, countSource, getDaily, deleteDaily, getMeta, setMeta } from './wearables-store.js';
 import { state } from './state.js';
 import { saveImportedData } from './data.js';
 
@@ -197,16 +197,15 @@ export async function deleteManualMetric(profileId, metric, date) {
   if (!existing) return;
   const { source, date: _d, importedAt, ...rest } = existing;
   delete rest[metric];
-  // Any metric field left? If so, write updated row. Otherwise nuke.
+  // Any metric field left? If so, write updated row. If nothing measurable
+  // remains, delete the row outright (not a stub) so IDB quota + summary
+  // coverageDays stay accurate. Tags are also stripped — they annotated a
+  // reading that no longer exists, so keeping them would be phantom context.
   const hasOtherMetrics = MANUAL_METRICS.some((m) => rest[m] != null);
   if (hasOtherMetrics) {
     await upsertDaily(profileId, { source: 'manual', date, ...rest });
   } else {
-    // Can't partial-delete from IDB by compound key without another helper —
-    // overwrite with a stub that has no metric fields. The summary loop
-    // ignores rows with no metric values, so functionally this is equivalent
-    // to deletion for display purposes.
-    await upsertDaily(profileId, { source: 'manual', date });
+    await deleteDaily(profileId, 'manual', date);
   }
 }
 

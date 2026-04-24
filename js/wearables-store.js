@@ -78,6 +78,17 @@ export async function upsertDaily(profileId, row) {
   return txPromise(tx);
 }
 
+// Remove a single row by compound key. Used by deleteManualMetric when
+// the last metric field on a row is cleared — otherwise stub rows pile up
+// in IDB and sources.coverageDays over-counts. Idempotent (silent on
+// missing key).
+export async function deleteDaily(profileId, source, date) {
+  const db = await openWearablesDB(profileId);
+  const tx = db.transaction(STORE_DAILY, 'readwrite');
+  tx.objectStore(STORE_DAILY).delete([source, date]);
+  return txPromise(tx);
+}
+
 export async function upsertDailyBatch(profileId, rows) {
   if (!rows || rows.length === 0) return;
   const db = await openWearablesDB(profileId);
