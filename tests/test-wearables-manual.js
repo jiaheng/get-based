@@ -33,6 +33,21 @@ return (async function() {
   assert('deleteManualMetric exported', typeof manual.deleteManualMetric === 'function');
   assert('refreshManualSummary exported', typeof manual.refreshManualSummary === 'function');
 
+  // Dashboard strip inline-log form wiring (Phase 3). These are window
+  // globals defined in wearables.js; the onclick attrs on empty cards call
+  // them directly. Regression-guard the names so a future refactor can't
+  // break the attrs silently.
+  assert('openManualLogForm on window', typeof window.openManualLogForm === 'function');
+  assert('saveManualLog on window', typeof window.saveManualLog === 'function');
+  assert('cancelManualLog on window', typeof window.cancelManualLog === 'function');
+
+  // Source-level check that the empty-card state is wired up.
+  const wearablesSrc = await fetch('js/wearables.js').then(r => r.text());
+  assert('wearables.js renders empty manual cards',
+    wearablesSrc.includes('renderEmptyManualCard') && wearablesSrc.includes('wearable-card-empty'));
+  assert('wearables.js MANUAL_EMPTY_METRICS covers weight/bp/rhr',
+    /MANUAL_EMPTY_METRICS\s*=\s*\[[^\]]*weight[^\]]*bp_systolic[^\]]*rhr/.test(wearablesSrc));
+
   // Client-list Edit Client modal dual-writes via these helpers; verify the
   // wiring is present in source so a future refactor can't silently drop it.
   const clSrc = await fetch('js/client-list.js').then(r => r.text());

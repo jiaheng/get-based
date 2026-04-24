@@ -212,6 +212,28 @@ function sparklineSVG(series, baseline, worseWhen) {
 // RENDER
 // ─────────────────────────────────────────────────────────
 
+// Empty-state card for manual-capable metrics that have no data yet.
+// Tap / click → opens an inline entry form in-place (see _openManualLogForm).
+// For bp_systolic the form prompts for both systolic + diastolic (and
+// optional pulse) on one card; bp_diastolic and rhr are folded into that
+// same card when BP is empty, so the user sees ONE "BP" affordance rather
+// than three.
+function renderEmptyManualCard(metricId, canon) {
+  const subLabel = canon.sub ? ` <span class="wearable-metric-sub">${escapeHTML(canon.sub)}</span>` : '';
+  const label = metricId === 'bp_systolic' ? 'Blood pressure' : canon.label;
+  return `<div class="wearable-card wearable-card-empty" data-empty-metric="${escapeHTML(metricId)}" onclick="openManualLogForm('${escapeHTML(metricId)}',event)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openManualLogForm('${escapeHTML(metricId)}',event)}" role="button" tabindex="0" aria-label="Log ${escapeHTML(label.toLowerCase())} manually">
+    <div class="wearable-card-top">
+      <span class="wearable-metric-name">${escapeHTML(label)}${metricId === 'bp_systolic' ? '' : subLabel}</span>
+    </div>
+    <div class="wearable-value-row wearable-value-row-empty">
+      <span class="wearable-value wearable-value-dash">–</span>
+    </div>
+    <div class="wearable-card-bottom">
+      <div class="wearable-empty-cta">+ log</div>
+    </div>
+  </div>`;
+}
+
 function renderCard(metricId, canon, metric, showSourceBadge) {
   const deltaCls = deltaClassFor(metric.latest, metric.baseline, canon.worseWhen);
   const deltaText = formatDelta(metric.latest, metric.baseline);
@@ -336,6 +358,18 @@ export function renderWearableStrip() {
     );
     const showBadgeForThisMetric = providersForMetric.length > 1;
     html += renderCard(metricId, canon, metric, showBadgeForThisMetric);
+  }
+
+  // Empty-state cards for manual-capable metrics with no data yet — so the
+  // user sees a "+ log weight" affordance even when no wearable provides it.
+  // bp_diastolic is folded into the bp_systolic empty card (one BP prompt,
+  // two fields) rather than rendering as a second empty card.
+  const MANUAL_EMPTY_METRICS = ['weight', 'bp_systolic', 'rhr'];
+  for (const metricId of MANUAL_EMPTY_METRICS) {
+    if (summary.metrics?.[metricId]) continue; // already rendered with data
+    const canon = canonicalMetric(metricId);
+    if (!canon) continue;
+    html += renderEmptyManualCard(metricId, canon);
   }
 
   html += `</div>`;
@@ -955,12 +989,115 @@ function refreshSettingsWearables() {
   if (section) section.innerHTML = renderWearablesSettingsSection();
 }
 
+// ─────────────────────────────────────────────────────────
+// Inline manual-log form (Phase 3) — opens from the empty strip cards.
+// ─────────────────────────────────────────────────────────
+
+function openManualLogForm(metricId, event) {
+  if (event) event.stopPropagation();
+  const card = document.querySelector(`.wearable-card-empty[data-empty-metric="${metricId}"]`);
+  if (!card) return;
+  const today = new Date().toISOString().slice(0, 10);
+  if (metricId === 'weight') {
+    card.innerHTML = `
+      <div class="wearable-card-top"><span class="wearable-metric-name">Weight</span></div>
+      <div class="wearable-log-form">
+        <input type="number" step="0.1" inputmode="decimal" class="wearable-log-input" id="wl-weight-val" placeholder="kg" aria-label="Weight in kilograms" autofocus>
+        <div class="wearable-log-row">
+          <input type="date" class="wearable-log-date" id="wl-weight-date" value="${today}" max="${today}" aria-label="Date">
+          <button type="button" class="wearable-log-save" onclick="saveManualLog('weight',event)">Save</button>
+          <button type="button" class="wearable-log-cancel" onclick="cancelManualLog(event)" aria-label="Cancel">✕</button>
+        </div>
+      </div>`;
+  } else if (metricId === 'bp_systolic') {
+    card.innerHTML = `
+      <div class="wearable-card-top"><span class="wearable-metric-name">Blood pressure</span></div>
+      <div class="wearable-log-form">
+        <div class="wearable-log-bp-row">
+          <input type="number" inputmode="numeric" class="wearable-log-input wearable-log-bp" id="wl-bp-sys" placeholder="sys" aria-label="Systolic" autofocus>
+          <span class="wearable-log-sep">/</span>
+          <input type="number" inputmode="numeric" class="wearable-log-input wearable-log-bp" id="wl-bp-dia" placeholder="dia" aria-label="Diastolic">
+        </div>
+        <input type="number" inputmode="numeric" class="wearable-log-input wearable-log-pulse-optional" id="wl-bp-pulse" placeholder="pulse (optional)" aria-label="Pulse (optional)">
+        <div class="wearable-log-row">
+          <input type="date" class="wearable-log-date" id="wl-bp-date" value="${today}" max="${today}" aria-label="Date">
+          <button type="button" class="wearable-log-save" onclick="saveManualLog('bp',event)">Save</button>
+          <button type="button" class="wearable-log-cancel" onclick="cancelManualLog(event)" aria-label="Cancel">✕</button>
+        </div>
+      </div>`;
+  } else if (metricId === 'rhr') {
+    card.innerHTML = `
+      <div class="wearable-card-top"><span class="wearable-metric-name">Resting HR</span></div>
+      <div class="wearable-log-form">
+        <input type="number" inputmode="numeric" class="wearable-log-input" id="wl-rhr-val" placeholder="bpm" aria-label="Resting heart rate in bpm" autofocus>
+        <div class="wearable-log-row">
+          <input type="date" class="wearable-log-date" id="wl-rhr-date" value="${today}" max="${today}" aria-label="Date">
+          <button type="button" class="wearable-log-save" onclick="saveManualLog('rhr',event)">Save</button>
+          <button type="button" class="wearable-log-cancel" onclick="cancelManualLog(event)" aria-label="Cancel">✕</button>
+        </div>
+      </div>`;
+  }
+  // Focus the first input.
+  setTimeout(() => card.querySelector('input[type="number"]')?.focus(), 0);
+  // Enter-to-save on the number inputs.
+  card.querySelectorAll('input[type="number"]').forEach((el) => {
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); saveManualLog(metricId === 'bp_systolic' ? 'bp' : metricId, e); }
+      if (e.key === 'Escape') { e.preventDefault(); cancelManualLog(e); }
+    });
+  });
+}
+
+async function saveManualLog(kind, event) {
+  if (event) event.stopPropagation();
+  const { logManualMetric, logManualBP, refreshManualSummary } = await import('./wearables-manual.js');
+  const profileId = state.currentProfile;
+  try {
+    if (kind === 'weight') {
+      const val = parseFloat(document.getElementById('wl-weight-val')?.value);
+      const date = document.getElementById('wl-weight-date')?.value;
+      if (!val || val <= 0 || !date) { showNotification?.('Enter a weight and date', 'error'); return; }
+      if (val > 500) { showNotification?.('Weight over 500 kg seems unlikely', 'error'); return; }
+      await logManualMetric(profileId, 'weight', { date, value: val });
+    } else if (kind === 'rhr') {
+      const val = parseInt(document.getElementById('wl-rhr-val')?.value, 10);
+      const date = document.getElementById('wl-rhr-date')?.value;
+      if (!val || val <= 0 || !date) { showNotification?.('Enter a pulse and date', 'error'); return; }
+      if (val > 250) { showNotification?.('Pulse over 250 bpm seems unlikely', 'error'); return; }
+      await logManualMetric(profileId, 'rhr', { date, value: val });
+    } else if (kind === 'bp') {
+      const sys = parseInt(document.getElementById('wl-bp-sys')?.value, 10);
+      const dia = parseInt(document.getElementById('wl-bp-dia')?.value, 10);
+      const pulse = parseInt(document.getElementById('wl-bp-pulse')?.value, 10);
+      const date = document.getElementById('wl-bp-date')?.value;
+      if (!sys || !dia || sys <= 0 || dia <= 0 || !date) { showNotification?.('Enter systolic, diastolic, and date', 'error'); return; }
+      if (sys > 300 || dia > 200) { showNotification?.('BP values seem too high', 'error'); return; }
+      if (dia >= sys) { showNotification?.('Diastolic should be lower than systolic', 'error'); return; }
+      await logManualBP(profileId, { date, systolic: sys, diastolic: dia, pulse: isFinite(pulse) && pulse > 0 ? pulse : undefined });
+    }
+    await refreshManualSummary(profileId);
+    if (window.navigate) window.navigate('dashboard');
+    showNotification?.('Saved', 'success');
+  } catch (e) {
+    showNotification?.('Could not save: ' + e.message, 'error');
+  }
+}
+
+function cancelManualLog(event) {
+  if (event) event.stopPropagation();
+  // Re-render strip to restore the empty card.
+  if (window.navigate) window.navigate('dashboard');
+}
+
 Object.assign(window, {
   renderWearableStrip,
   toggleWearableStrip,
   openWearableDetail,
   syncWearableNow,
   chooseWearableSource,
+  openManualLogForm,
+  saveManualLog,
+  cancelManualLog,
   hasWearableSummary,
   renderWearablesSettingsSection,
   handleWearableConnect,
