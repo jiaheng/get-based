@@ -272,6 +272,27 @@ export const ADAPTERS = [
   },
 
   {
+    // Manual entry — user-authored weight/BP/pulse records treated as a
+    // first-class source. No OAuth, no file import, no live sync. The
+    // dashboard strip and per-metric source picker render these alongside
+    // wearable-synced data via the generic summary pipeline.
+    //
+    // Implementation lives in js/wearables-manual.js. The adapter only
+    // declares which canonical metrics manual entry covers and its
+    // display-layer metadata.
+    id: 'manual',
+    displayName: 'Manual',
+    authType: 'manual',
+    apiHost: null,
+    beta: false,
+    metrics: {
+      weight:       { manual: true },
+      bp_systolic:  { manual: true },
+      bp_diastolic: { manual: true },
+      rhr:          { manual: true },
+    },
+  },
+  {
     // Apple Health sits last — file-import-only, no OAuth, no live sync.
     // Different operational shape from the rest, so visually grouping it at
     // the bottom makes the list easier to scan.

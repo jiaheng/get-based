@@ -25,6 +25,7 @@ import './pdf-import.js';
 import { ensureSNPTable, ensureHaplogroupTable } from './dna.js';
 import './wearables.js';
 import { initWearableScheduler, handleOAuthCallbackOnLoad } from './wearables-connect.js';
+import { migrateBiometricsToManual } from './wearables-manual.js';
 import './export.js';
 import './chat.js';
 import './image-utils.js';
@@ -82,6 +83,23 @@ document.addEventListener("DOMContentLoaded", async () => {
   state.currentProfile = getActiveProfileId();
   const savedImported = await encryptedGetItem(profileStorageKey(state.currentProfile, 'imported'));
   if (savedImported) { try { state.importedData = JSON.parse(savedImported); if (!state.importedData.notes) state.importedData.notes = []; migrateProfileData(state.importedData); } catch(e) {} }
+
+  // Health Metrics unification (Commit 1/5): walk legacy importedData.biometrics
+  // into the wearables IndexedDB with source: 'manual'. Idempotent — tagged in
+  // the wearables meta store so it only runs once per profile. Old biometrics
+  // data is preserved; the Edit Client modal keeps writing there during the
+  // dual-write transition (cleanup lands in Commit 4).
+  migrateBiometricsToManual(state.currentProfile, state.importedData?.biometrics)
+    .then(async (r) => {
+      if (r?.migrated && r.counts?.rows > 0) {
+        // Rebuild the L2 summary so the strip picks up the newly-migrated
+        // manual source on this load (no wait for the next wearable sync).
+        const { syncWearableSummary } = await import('./wearables-summary.js');
+        const { listConnectedSources } = await import('./wearables-connect.js');
+        await syncWearableSummary(state.currentProfile, listConnectedSources());
+      }
+    })
+    .catch(() => { /* non-fatal; Safari can refuse IDB in some contexts */ });
 
   // Handle wearable OAuth2 callback (Oura / Withings / Ultrahuman / WHOOP / Fitbit) — must run
   // AFTER profile load so saveConnection writes to the active profile's state + localStorage.

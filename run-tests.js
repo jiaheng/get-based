@@ -32,6 +32,7 @@ const TEST_FILES = [
   'tests/test-dna-illumina-and-valence.js',
   'tests/test-dna-mtdna-subclades.js',
   'tests/test-wearables.js',
+  'tests/test-wearables-manual.js',
   'tests/test-venice-e2ee.js',
   'tests/test-change-history.js',
   'tests/test-sync.js',
