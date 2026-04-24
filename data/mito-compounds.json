@@ -13,16 +13,21 @@
       {
         "f": "Complex I",
         "a": "inhibits",
-        "t": "primary mechanism of action"
+        "t": "supratherapeutic dose; primary low-dose target debated"
+      },
+      {
+        "f": "mGPDH",
+        "a": "inhibits",
+        "t": "candidate primary target at therapeutic dose (Madiraju 2014)"
       },
       {
         "f": "AMPK",
         "a": "activates",
-        "t": "secondary to Complex I inhibition"
+        "t": "lysosomal, complex-I-independent at low dose (Cameron 2018)"
       }
     ],
     "pmid": 39693440,
-    "more": "metformin+mitochondrial+complex+I"
+    "more": "metformin+mitochondrial+mGPDH+AMPK"
   },
   {
     "name": "Simvastatin",
@@ -187,7 +192,7 @@
       {
         "f": "Oxidative phosphorylation",
         "a": "uncouples",
-        "t": "high dose"
+        "t": "high dose only — 81 mg cardioprotective dose has no measurable effect"
       }
     ],
     "pmid": 9048975,
@@ -1059,13 +1064,13 @@
     "effects": [
       {
         "f": "Complex I, III, IV",
-        "a": "enhances",
-        "t": "protective"
+        "a": "protects",
+        "t": "from ROS damage (indirect via antioxidant effect, not direct activity enhancement)"
       },
       {
         "f": "ROS",
         "a": "decreases",
-        "t": "antioxidant, transported into mitochondria"
+        "t": "mitochondrially-targeted antioxidant, concentrates in matrix"
       },
       {
         "f": "MPT pore",
@@ -1107,7 +1112,7 @@
       {
         "f": "Mitochondrial biogenesis",
         "a": "increases",
-        "t": "SIRT1/PGC-1alpha, low dose"
+        "t": "low dose — functional effect replicated, but direct SIRT1 binding contested (Pacholec 2010); likely upstream via AMPK"
       },
       {
         "f": "Complex I",
@@ -2481,5 +2486,169 @@
     ],
     "pmid": 41435838,
     "more": "glutamine+mitochondrial+anaplerosis"
+  },
+  {
+    "name": "Urolithin A",
+    "k": [
+      "urolithin a",
+      "urolithin",
+      "mitopure"
+    ],
+    "cat": "supplement",
+    "effects": [
+      {
+        "f": "Mitophagy",
+        "a": "induces",
+        "t": "PINK1/Parkin-independent pathway (Ryu 2016 Nat Med)"
+      },
+      {
+        "f": "Mitochondrial biogenesis",
+        "a": "increases",
+        "t": "via PGC-1alpha; validated in sarcopenic elderly RCTs"
+      }
+    ],
+    "pmid": 27214900,
+    "more": "urolithin+A+mitophagy+mitochondrial"
+  },
+  {
+    "name": "Methylene Blue",
+    "k": [
+      "methylene blue",
+      "methylthioninium chloride"
+    ],
+    "cat": "drug",
+    "effects": [
+      {
+        "f": "Complex IV",
+        "a": "enhances",
+        "t": "low dose <2 mg/kg — alternative electron carrier, bypasses Complex I/III"
+      },
+      {
+        "f": "ROS",
+        "a": "decreases",
+        "t": "low dose — biphasic response"
+      },
+      {
+        "f": "ROS",
+        "a": "increases",
+        "t": "high dose >10 mg/kg — pro-oxidant direction at elevated doses"
+      }
+    ],
+    "pmid": 21531634,
+    "more": "methylene+blue+mitochondrial+electron+transport"
+  },
+  {
+    "name": "Spermidine",
+    "k": [
+      "spermidine",
+      "wheat germ extract"
+    ],
+    "cat": "supplement",
+    "effects": [
+      {
+        "f": "Mitophagy",
+        "a": "induces",
+        "t": "via autophagy induction and hypusination of eIF5A"
+      },
+      {
+        "f": "Mitochondrial biogenesis",
+        "a": "increases",
+        "t": "via TFEB — Eisenberg 2016 cardiac benefit"
+      }
+    ],
+    "pmid": 27892468,
+    "more": "spermidine+autophagy+mitophagy+longevity"
+  },
+  {
+    "name": "Fisetin",
+    "k": [
+      "fisetin"
+    ],
+    "cat": "supplement",
+    "effects": [
+      {
+        "f": "Senescent cell clearance",
+        "a": "induces",
+        "t": "most potent natural senolytic per Mayo screen (Yousefzadeh 2018)"
+      },
+      {
+        "f": "ROS",
+        "a": "decreases",
+        "t": "Nrf2 induction"
+      },
+      {
+        "f": "Mitochondrial biogenesis",
+        "a": "increases",
+        "t": "via SIRT1"
+      }
+    ],
+    "pmid": 30279143,
+    "more": "fisetin+senolytic+mitochondrial"
+  },
+  {
+    "name": "Caffeine",
+    "k": [
+      "caffeine",
+      "coffee",
+      "guarana"
+    ],
+    "cat": "supplement",
+    "effects": [
+      {
+        "f": "Mitochondrial biogenesis",
+        "a": "increases",
+        "t": "via AMPK/PGC-1alpha — exercise-mimetic signaling"
+      },
+      {
+        "f": "Mitochondrial calcium uptake",
+        "a": "increases",
+        "t": "ryanodine receptor agonist, dose-dependent"
+      },
+      {
+        "f": "Beta-oxidation",
+        "a": "enhances",
+        "t": "lipolysis upstream"
+      }
+    ],
+    "pmid": 24463434,
+    "more": "caffeine+mitochondrial+biogenesis+AMPK"
+  },
+  {
+    "name": "Ethanol",
+    "k": [
+      "ethanol",
+      "alcohol",
+      "ethyl alcohol"
+    ],
+    "cat": "toxin",
+    "effects": [
+      {
+        "f": "Complex I",
+        "a": "inhibits",
+        "t": "chronic exposure"
+      },
+      {
+        "f": "Complex IV",
+        "a": "inhibits",
+        "t": "chronic exposure"
+      },
+      {
+        "f": "mtDNA",
+        "a": "damages",
+        "t": "acetaldehyde adducts"
+      },
+      {
+        "f": "Glutathione",
+        "a": "depletes",
+        "t": "hepatic GSH pool"
+      },
+      {
+        "f": "Mitochondrial biogenesis",
+        "a": "decreases",
+        "t": "PGC-1alpha suppression in chronic use"
+      }
+    ],
+    "pmid": 31430245,
+    "more": "ethanol+mitochondrial+toxicity+liver"
   }
 ]

@@ -5,6 +5,17 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.22.2', date: '2026-04-24', title: 'Supplement mito-effects: 6 additions + mechanism updates',
+    items: [
+      'Added <b>6 missing mitochondrial compounds</b> to the supplement warning system: Urolithin A (mitophagy, Auwerx lab), Methylene Blue (Complex IV electron carrier, biphasic), Spermidine (autophagy inducer), Fisetin (top senolytic per Mayo), Caffeine (exercise-mimetic biogenesis), and Ethanol (the biggest mitotoxin we were missing).',
+      '<b>Metformin</b> effect note updated: the "Complex I inhibitor" framing is the textbook view but has been contested by 2018-2024 literature. Now notes mGPDH (Madiraju 2014) and lysosomal AMPK (Cameron 2018) as candidate primary low-dose targets, with Complex I inhibition only at supratherapeutic doses.',
+      '<b>Aspirin</b>: clarified that OXPHOS uncoupling is a high-dose effect only — 81 mg cardioprotective dose has no measurable mitochondrial impact.',
+      '<b>Resveratrol</b>: direct SIRT1 binding has been contested (Pacholec 2010); the biogenesis effect holds but is likely upstream via AMPK.',
+      '<b>Melatonin</b>: reframed from "enhances Complex I/III/IV activity" to "protects Complex I/III/IV from ROS damage" — the protective effect is real, but it\'s an antioxidant story, not a direct activity boost.',
+      'Total compounds: 108 → 114.',
+    ]
+  },
+  {
     version: '1.22.1', date: '2026-04-24', title: 'Genetics dashboard tells you what is good news',
     items: [
       'New <b>orange dot</b> for mild-effect genotypes — previously these silently had no indicator. MTR, MTHFR A1298C heterozygous, ADIPOQ heterozygous, and others now visibly appear on the dashboard.',
