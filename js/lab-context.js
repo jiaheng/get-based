@@ -274,7 +274,7 @@ function _buildLabContextInner({ skipGroupFilter } = {}) {
   }
 
   // ── 5. User Notes ──
-  const notes = (state.importedData.notes || []).slice().sort((a, b) => a.date.localeCompare(b.date));
+  const notes = (state.importedData.notes || []).slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
   if (notes.length > 0) {
     ctx += `[section:userNotes]\n## User Notes\n`;
     for (const n of notes) {
@@ -353,7 +353,7 @@ function _buildLabContextInner({ skipGroupFilter } = {}) {
       ctx += `Height: ${htLabel}\n`;
     }
     if (bio?.weight?.length) {
-      const sorted = [...bio.weight].sort((a, b) => b.date.localeCompare(a.date));
+      const sorted = [...bio.weight].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
       const latest = sorted[0];
       const latestKg = latest.unit === 'lbs' ? latest.value / 2.205 : latest.value;
       ctx += `Weight (latest ${latest.date}): ${latest.value} ${latest.unit}`;
@@ -370,7 +370,7 @@ function _buildLabContextInner({ skipGroupFilter } = {}) {
       }
     }
     if (bio?.bp?.length) {
-      const sorted = [...bio.bp].sort((a, b) => b.date.localeCompare(a.date));
+      const sorted = [...bio.bp].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
       const latest = sorted[0];
       ctx += `Blood Pressure (latest ${latest.date}): ${latest.sys}/${latest.dia} mmHg`;
       if (sorted.length > 1) {
@@ -382,7 +382,7 @@ function _buildLabContextInner({ skipGroupFilter } = {}) {
       ctx += '\n';
     }
     if (bio?.pulse?.length) {
-      const sorted = [...bio.pulse].sort((a, b) => b.date.localeCompare(a.date));
+      const sorted = [...bio.pulse].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
       const latest = sorted[0];
       ctx += `Resting Pulse (latest ${latest.date}): ${latest.value} bpm`;
       if (sorted.length > 1) {
@@ -432,7 +432,7 @@ function _buildLabContextInner({ skipGroupFilter } = {}) {
     }
     if (mc.conditions) ctx += ` Conditions: ${mc.conditions}.`;
     ctx += '\n';
-    const periods = (mc.periods || []).slice().sort((a, b) => b.startDate.localeCompare(a.startDate));
+    const periods = (mc.periods || []).slice().sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''));
     if (periods.length > 0) {
       const fmtD = d => new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
       ctx += `Recent periods: ${periods.slice(0, 6).map(p => {
@@ -618,7 +618,7 @@ function _buildLabContextInner({ skipGroupFilter } = {}) {
   const emf = state.importedData.emfAssessment;
   if (emf && emf.assessments && emf.assessments.length > 0) {
     ctx += `### EMF Assessment (Baubiologie SBM-2015)\n`;
-    const sorted = [...emf.assessments].sort((a, b) => b.date.localeCompare(a.date));
+    const sorted = [...emf.assessments].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
     const latest = sorted[0];
     ctx += `Assessment: ${fmtDate(latest.date)}${latest.label ? ' (' + latest.label + ')' : ''}${latest.consultant ? ' by ' + latest.consultant : ''}\n`;
     for (const room of latest.rooms) {
@@ -645,8 +645,10 @@ function _buildLabContextInner({ skipGroupFilter } = {}) {
   const changeHistory = state.importedData.changeHistory || [];
   if (changeHistory.length > 0) {
     const fieldLabels = { diet: 'Diet & Digestion', exercise: 'Exercise', sleepRest: 'Sleep & Rest', lightCircadian: 'Light & Circadian', stress: 'Stress', loveLife: 'Love Life', environment: 'Environment', diagnoses: 'Medical Conditions', healthGoals: 'Health Goals', interpretiveLens: 'Interpretive Lens', contextNotes: 'Context Notes', menstrualCycle: 'Menstrual Cycle' };
-    // Group by field, sorted by date
-    const sorted = [...changeHistory].sort((a, b) => a.date.localeCompare(b.date));
+    // Group by field, sorted by date. Defensive against legacy entries that
+    // somehow missed the date field — sorting on undefined throws and takes
+    // down the whole context push (which is called on every saveImportedData).
+    const sorted = [...changeHistory].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
     // Build timeline with diffs between consecutive snapshots per field
     const lines = [];
     const byField = {};
