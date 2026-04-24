@@ -993,6 +993,30 @@ function refreshSettingsWearables() {
 // Inline manual-log form (Phase 3) — opens from the empty strip cards.
 // ─────────────────────────────────────────────────────────
 
+// Chip row for optional context tags. Tags are purely informational but
+// sensors can't infer them — 140/90 resting is a very different story from
+// 140/90 post-workout. Chips toggle a `.active` class; save reads them.
+// Weight doesn't render the row (context rarely matters for weight — gets
+// noisy without payoff); BP/RHR render the full set.
+const TAG_CHIPS = {
+  bp_systolic: ['resting', 'morning-fasted', 'post-workout', 'stress'],
+  rhr: ['resting', 'morning-fasted', 'post-workout'],
+};
+function _renderTagChips(metricId) {
+  const tags = TAG_CHIPS[metricId];
+  if (!tags) return '';
+  return `<div class="wearable-log-tags" role="group" aria-label="Optional context">
+    ${tags.map(t => `<button type="button" class="wearable-log-chip" data-tag="${escapeHTML(t)}" onclick="toggleManualLogChip(this,event)">${escapeHTML(t)}</button>`).join('')}
+  </div>`;
+}
+function toggleManualLogChip(btn, event) {
+  if (event) event.stopPropagation();
+  btn.classList.toggle('active');
+}
+function _collectActiveChips(card) {
+  return Array.from(card.querySelectorAll('.wearable-log-chip.active')).map(b => b.dataset.tag);
+}
+
 function openManualLogForm(metricId, event) {
   if (event) event.stopPropagation();
   const card = document.querySelector(`.wearable-card-empty[data-empty-metric="${metricId}"]`);
@@ -1019,6 +1043,7 @@ function openManualLogForm(metricId, event) {
           <input type="number" inputmode="numeric" class="wearable-log-input wearable-log-bp" id="wl-bp-dia" placeholder="dia" aria-label="Diastolic">
         </div>
         <input type="number" inputmode="numeric" class="wearable-log-input wearable-log-pulse-optional" id="wl-bp-pulse" placeholder="pulse (optional)" aria-label="Pulse (optional)">
+        ${_renderTagChips('bp_systolic')}
         <div class="wearable-log-row">
           <input type="date" class="wearable-log-date" id="wl-bp-date" value="${today}" max="${today}" aria-label="Date">
           <button type="button" class="wearable-log-save" onclick="saveManualLog('bp',event)">Save</button>
@@ -1030,6 +1055,7 @@ function openManualLogForm(metricId, event) {
       <div class="wearable-card-top"><span class="wearable-metric-name">Resting HR</span></div>
       <div class="wearable-log-form">
         <input type="number" inputmode="numeric" class="wearable-log-input" id="wl-rhr-val" placeholder="bpm" aria-label="Resting heart rate in bpm" autofocus>
+        ${_renderTagChips('rhr')}
         <div class="wearable-log-row">
           <input type="date" class="wearable-log-date" id="wl-rhr-date" value="${today}" max="${today}" aria-label="Date">
           <button type="button" class="wearable-log-save" onclick="saveManualLog('rhr',event)">Save</button>
@@ -1052,19 +1078,25 @@ async function saveManualLog(kind, event) {
   if (event) event.stopPropagation();
   const { logManualMetric, logManualBP, refreshManualSummary } = await import('./wearables-manual.js');
   const profileId = state.currentProfile;
+  // Pull any active context chips before the DOM is swapped out by re-render.
+  const cardForTags =
+    kind === 'weight' ? document.querySelector('.wearable-card-empty[data-empty-metric="weight"]') :
+    kind === 'rhr'    ? document.querySelector('.wearable-card-empty[data-empty-metric="rhr"]') :
+    kind === 'bp'     ? document.querySelector('.wearable-card-empty[data-empty-metric="bp_systolic"]') : null;
+  const tags = cardForTags ? _collectActiveChips(cardForTags) : [];
   try {
     if (kind === 'weight') {
       const val = parseFloat(document.getElementById('wl-weight-val')?.value);
       const date = document.getElementById('wl-weight-date')?.value;
       if (!val || val <= 0 || !date) { showNotification?.('Enter a weight and date', 'error'); return; }
       if (val > 500) { showNotification?.('Weight over 500 kg seems unlikely', 'error'); return; }
-      await logManualMetric(profileId, 'weight', { date, value: val });
+      await logManualMetric(profileId, 'weight', { date, value: val, tags });
     } else if (kind === 'rhr') {
       const val = parseInt(document.getElementById('wl-rhr-val')?.value, 10);
       const date = document.getElementById('wl-rhr-date')?.value;
       if (!val || val <= 0 || !date) { showNotification?.('Enter a pulse and date', 'error'); return; }
       if (val > 250) { showNotification?.('Pulse over 250 bpm seems unlikely', 'error'); return; }
-      await logManualMetric(profileId, 'rhr', { date, value: val });
+      await logManualMetric(profileId, 'rhr', { date, value: val, tags });
     } else if (kind === 'bp') {
       const sys = parseInt(document.getElementById('wl-bp-sys')?.value, 10);
       const dia = parseInt(document.getElementById('wl-bp-dia')?.value, 10);
@@ -1073,7 +1105,7 @@ async function saveManualLog(kind, event) {
       if (!sys || !dia || sys <= 0 || dia <= 0 || !date) { showNotification?.('Enter systolic, diastolic, and date', 'error'); return; }
       if (sys > 300 || dia > 200) { showNotification?.('BP values seem too high', 'error'); return; }
       if (dia >= sys) { showNotification?.('Diastolic should be lower than systolic', 'error'); return; }
-      await logManualBP(profileId, { date, systolic: sys, diastolic: dia, pulse: isFinite(pulse) && pulse > 0 ? pulse : undefined });
+      await logManualBP(profileId, { date, systolic: sys, diastolic: dia, pulse: isFinite(pulse) && pulse > 0 ? pulse : undefined, tags });
     }
     await refreshManualSummary(profileId);
     if (window.navigate) window.navigate('dashboard');
@@ -1098,6 +1130,7 @@ Object.assign(window, {
   openManualLogForm,
   saveManualLog,
   cancelManualLog,
+  toggleManualLogChip,
   hasWearableSummary,
   renderWearablesSettingsSection,
   handleWearableConnect,

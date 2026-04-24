@@ -4005,6 +4005,24 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
 }
 .wearable-log-cancel:hover { color: var(--text-primary); }
 
+/* Optional context-tag chips on the inline log form (BP / RHR). Toggle-
+   selectable. Purely informational — a post-workout BP reading tells a
+   different story than a resting one, even when the numbers match. */
+.wearable-log-tags { display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 0; }
+.wearable-log-chip {
+  font-size: 10px; padding: 3px 7px; line-height: 1.2;
+  background: transparent; color: var(--text-muted);
+  border: 1px solid var(--border); border-radius: 10px;
+  cursor: pointer; transition: all 0.12s ease;
+}
+.wearable-log-chip:hover { color: var(--text-primary); border-color: var(--text-muted); }
+.wearable-log-chip.active {
+  background: var(--accent-faded, rgba(99,102,241,0.18));
+  color: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
 .wearable-card-top {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
 }

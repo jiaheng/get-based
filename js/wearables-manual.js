@@ -28,6 +28,15 @@ async function _mergeManualRow(profileId, date, patch) {
 // manual UI exposes for entry.
 export const MANUAL_METRICS = ['weight', 'bp_systolic', 'bp_diastolic', 'rhr'];
 
+// Optional context tags a user can attach to a reading. Sensors can't infer
+// these — a BP of 140/90 means wildly different things "resting first thing
+// in the morning" vs "immediately post-workout" vs "in a stressful meeting."
+// The tag is the information manual entry BEATS wearables-only tracking on.
+// Tags are strictly informational for display + AI context; they don't gate
+// any storage or summary logic. Persisted per-row as an array so multiple
+// tags on one reading are supported (e.g. post-workout + stress).
+export const MANUAL_TAGS = ['resting', 'morning-fasted', 'post-workout', 'stress'];
+
 // One-time migration flag key in the wearables meta store.
 const MIGRATION_FLAG = 'biometrics-migrated-v1';
 
@@ -61,7 +70,7 @@ export function ensureManualConnection({ coverageDays = 0 } = {}) {
  * Rows are upserted on the [source, date] compound key. Logging weight
  * twice on the same day overwrites — same behaviour as a wearable sync.
  */
-export async function logManualMetric(profileId, metric, { date, value }) {
+export async function logManualMetric(profileId, metric, { date, value, tags }) {
   if (!MANUAL_METRICS.includes(metric)) {
     throw new Error(`logManualMetric: unknown metric "${metric}"`);
   }
@@ -69,7 +78,9 @@ export async function logManualMetric(profileId, metric, { date, value }) {
     throw new Error('logManualMetric: value must be a finite number');
   }
   const d = date || new Date().toISOString().slice(0, 10);
-  await _mergeManualRow(profileId, d, { [metric]: value });
+  const patch = { [metric]: value };
+  if (Array.isArray(tags) && tags.length) patch.tags = _sanitizeTags(tags);
+  await _mergeManualRow(profileId, d, patch);
   ensureManualConnection();
 }
 
@@ -77,17 +88,33 @@ export async function logManualMetric(profileId, metric, { date, value }) {
  * Log BP as a pair — matches how home cuffs report systolic + diastolic
  * (+ optional pulse) in a single reading. One row per date.
  */
-export async function logManualBP(profileId, { date, systolic, diastolic, pulse }) {
+export async function logManualBP(profileId, { date, systolic, diastolic, pulse, tags }) {
   const d = date || new Date().toISOString().slice(0, 10);
   const row = { source: 'manual', date: d };
   if (systolic != null && isFinite(systolic)) row.bp_systolic = systolic;
   if (diastolic != null && isFinite(diastolic)) row.bp_diastolic = diastolic;
   if (pulse != null && isFinite(pulse)) row.rhr = pulse;
   if (!row.bp_systolic && !row.bp_diastolic && !row.rhr) return;
+  if (Array.isArray(tags) && tags.length) row.tags = _sanitizeTags(tags);
   // Merge rather than replace — preserves same-day weight from a prior entry.
   const { source: _s, date: _d, ...patch } = row;
   await _mergeManualRow(profileId, d, patch);
   ensureManualConnection();
+}
+
+// Keep only recognized tags so a typo'd or stale chip can't poison the row.
+// Dedup-preserves order. Intentionally silent — tags are cosmetic, don't
+// throw just because the user clicked something odd.
+function _sanitizeTags(tags) {
+  const seen = new Set();
+  const out = [];
+  for (const t of tags) {
+    if (typeof t === 'string' && MANUAL_TAGS.includes(t) && !seen.has(t)) {
+      seen.add(t);
+      out.push(t);
+    }
+  }
+  return out;
 }
 
 /**

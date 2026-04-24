@@ -30,6 +30,12 @@ return (async function() {
     manual.MANUAL_METRICS.includes('bp_systolic') &&
     manual.MANUAL_METRICS.includes('bp_diastolic') &&
     manual.MANUAL_METRICS.includes('rhr'));
+  assert('MANUAL_TAGS exported', Array.isArray(manual.MANUAL_TAGS));
+  assert('MANUAL_TAGS includes core context set',
+    manual.MANUAL_TAGS.includes('resting') &&
+    manual.MANUAL_TAGS.includes('morning-fasted') &&
+    manual.MANUAL_TAGS.includes('post-workout') &&
+    manual.MANUAL_TAGS.includes('stress'));
   assert('deleteManualMetric exported', typeof manual.deleteManualMetric === 'function');
   assert('refreshManualSummary exported', typeof manual.refreshManualSummary === 'function');
 
@@ -224,6 +230,40 @@ return (async function() {
     assert('deleteManualMetric rejects unknown metric', threwDel);
     await manual.deleteManualMetric(DEL_PROFILE, 'weight', '2099-01-01'); // no-op
     assert('deleteManualMetric on missing date is a no-op', true);
+
+    // ═══════════════════════════════════════
+    // 8. Context tags
+    // ═══════════════════════════════════════
+    console.log('%c 8. Context Tags ', 'font-weight:bold;color:#f59e0b');
+
+    const TAG_PROFILE = 'test-tags-' + Math.random().toString(36).slice(2, 8);
+    window._labState.currentProfile = TAG_PROFILE;
+    window._labState.importedData = { wearableConnections: {} };
+    await manual.logManualBP(TAG_PROFILE, {
+      date: '2026-04-24', systolic: 145, diastolic: 92,
+      tags: ['post-workout', 'stress']
+    });
+    const taggedRow = await store.getDaily(TAG_PROFILE, 'manual', '2026-04-24');
+    assert('BP row persists tags array', Array.isArray(taggedRow?.tags));
+    assert('tags contain post-workout + stress',
+      taggedRow?.tags?.includes('post-workout') && taggedRow?.tags?.includes('stress'));
+
+    // Unknown / typo'd tags get silently stripped — never throw, just don't persist them.
+    await manual.logManualMetric(TAG_PROFILE, 'weight', {
+      date: '2026-04-25', value: 81,
+      tags: ['morning-fasted', 'bogus-tag', 'resting', 'post-workout']
+    });
+    const weightRow = await store.getDaily(TAG_PROFILE, 'manual', '2026-04-25');
+    assert('unknown tags are filtered out',
+      !weightRow?.tags?.includes('bogus-tag'));
+    assert('valid tags survive the filter',
+      weightRow?.tags?.includes('morning-fasted') &&
+      weightRow?.tags?.includes('resting') &&
+      weightRow?.tags?.includes('post-workout'));
+
+    // Dashboard strip form wiring for chips
+    assert('wearables.js renders tag chips on bp form', wearablesSrc.includes('_renderTagChips'));
+    assert('toggleManualLogChip on window', typeof window.toggleManualLogChip === 'function');
 
   } finally {
     // Restore live profile
