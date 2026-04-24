@@ -248,7 +248,12 @@ return (async function() {
     assert(`CANONICAL_METRICS has ${mid}`, !!reg.CANONICAL_METRICS[mid]);
     assert(`Oura adapter maps ${mid}`, reg.adapterSupportsMetric('oura', mid));
   }
-  assert('DEFAULT_METRIC_ORDER is 9 metrics (4 core + 5 extended)', reg.DEFAULT_METRIC_ORDER.length === 9);
+  assert('DEFAULT_METRIC_ORDER is 12 metrics (4 core + 5 extended + 3 biometric)', reg.DEFAULT_METRIC_ORDER.length === 12);
+  // Biometric metrics must be in the default order so the summary pipeline
+  // iterates them for manual / Withings / Fitbit rows.
+  assert('DEFAULT_METRIC_ORDER includes weight', reg.DEFAULT_METRIC_ORDER.includes('weight'));
+  assert('DEFAULT_METRIC_ORDER includes bp_systolic', reg.DEFAULT_METRIC_ORDER.includes('bp_systolic'));
+  assert('DEFAULT_METRIC_ORDER includes bp_diastolic', reg.DEFAULT_METRIC_ORDER.includes('bp_diastolic'));
   assert('Steps is mapped to the same endpoint as activity_score (both from daily_activity)',
     reg.adapterById('oura').metrics.steps.endpoint === reg.adapterById('oura').metrics.activity_score.endpoint);
 

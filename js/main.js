@@ -25,7 +25,7 @@ import './pdf-import.js';
 import { ensureSNPTable, ensureHaplogroupTable } from './dna.js';
 import './wearables.js';
 import { initWearableScheduler, handleOAuthCallbackOnLoad } from './wearables-connect.js';
-import { migrateBiometricsToManual } from './wearables-manual.js';
+import { migrateBiometricsToManual, hasManualData } from './wearables-manual.js';
 import './export.js';
 import './chat.js';
 import './image-utils.js';
@@ -90,10 +90,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   // data is preserved; the Edit Client modal keeps writing there during the
   // dual-write transition (cleanup lands in Commit 4).
   migrateBiometricsToManual(state.currentProfile, state.importedData?.biometrics)
-    .then(async (r) => {
-      if (r?.migrated && r.counts?.rows > 0) {
-        // Rebuild the L2 summary so the strip picks up the newly-migrated
-        // manual source on this load (no wait for the next wearable sync).
+    .then(async () => {
+      // Rebuild the L2 summary on every load that has manual data — covers
+      // both the first-run migration AND catching up a stale cached summary
+      // after a DEFAULT_METRIC_ORDER change or bug fix. The L2 change-gate
+      // (shouldWriteL2) prevents redundant writes when nothing has shifted.
+      if (await hasManualData(state.currentProfile)) {
         const { syncWearableSummary } = await import('./wearables-summary.js');
         const { listConnectedSources } = await import('./wearables-connect.js');
         await syncWearableSummary(state.currentProfile, listConnectedSources());

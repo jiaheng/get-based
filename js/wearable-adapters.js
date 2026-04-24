@@ -52,9 +52,15 @@ export const CANONICAL_METRICS = {
 
 // Default display order for the dashboard strip. A canonical metric not listed
 // here still renders (appended in registry order) — the list just pins priority.
+// Also used as METRICS_FOR_SUMMARY in wearables-summary.js, so any metric that
+// should be included in the L2 summary (and thus the dashboard strip) must
+// appear here. Biometrics (weight, bp_systolic, bp_diastolic) are included so
+// manual entries and Withings-scale/BP-cuff sync flow through the same pipeline.
 export const DEFAULT_METRIC_ORDER = [
   'hrv_rmssd', 'rhr', 'sleep_score', 'readiness_score',
-  'activity_score', 'steps', 'stress_high_min', 'resilience_level', 'cardio_age',
+  'activity_score', 'steps',
+  'weight', 'bp_systolic', 'bp_diastolic',
+  'stress_high_min', 'resilience_level', 'cardio_age',
 ];
 
 export const ADAPTERS = [
