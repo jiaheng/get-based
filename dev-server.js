@@ -152,6 +152,19 @@ const server = http.createServer((req, res) => {
     res.writeHead(403); res.end('Forbidden'); return;
   }
 
+  // API: return current git HEAD + branch so Settings → Display shows the
+  // worktree's actual SHA in local dev (mirrors api/commit.js on Vercel).
+  if (pathname === '/api/commit') {
+    execFile('git', ['-C', ROOT, 'rev-parse', 'HEAD'], (e1, sha) => {
+      if (e1) { res.writeHead(404); res.end('not-a-git-checkout'); return; }
+      execFile('git', ['-C', ROOT, 'rev-parse', '--abbrev-ref', 'HEAD'], (e2, ref) => {
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify({ sha: sha.trim(), ref: e2 ? '' : ref.trim() }));
+      });
+    });
+    return;
+  }
+
   // API: HEAD-check a URL and return the real status code (bypasses browser CORS)
   if (pathname === '/api/check-url') {
     const target = url.searchParams.get('url');
