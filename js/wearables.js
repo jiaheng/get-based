@@ -1139,7 +1139,9 @@ async function saveManualEntryFromDetail(metricId, kind) {
     }
     await refreshManualSummary(profileId);
     showNotification?.('Saved', 'success');
-    // Re-open the detail modal to refresh the entries list + chart.
+    // Re-render the dashboard strip so the populated card reflects the new
+    // value, then re-open the detail modal on top with the refreshed list.
+    if (window.navigate) window.navigate('dashboard');
     openWearableDetail(metricId);
   } catch (e) {
     showNotification?.(`Couldn't save: ${e.message}`, 'error', 4000);
@@ -1170,7 +1172,18 @@ async function deleteManualEntryFromDetail(metricId, date) {
     }
     await refreshManualSummary(profileId);
     showNotification?.('Deleted', 'success');
-    openWearableDetail(metricId);
+    // Re-render the dashboard strip first so the card visibly updates (or
+    // disappears if that was the last reading). If the metric still has
+    // data, re-open the detail modal on top to refresh its entries list.
+    // If not, close the modal — re-opening `openWearableDetail` on an
+    // empty metric would flash an error toast instead.
+    if (window.navigate) window.navigate('dashboard');
+    const stillHasMetric = !!state.importedData?.wearableSummary?.metrics?.[metricId];
+    if (stillHasMetric) {
+      openWearableDetail(metricId);
+    } else if (window.closeModal) {
+      window.closeModal();
+    }
   } catch (e) {
     showNotification?.(`Couldn't delete: ${e.message}`, 'error', 4000);
   }

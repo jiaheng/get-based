@@ -152,6 +152,39 @@ return (async function() {
   const hasFlipEvent = flipRes.anomalyEvents?.some(e => e.kind === 'trend-flip' && e.metricId === 'hrv_rmssd');
   assert('Gate: trend flip emits anomaly event', hasFlipEvent, `events: ${JSON.stringify(flipRes.anomalyEvents)}`);
 
+  // Gate: metric-removed (Phase 7 L2 fix). User deletes last manual weight
+  // entry → summary.metrics no longer contains weight → strip must re-render
+  // immediately. Without this guard the stale summary persists and the card
+  // stays on screen forever.
+  const oldWithWeight = {
+    summaryUpdatedAt: baseSummary.summaryUpdatedAt,
+    sources: baseSummary.sources,
+    metrics: { ...baseSummary.metrics, weight: { latest: 82, primarySource: 'manual', baseline: 82, rolling: { d7: 82 }, trend30d: 'flat', weekly: [82] } }
+  };
+  const newWithoutWeight = { ...baseSummary }; // has no `weight` key
+  const removedRes = summary.shouldWriteL2(newWithoutWeight, oldWithWeight);
+  assert('Gate: metric-removed trips write',
+    removedRes.write === true && removedRes.reason?.startsWith('metric-removed:'),
+    `reason=${removedRes.reason}`);
+
+  // Gate: source-flip (Phase 7 L2 fix). User deletes manual rhr → auto-picker
+  // reverts primary to Oura → card source label must refresh even if d7
+  // doesn't cross the 5% threshold.
+  const oldRhrManual = {
+    summaryUpdatedAt: baseSummary.summaryUpdatedAt,
+    sources: baseSummary.sources,
+    metrics: { rhr: { latest: 64, primarySource: 'manual', baseline: 65, rolling: { d7: 64 }, trend30d: 'flat', weekly: [64] } }
+  };
+  const newRhrOura = {
+    summaryUpdatedAt: baseSummary.summaryUpdatedAt,
+    sources: baseSummary.sources,
+    metrics: { rhr: { latest: 64, primarySource: 'oura', baseline: 65, rolling: { d7: 64 }, trend30d: 'flat', weekly: [64] } }
+  };
+  const sourceFlipRes = summary.shouldWriteL2(newRhrOura, oldRhrManual);
+  assert('Gate: source-flip trips write even without d7 shift',
+    sourceFlipRes.write === true && sourceFlipRes.reason?.startsWith('source-flip:'),
+    `reason=${sourceFlipRes.reason}`);
+
   // ═══════════════════════════════════════
   // 5. buildWearableContext
   // ═══════════════════════════════════════

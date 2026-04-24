@@ -331,10 +331,16 @@ export function getActiveData() {
       return Math.round((u * 2.801) / (c * 0.01131) * 10) / 10;
     });
 
-    // Free Water Deficit — TBW × (Na/140 − 1), uses latest weight or 70kg fallback
+    // Free Water Deficit — TBW × (Na/140 − 1), uses latest weight or 70kg fallback.
+    // Weight now lives in the wearables summary (single source of truth after
+    // the Health Metrics unification; manual entries write kg-canonicalized).
+    // Legacy importedData.biometrics.weight is kept as a backstop for old
+    // profiles that somehow haven't seen the migration run yet.
     const sodiumVals = getVals('electrolytes', 'sodium');
-    const weightArr = state.importedData?.biometrics?.weight;
-    const latestWeight = Array.isArray(weightArr) && weightArr.length > 0 ? weightArr[weightArr.length - 1].value : null;
+    const summaryWeight = state.importedData?.wearableSummary?.metrics?.weight?.latest;
+    const legacyWeightArr = state.importedData?.biometrics?.weight;
+    const legacyWeight = Array.isArray(legacyWeightArr) && legacyWeightArr.length > 0 ? legacyWeightArr[legacyWeightArr.length - 1].value : null;
+    const latestWeight = (typeof summaryWeight === 'number' && isFinite(summaryWeight)) ? summaryWeight : legacyWeight;
     ratios.markers.freeWaterDeficit.values = sortedDates.map((_, i) => {
       const na = sodiumVals ? sodiumVals[i] : null;
       if (na == null || na <= 0) return null;

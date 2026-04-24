@@ -265,6 +265,20 @@ return (async function() {
     assert('wearables.js renders tag chips on bp form', wearablesSrc.includes('_renderTagChips'));
     assert('toggleManualLogChip on window', typeof window.toggleManualLogChip === 'function');
 
+    // Detail-modal save/delete handlers must re-render the dashboard strip,
+    // not just the modal. Before the audit fix, they only re-opened the
+    // detail modal — the strip card stayed stale until the user happened to
+    // re-navigate. Regression guard with a source-grep scoped to each
+    // function so a future refactor can't silently drop the render call.
+    const saveFn = wearablesSrc.match(/async function saveManualEntryFromDetail[\s\S]*?\n\}/)?.[0] || '';
+    const delFn = wearablesSrc.match(/async function deleteManualEntryFromDetail[\s\S]*?\n\}/)?.[0] || '';
+    assert('saveManualEntryFromDetail re-renders dashboard strip',
+      /window\.navigate\([^)]*\)/.test(saveFn) && /['"]dashboard['"]/.test(saveFn));
+    assert('deleteManualEntryFromDetail re-renders dashboard strip',
+      /window\.navigate\([^)]*\)/.test(delFn) && /['"]dashboard['"]/.test(delFn));
+    assert('deleteManualEntryFromDetail closes modal when last reading is removed',
+      /closeModal/.test(delFn));
+
   } finally {
     // Restore live profile
     window._labState.currentProfile = origProfile;
