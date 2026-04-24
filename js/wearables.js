@@ -383,6 +383,10 @@ async function openWearableDetail(metricId) {
     return;
   }
 
+  // Snapshot the focused element (clicked card) so closeModal can return
+  // focus to it — keyboard users otherwise land on <body> after close.
+  window.rememberModalTrigger?.();
+
   // Pull last 90 days from L1 for whichever source is primary for this metric.
   // Series may have gaps (ring not worn, feature off) — we plot what's there
   // and label missing days via Chart.js spanGaps rather than forward-filling.

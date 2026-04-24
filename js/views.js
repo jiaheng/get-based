@@ -257,6 +257,21 @@ export function showDashboard(data) {
 // ── Commit Hash ──
 
 let _cachedCommitHash = null;
+
+// Remembered focus before a detail modal opens, so closeModal() can return
+// focus to the trigger. Keyboard users otherwise land on <body> after close
+// and lose their place in the page.
+let _modalLastTrigger = null;
+export function rememberModalTrigger() {
+  const el = document.activeElement;
+  _modalLastTrigger = (el && el !== document.body && typeof el.focus === 'function') ? el : null;
+}
+function restoreModalTrigger() {
+  const el = _modalLastTrigger;
+  _modalLastTrigger = null;
+  if (!el || !document.contains(el)) return;
+  try { el.focus(); } catch { /* element may have been replaced */ }
+}
 function loadCommitHash() {
   const vEl = document.getElementById('app-version-text');
   if (vEl && !vEl.textContent) vEl.textContent = window.APP_VERSION || '';
@@ -1067,6 +1082,7 @@ export function showDetailModal(id, opts = {}) {
   let marker = data.categories[catKey]?.markers[mKey];
   if (marker) state.markerRegistry[id] = marker;
   if (!marker) return;
+  rememberModalTrigger();
   const modal = document.getElementById("detail-modal");
   const overlay = document.getElementById("modal-overlay");
   const dates = marker.singlePoint ? [marker.singleDateLabel || "N/A"] : data.dateLabels;
@@ -1703,6 +1719,7 @@ export function closeModal() {
   if (state.chartInstances["modal"]) { state.chartInstances["modal"].destroy(); delete state.chartInstances["modal"]; }
   document.removeEventListener('click', closeSuggestionsOnClickOutside);
   if (window.closeEMFInterpretation) window.closeEMFInterpretation();
+  restoreModalTrigger();
 }
 
 
@@ -2186,6 +2203,7 @@ Object.assign(window, {
   saveMarkerNote,
   deleteMarkerNote,
   closeModal,
+  rememberModalTrigger,
   showCompare,
   setCompareDate1,
   setCompareDate2,
