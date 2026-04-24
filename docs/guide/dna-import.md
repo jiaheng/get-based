@@ -13,6 +13,7 @@ You need a **raw DNA data file** from one of these providers:
 | **MyHeritage** | CSV | DNA → Manage DNA kits → Download Raw Data |
 | **FTDNA** (Family Tree DNA) | CSV | myFTDNA → Download Raw Data |
 | **Living DNA** | Tab-separated text | Dashboard → Download Raw DNA |
+| **Illumina GenomeStudio** (DNAEra and other clinical chip exports) | CSV with `[Header]`/`[Data]` blocks | Provided by your clinical lab |
 
 No AI provider is needed for DNA import — the file is parsed locally.
 
@@ -27,20 +28,23 @@ The file is processed entirely in your browser using a Web Worker. Your DNA data
 
 ## What Gets Extracted
 
-getbased doesn't store your entire genome. It scans your file for **42 curated SNPs** across 10 categories and discards everything else.
+getbased doesn't store your entire genome. It scans your file for **47 curated SNPs** across 13 categories and discards everything else.
 
 | Category | SNPs | Example genes | Related markers |
 |---|---|---|---|
 | Methylation | 6 | MTHFR, MTR, MTRR, CBS | Homocysteine, folate, B12 |
 | Iron | 5 | HFE, TMPRSS6, TF | Ferritin, transferrin, iron |
-| Lipids | 5 | APOE, PCSK9, CETP | LDL, HDL, cholesterol, Lp(a) |
+| Lipids | 6 | APOE, PCSK9, CETP, LIPC | LDL, HDL, cholesterol, Lp(a) |
 | Vitamin D | 4 | VDR, GC, CYP2R1 | Vitamin D |
 | Vitamin B12 | 4 | FUT2, TCN2, CUBN | B12, homocysteine |
-| Blood Sugar | 4 | TCF7L2, PPARG, ADIPOQ | Glucose, HbA1c, insulin |
+| Blood Sugar | 5 | TCF7L2, PPARG, ADIPOQ, MTNR1B | Glucose, HbA1c, insulin |
 | Sex Hormones | 5 | SHBG, CYP17A1, CYP19A1 | Testosterone, estradiol, SHBG |
 | Thyroid | 3 | DIO1, DIO2, TSHR | TSH, fT3, fT4 |
 | Bilirubin | 2 | UGT1A1 | Total bilirubin |
 | Fatty Acids | 4 | FADS1, FADS2, ELOVL2 | Omega-3, EPA, DHA |
+| Alcohol | 1 | ALDH2 | GGT, AST, ALT (liver enzymes) |
+| Caffeine | 1 | CYP1A2 | Cholesterol, hsCRP, glucose |
+| Body Composition | 1 | FTO | Body fat %, BMI, HbA1c |
 
 ### APOE Haplotype
 
@@ -60,15 +64,17 @@ The core principle: **only SNPs that help you interpret the blood work you're al
 
 ## Effect Tiers
 
-Each genotype is classified into one of three tiers:
+Each genotype gets a colored dot on two axes — **severity** (significant / moderate / mild) × **valence** (risk / protective / neutral). The legend at the top of the genetics dashboard explains the scheme.
 
-| Tier | Meaning | Example |
+| Dot | Meaning | Example |
 |---|---|---|
-| 🔴 **Significant** | Meaningful functional impact — worth factoring into your health decisions | MTHFR C677T AA (~30% enzyme activity) |
-| 🟡 **Moderate** | Mild effect — relevant when combined with other factors | MTRR A66G AG (modestly reduced B12 recycling) |
-| 🟢 **None** | Normal / wild-type — no impact | HFE C282Y GG (no hemochromatosis risk) |
+| 🔴 **Significant risk** | Meaningful functional impact — worth factoring into your health decisions | MTHFR C677T AA (~30% enzyme activity) |
+| 🟡 **Moderate risk** | Mild effect — relevant when combined with other factors | HFE C282Y heterozygous |
+| 🟠 **Mild risk** | Small effect on its own; mainly relevant in combination | MTHFR A1298C heterozygous |
+| 🟢 **Beneficial** | Variant that's actually good news (longevity, lower risk) | PCSK9 R46L (~15% lower lifetime LDL) |
+| ⚪ **Informational** | Lab-interpretation flag, neither risky nor protective | FUT2 W154X non-secretor (lab-artifact high B12) |
 
-The import preview groups findings by tier so you can see significant results first.
+The import preview groups findings by severity so you can see significant results first. Wild-type / no-effect genotypes get no dot at all.
 
 ## Where Genetics Appears
 
@@ -91,7 +97,7 @@ SNPs route to relevant context cards (diet, supplements, sleep, etc.) so the AI 
 ## Privacy
 
 - Your DNA file is parsed **entirely in your browser** using a Web Worker — it is never uploaded or transmitted
-- Only the 42 matched SNP genotypes are stored (not your full genome)
+- Only the 47 matched SNP genotypes are stored (not your full genome)
 - Stored data includes: rsid, genotype, gene name, variant name, and effect classification
 - DNA data is included in JSON exports and covered by encryption if enabled
 - You can delete your genetic data at any time from the Genetics dashboard section
@@ -106,7 +112,7 @@ Importing a new DNA file replaces any existing genetic data for the current prof
 **What if my file isn't detected?**
 getbased identifies files by their content headers, not just the filename. Make sure you're using the raw data export (a text or CSV file), not a PDF report or a health report download.
 
-**Why only 42 SNPs?**
+**Why only 47 SNPs?**
 Quality over quantity. Each SNP was selected because it has a well-understood mechanism, a large effect size, and directly helps interpret a biomarker you're tracking. Adding hundreds of low-confidence GWAS hits would create noise, not signal. Each SNP links to its primary research paper so you can verify the evidence yourself.
 
 **Can I add my own SNPs?**

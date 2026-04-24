@@ -2,8 +2,8 @@
   "_meta": {
     "version": "1.1.0",
     "description": "Curated health-relevant SNP lookup table for DNA raw data import. Forward (+) strand alleles. snpHints connect genetics to supplement recommendation slots. UPDATE when new research warrants adding/revising SNPs — each entry needs gene, genotypes, effect notes, and at least one citation.",
-    "snpCount": 42,
-    "categories": ["methylation", "iron", "lipids", "vitaminD", "vitaminB12", "bilirubin", "thyroid", "fattyAcids", "bloodSugar", "sexHormones"],
+    "snpCount": 47,
+    "categories": ["methylation", "iron", "lipids", "vitaminD", "vitaminB12", "bilirubin", "thyroid", "fattyAcids", "bloodSugar", "sexHormones", "alcohol", "caffeine", "bodyComposition"],
     "sources": ["SNPedia", "ClinVar", "GWAS Catalog", "PharmGKB"]
   },
 
