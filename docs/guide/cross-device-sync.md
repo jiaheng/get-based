@@ -50,6 +50,16 @@ Anyone with your mnemonic can access your synced data. Treat it like a password 
 
 Settings such as theme are device-specific and do not sync.
 
+### Wearable data
+
+Wearables follow a deliberate split:
+
+- **The L2 summary syncs.** Latest values, baselines, weekly trends, and anomaly events for every connected metric — about 200 tokens per profile — flow to your other devices alongside everything else. Strip cards on Device B show the right numbers immediately after sync.
+- **Raw daily rows stay local.** The full 90-day history (every per-day HRV / sleep / RHR / manual entry) lives in a per-device IndexedDB and is excluded from the sync payload. Detail-modal charts on Device B will be empty until you OAuth-connect each vendor there.
+- **OAuth tokens never sync.** Each device has to authorise each wearable independently. By design — a stolen mnemonic shouldn't grant the attacker continuous access to your live wearable feeds.
+
+Profile delete drops the per-device wearable IndexedDB along with the localStorage data. Auto-backup and folder-backup capture the full wearable IDB so a restore round-trips your raw history.
+
 ## Mnemonic Security
 
 Your mnemonic is your encryption key. getbased takes several precautions:

@@ -843,9 +843,13 @@ async function chooseWearableSource(metricId, event) {
 
   // Close any existing picker, then build + position a new one near the click.
   document.querySelectorAll('.wearable-source-picker').forEach(el => el.remove());
-  const current = state.importedData?.wearablePrimaryOverride?.[metricId]
-    || state.importedData?.wearableSummary?.metrics?.[metricId]?.primarySource
-    || eligible[0];
+  // Pick the EFFECTIVE primary first — `wearableSummary.metrics[mid].primarySource`
+  // is what the L2 picker actually used, which falls through to auto-pick when
+  // an override points at a source with no data. Reading the override directly
+  // would mark a stale checkmark and lie to the user about what's active.
+  const effectivePrimary = state.importedData?.wearableSummary?.metrics?.[metricId]?.primarySource;
+  const overrideSource = state.importedData?.wearablePrimaryOverride?.[metricId];
+  const current = effectivePrimary || overrideSource || eligible[0];
   const picker = document.createElement('div');
   picker.className = 'wearable-source-picker';
   picker.innerHTML = `

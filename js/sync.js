@@ -917,7 +917,10 @@ export function pushContextToGateway() {
       const seriesBlock = await buildWearableSeriesSection(30).catch(() => '');
       const context = seriesBlock ? `${baseContext}\n${seriesBlock}\n` : baseContext;
       const profileId = state.currentProfile || 'default';
-      const profiles = getProfiles().map(p => ({ id: p.id, name: p.name }));
+      // The gateway only needs the active profileId — DON'T leak the full
+      // profile-name list. Profile names can include real names; the relay
+      // is unencrypted (the rest of the agent payload is by design too,
+      // but profile names are gratuitous PII for the agent's needs).
       const relay = getSyncRelay().replace(/^wss:\/\//, 'https://').replace(/^ws:\/\//, 'http://');
 
       await fetch(`${relay}/api/context`, {
@@ -926,7 +929,7 @@ export function pushContextToGateway() {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ context, profileId, profiles }),
+        body: JSON.stringify({ context, profileId }),
       });
       dbg(`Context pushed to gateway (profile: ${profileId}, series: ${seriesBlock ? 'yes' : 'no'})`);
     } catch (e) {

@@ -76,7 +76,7 @@ Vendors that uniquely provide a metric (only Withings does weight) don't show a 
 - **"needs reconnection" pill** — refresh token expired or revoked. Click Reconnect.
 - **Wearable not in the dropdown when picking a metric source** — the vendor doesn't expose that canonical metric (e.g. WHOOP doesn't do `weight`, Withings doesn't do `hrv_rmssd`).
 - **Apple Health import is slow** — the XML can be 100 MB+ for multi-year history. Parsing happens in-browser; expect 30–60 seconds for large exports.
-- **"waiting on partner credentials"** for WHOOP / Ultrahuman — we don't yet have production OAuth client IDs from these vendors. Watch the changelog.
+- **"waiting on partner credentials"** for WHOOP / Ultrahuman — I don't yet have production OAuth client IDs from these vendors. Watch the changelog.
 
 ## Beta status
 

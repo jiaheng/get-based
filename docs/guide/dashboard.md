@@ -9,12 +9,13 @@ Sections appear in this order:
 1. **Import Button** — A floating action button (bottom-right, above the chat FAB) for importing PDFs or JSON files. Appears once you have data; on first visit, the welcome hero handles imports
 2. **Interpretive Lens** — The scientific or clinical framework the AI uses when analyzing your results
 3. **Focus Card** — A single AI-generated sentence summarizing the most important finding right now
-4. **Context Cards** — Nine lifestyle cards covering what your GP typically doesn't ask
-5. **Menstrual Cycle** — Cycle tracking and phase-aware interpretation (female profiles only)
-6. **Supplements** — Your supplement and medication timeline
-7. **Key Trends** — Line charts for each biomarker category
-8. **Trends & Alerts** — Automatically detected changes and critical flags
-9. **Data & Notes** — Your raw entries, standalone notes, and export options
+4. **Wearable Strip** — Visible once you connect a wearable (Oura, WHOOP, Fitbit, Withings, Ultrahuman, Polar, Apple Health) or log your first manual weight / BP / resting HR. HRV, sleep, recovery, and biometrics in one row of cards. See [Wearables](./wearables.md) for the full setup walkthrough
+5. **Context Cards** — Nine lifestyle cards covering what your GP typically doesn't ask
+6. **Menstrual Cycle** — Cycle tracking and phase-aware interpretation (female profiles only)
+7. **Supplements** — Your supplement and medication timeline
+8. **Key Trends** — Line charts for each biomarker category
+9. **Trends & Alerts** — Automatically detected changes and critical flags
+10. **Data & Notes** — Your raw entries, standalone notes, and export options
 
 ::: tip
 The dashboard only shows markers that have actual data from your lab results. Markers in the schema that you have never imported are hidden from the sidebar count and charts.

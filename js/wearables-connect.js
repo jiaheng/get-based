@@ -7,7 +7,7 @@
 import { state } from './state.js';
 import { saveImportedData } from './data.js';
 import { adapterById } from './wearable-adapters.js';
-import { upsertDailyBatch, clearSource, setMeta, getMeta, countSource } from './wearables-store.js';
+import { upsertDailyBatch, clearSource, setMeta, getMeta, deleteMeta, countSource } from './wearables-store.js';
 import { syncWearableSummary } from './wearables-summary.js';
 import { fetchOuraDailyRange, fetchOuraPersonalInfo, daysAgoIso, isoDay } from './wearables-oura.js';
 import { beginOAuth as beginOuraOAuth, completeOAuthCallback as completeOuraCallback, isOuraCallback, withFreshToken as ouraWithFreshToken, DEFAULT_OURA_SCOPES } from './wearables-oura-auth.js';
@@ -196,7 +196,16 @@ export async function handleOAuthCallbackOnLoad() {
   saveConnection(adapterId, { ...getConnection(adapterId), account: info.ok ? info.account : null });
   // Polar-only one-time user registration (409 if already registered — fine).
   if (typeof disp.postConnect === 'function') {
-    const memberId = `getbased-${activeProfile}-${result.tokens.userId || 'user'}`;
+    // The token grant MUST carry x_user_id — without it two profiles connecting
+    // Polar on the same browser would collide on the literal "user" fallback,
+    // and the second profile's data fetches would alias to the first one's
+    // member registration. Refuse rather than silently pollute.
+    if (!result.tokens.userId) {
+      saveConnection(adapterId, { ...getConnection(adapterId), needsReauth: true });
+      showNotification?.(`${disp.displayName}: connect response missing user id — please reconnect`, 'error', 5000);
+      return;
+    }
+    const memberId = `getbased-${activeProfile}-${result.tokens.userId}`;
     try {
       const reg = await disp.postConnect(result.tokens.accessToken, memberId);
       if (reg?.ok) {
@@ -368,6 +377,11 @@ export async function disconnectWearable(adapterId, { deleteData = true } = {}) 
   removeConnection(adapterId);
   if (deleteData) {
     try { await clearSource(profileId, adapterId); } catch (e) { if (isDebugMode?.()) console.warn('[wearables] clearSource failed:', e.message); }
+    // Drop the `last-sync:{adapterId}` meta entry too — otherwise a future
+    // reconnect's incrementalSyncWearable picks up the stale endDate as
+    // start, missing the freshly-cleared backfill range until the
+    // recoverIfL1Empty scheduler eventually full-resyncs.
+    try { await deleteMeta(profileId, `last-sync:${adapterId}`); } catch { /* meta wipe failure is recoverable */ }
     if (state.importedData?.wearableSummary?.sources?.[adapterId]) {
       delete state.importedData.wearableSummary.sources[adapterId];
       if (Object.keys(state.importedData.wearableSummary.sources).length === 0) {
@@ -418,6 +432,10 @@ export async function syncAllConnected() {
 export async function recoverIfL1Empty(adapterId) {
   const conn = getConnection(adapterId);
   if (!conn?.accessToken) return { skipped: true };
+  // Skip if the connection is already flagged as needing reauth — backfill
+  // would 401 → flip the same flag again and the user gets noisy errors
+  // every scheduler tick. Wait for them to reconnect before retrying.
+  if (conn.needsReauth) return { skipped: true, reason: 'needs-reauth' };
   const profileId = getActiveProfileId();
   const n = await countSource(profileId, adapterId).catch(() => 0);
   if (n > 0) return { skipped: true, rows: n };

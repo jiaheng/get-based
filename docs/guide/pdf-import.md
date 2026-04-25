@@ -55,7 +55,7 @@ getbased automatically detects non-blood tests — OAT, DUTCH, HTMA, amino acids
 
 ## What Gets Extracted
 
-getbased tracks 300+ biomarkers across 18 categories:
+getbased tracks 300+ biomarkers across 17 categories:
 
 - Biochemistry (glucose, liver enzymes, kidney markers, electrolytes)
 - Hormones (testosterone, estradiol, cortisol, DHEA, insulin, and more)

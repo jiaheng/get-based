@@ -5,6 +5,20 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.27.4', date: '2026-04-25', title: 'Wearables P1 cleanup — sync hygiene, picker honesty, touch targets, doc drift',
+    items: [
+      '<b>Disconnect-then-reconnect was missing data.</b> The <code>last-sync</code> meta entry survived disconnect, so the next reconnect\'s incremental sync started from the old end-date instead of refetching the cleared range. Now cleared on disconnect.',
+      '<b>Source picker checkmark fixed.</b> When you forced a primary source that had no data, the L2 picker silently fell back to auto — but the picker still showed your stale override with a ✓. Now reflects the EFFECTIVE primary the L2 actually used.',
+      '<b>Polar connect refuses gracefully when the token grant is missing user_id.</b> Previously a missing <code>x_user_id</code> would have aliased two different profiles\' Polar data via the literal "user" fallback. Now flags <i>needs reauth</i> with a clear message.',
+      '<b>Scheduler stops the 401 retry storm.</b> <code>recoverIfL1Empty</code> now skips a connection that\'s already flagged <code>needsReauth</code>, so a stale token doesn\'t trigger a backfill that 401s and re-flags the same flag every tick.',
+      '<b>Agent gateway no longer leaks profile names.</b> The push to the relay carried a full <code>profiles: [{id,name},…]</code> array — the relay only needs the active <code>profileId</code>. Profile names can include real names; this was gratuitous PII over-share.',
+      '<b>Service worker now caches <code>wearables-manual.js</code></b> — was missing from the SW static-cache list, would 404 offline for users with manual entries.',
+      '<b>Mobile touch targets ≥44px.</b> Strip sync, reorder arrows, source picker items, manual-entry delete, action buttons, and inline log save/cancel all hit the standard tap-target threshold under <code>(pointer: coarse)</code>.',
+      '<b>"Push 30-day wearable series" toggle copy fixed</b> — said "~1500 extra tokens" when reality is ~400 (real-measured). Matches the docs.',
+      '<b>Doc drift cleanup.</b> Dashboard guide lists the wearable strip in the layout flow. Cross-device-sync guide explicitly explains the L2-syncs / L1-stays-local / tokens-don\'t-sync split. Marker-count drift fixed across <code>pdf-import.md</code>, <code>custom-markers.md</code>, <code>manual-entry.md</code> — all 17, not 18. Single-maintainer voice in <code>wearables.md</code> ("I" not "we").',
+    ]
+  },
+  {
     version: '1.27.3', date: '2026-04-25', title: 'Fix: backups + profile delete + PDF report all carry wearable data now',
     items: [
       '<b>Auto-backup + folder-backup + manual export now include 90 days of wearable raw rows.</b> Previously only the L2 summary survived a backup restore — every daily HRV / sleep / RHR / manual entry was silently lost. New <code>buildFullBackupSnapshot</code> + restore path round-trips the whole wearable IndexedDB.',
@@ -112,7 +126,7 @@ const CHANGELOG = [
       '<b>Reorder your strip.</b> Tap the ⇄ button in the strip header → each card grows ◀ ▶ arrows → one click moves that card one slot. Works the same on mouse and touch. Order persists per-profile.',
       '<b>Settings → Integrations panel</b> for managing connections. Real vendor logos, one-click connect, expand a row to sync / re-sync 90 days / disconnect. Manual is in the same list — expand it for entry counts + a <i>Delete all manual entries</i> escape hatch (wearable data untouched).',
       '<b>Settings → AI → AI Context</b> has a toggle to include or exclude wearable data from the AI chat context. On by default; turn it off to keep metrics out of every prompt.',
-      '<b>Privacy by design.</b> Wearable data stays on your device. Only a compact summary plus anomaly events sync to your other devices via the existing Evolu CRDT. We never see your raw HRV / sleep / heart-rate data. OAuth tokens stay per-device — never sync.',
+      '<b>Privacy by design.</b> Wearable data stays on your device. Only a compact summary plus anomaly events sync to your other devices via the existing Evolu CRDT. The relay never sees your raw HRV / sleep / heart-rate data. OAuth tokens stay per-device — never sync.',
       '<b>Notes.</b> Polar exposes HRV only from recorded workouts (not overnight averages like Oura / WHOOP / Fitbit). Apple Health is file-import — export from your iPhone and drop the zip in. All seven integrations are <i>beta</i>; WHOOP and Ultrahuman are waiting on partner credentials for the OAuth handshake.',
     ]
   },

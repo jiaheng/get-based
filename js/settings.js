@@ -906,7 +906,7 @@ function renderMessengerSection() {
         <div style="display:flex;align-items:center;justify-content:space-between">
           <div style="flex:1;margin-right:14px">
             <div style="font-size:13px;color:var(--text-secondary)">Push 30-day wearable series</div>
-            <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Adds a daily-values matrix (HRV, RHR, sleep…) so agents can spot trends. ~1500 extra tokens per agent prompt; cached cleanly so the marginal cost is small. Off by default — turn on if you want time-series reasoning.</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Adds a daily-values matrix (HRV, RHR, sleep…) so agents can spot trends. ~400 extra tokens per agent prompt (real-measured at 30 days × 13 metrics); cached cleanly so the marginal cost per turn is small. Off by default — turn on if you want time-series reasoning.</div>
           </div>
           <label class="chat-websearch-toggle-label" style="display:flex" aria-label="Push wearable series to agent">
             <input type="checkbox" id="agent-wearable-series-toggle" ${window.isAgentWearableSeriesEnabled?.() ? 'checked' : ''} onchange="window.setAgentWearableSeriesEnabled(this.checked); window.pushContextToGateway && window.pushContextToGateway()" style="display:none">

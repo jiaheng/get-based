@@ -3767,6 +3767,19 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
   .chart-layers-row { min-height: 44px; }
   .emf-room-tab { min-height: 44px; }
   .range-btn { min-height: 44px; }
+  /* Wearable-specific touch targets: previously the strip's sync, reorder,
+     manual-entry delete, and source-picker items all sat sub-20px on phones
+     (audit P1-9). Lift them to the 44px standard the rest of the app uses. */
+  .wearable-strip-sync,
+  .wearable-strip-reorder { min-height: 44px; padding: 8px 14px; }
+  .wearable-reorder-arrow { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
+  .wearable-source-picker-item { min-height: 44px; padding: 10px 12px; }
+  .wearable-manual-entry-del { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
+  .wearable-source-badge-btn { min-height: 32px; padding: 4px 10px; }
+  .wearable-action { min-height: 44px; padding: 10px 16px; }
+  .wearable-manual-add-btn,
+  .wearable-log-save,
+  .wearable-log-cancel { min-height: 44px; padding: 8px 14px; }
 }
 /* ═══ Guided Tour ═══ */
 #tour-overlay { position: fixed; inset: 0; z-index: 500; pointer-events: auto; }

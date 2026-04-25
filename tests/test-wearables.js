@@ -883,6 +883,79 @@ return (async function() {
   assert('WebCrypto+base64url yields RFC 7636 challenge', b64url === RFC_CHALLENGE, `got ${b64url}`);
 
   // ═══════════════════════════════════════
+  // 17y. P1 audit fallout (v1.27.4)
+  // ═══════════════════════════════════════
+  console.log('%c 17y. P1 Audit Fixes ', 'font-weight:bold;color:#f59e0b');
+
+  // SW cache: wearables-manual.js was missing — would 404 offline for users
+  // with manual entries.
+  const swSrc = await fetch('/service-worker.js').then(r => r.text());
+  assert('Service-worker static cache lists wearables-manual.js',
+    /\/js\/wearables-manual\.js/.test(swSrc));
+
+  // disconnectWearable now clears last-sync meta so reconnect doesn't pick
+  // up a stale endDate.
+  const connectSrc = await fetch('/js/wearables-connect.js').then(r => r.text());
+  assert('disconnectWearable clears last-sync:{adapterId} meta',
+    /export\s+async\s+function\s+disconnectWearable[\s\S]*?deleteMeta\(profileId,\s*`last-sync:\$\{adapterId\}`\)/.test(connectSrc));
+  assert('deleteMeta imported from wearables-store',
+    /import\s*\{[^}]*deleteMeta[^}]*\}\s*from\s*['"]\.\/wearables-store\.js['"]/.test(connectSrc));
+
+  // Source picker now uses the EFFECTIVE primary (the L2 picker's actual
+  // pick) rather than the raw override which can be stale/invalid.
+  const wearablesSrc3 = await fetch('/js/wearables.js').then(r => r.text());
+  assert('Source picker prefers wearableSummary.metrics primarySource (effective) over raw override',
+    /effectivePrimary\s*=\s*state\.importedData\?\.wearableSummary\?\.metrics\?\.\[metricId\]\?\.primarySource/.test(wearablesSrc3));
+
+  // Polar memberId guard: refuses connect when token grant lacks userId.
+  assert('Polar postConnect refuses to register when result.tokens.userId missing',
+    /if\s*\(!result\.tokens\.userId\)\s*\{[\s\S]*?needsReauth:\s*true/.test(connectSrc));
+
+  // recoverIfL1Empty now respects needsReauth — prevents the 401 retry
+  // storm in the scheduler.
+  assert('recoverIfL1Empty short-circuits when conn.needsReauth is true',
+    /if\s*\(conn\.needsReauth\)\s*return\s*\{\s*skipped:\s*true,\s*reason:\s*'needs-reauth'/.test(connectSrc));
+
+  // pushContextToGateway dropped the profile-name list (was sent cleartext to
+  // the relay alongside the context).
+  const syncSrc2 = await fetch('/js/sync.js').then(r => r.text());
+  assert('Gateway POST body does NOT include profile names array',
+    /JSON\.stringify\(\{\s*context,\s*profileId\s*\}\)/.test(syncSrc2));
+  assert('Gateway POST body NEVER references getProfiles().map for the relay payload',
+    !/profiles\s*=\s*getProfiles\(\)\.map[\s\S]{0,200}body:\s*JSON\.stringify\(\{\s*context,\s*profileId,\s*profiles\s*\}\)/.test(syncSrc2));
+
+  // Touch tap-target rule for wearable-specific controls.
+  const cssSrc = await fetch('/styles.css').then(r => r.text());
+  assert('Touch media block extends to .wearable-strip-sync (≥44px)',
+    /@media\s*\(pointer:\s*coarse\)[\s\S]{0,5000}\.wearable-strip-sync[\s\S]{0,200}min-height:\s*44px/.test(cssSrc));
+  assert('Touch media block extends to .wearable-manual-entry-del (≥44px)',
+    /@media\s*\(pointer:\s*coarse\)[\s\S]{0,5000}\.wearable-manual-entry-del[\s\S]{0,200}min-height:\s*44px/.test(cssSrc));
+  assert('Touch media block extends to .wearable-reorder-arrow (≥44px)',
+    /@media\s*\(pointer:\s*coarse\)[\s\S]{0,5000}\.wearable-reorder-arrow[\s\S]{0,200}min-height:\s*44px/.test(cssSrc));
+
+  // In-app token-cost copy aligned with measured reality (~400 not ~1500).
+  const settingsSrc = await fetch('/js/settings.js').then(r => r.text());
+  assert('Agent series toggle blurb cites ~400 tokens (matches docs/guide/agent-access.md)',
+    /~400 extra tokens per agent prompt/.test(settingsSrc));
+  assert('Agent series toggle blurb does NOT cite the stale ~1500 figure',
+    !/~1500 extra tokens per agent prompt/.test(settingsSrc));
+
+  // Single-maintainer voice — no "we don't yet have" / "We never see" in
+  // the wearables-touched docs/changelog.
+  const wearablesDoc = await fetch('/docs/guide/wearables.md').then(r => r.text());
+  assert('docs/guide/wearables.md uses single-maintainer voice ("I", not "we")',
+    !/we don't yet have/.test(wearablesDoc));
+  const changelogSrc = await fetch('/js/changelog.js').then(r => r.text());
+  assert('changelog.js v1.24.0 privacy bullet uses "The relay never sees" not "We never see"',
+    /relay never sees/.test(changelogSrc));
+
+  // Doc-source assertions (cross-device-sync.md, dashboard.md, marker count
+  // consistency across pdf-import.md / custom-markers.md / manual-entry.md)
+  // can't run through the browser harness — `/docs/guide/*.md` are not
+  // served by dev-server (they live in `dist-docs/` post-build). Source-edits
+  // landed in the same commit; rely on PR review for those.
+
+  // ═══════════════════════════════════════
   // 17z. P0 data-integrity (v1.27.3) — branch audit fallout
   // ═══════════════════════════════════════
   console.log('%c 17z. P0 Data-Integrity ', 'font-weight:bold;color:#f59e0b');
