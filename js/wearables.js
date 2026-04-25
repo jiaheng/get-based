@@ -335,12 +335,6 @@ export function renderWearableStrip() {
   // Daytime companions live in the detail modal as sub-stats, not as their
   // own cards — keeps the strip calm at 6-8 cards instead of 10.
   const STRIP_HIDDEN_METRICS = new Set(['hrv_day', 'hr_day']);
-  // Niche signals (Oura's vendor-proprietary 1/5 scores) collapse under a
-  // "More" disclosure unless the user has reordered them up. cardio_age
-  // (vascular-age estimate) used to live here too but it's interesting
-  // enough at a glance to keep inline; resilience_level (1-5 enum) is the
-  // only one users find truly opaque.
-  const STRIP_NICHE_METRICS = new Set(['resilience_level']);
   const displayOrder = [];
   const seenDisplay = new Set();
   for (const id of baseMetricOrder) {
@@ -418,39 +412,11 @@ export function renderWearableStrip() {
   // Unified render loop — both populated and empty cards flow in the
   // user-defined order (finalOrder). In reorder mode each card gains ◀ ▶
   // arrow handles and detail-modal clicks are suppressed.
-  // Niche metrics (Oura proprietary 1/5 scores) are deferred to a "More"
-  // disclosure unless the user explicitly placed them inline. We can't
-  // just check `savedOrder.includes(id)` because moveWearableCard saves
-  // the full display list (including niche cards visible in reorder mode)
-  // — so the first reorder of any non-niche card would auto-pin every
-  // niche metric. Instead we treat a niche metric as pinned only when its
-  // index in savedOrder is BEFORE the last non-niche entry, which is
-  // possible only if the user actively dragged it up past a real card.
-  const userPinnedNiche = (() => {
-    if (!Array.isArray(savedOrder) || !savedOrder.length) return new Set();
-    let lastNonNicheIdx = -1;
-    for (let i = savedOrder.length - 1; i >= 0; i--) {
-      if (!STRIP_NICHE_METRICS.has(savedOrder[i])) { lastNonNicheIdx = i; break; }
-    }
-    if (lastNonNicheIdx <= 0) return new Set();
-    const pinned = new Set();
-    for (let i = 0; i < lastNonNicheIdx; i++) {
-      const id = savedOrder[i];
-      if (STRIP_NICHE_METRICS.has(id)) pinned.add(id);
-    }
-    return pinned;
-  })();
-  const renderNicheInline = (metricId) => reorderMode || userPinnedNiche.has(metricId);
-  const nicheDeferred = [];
 
   for (let i = 0; i < finalOrder.length; i++) {
     const { id: metricId, empty } = finalOrder[i];
     const canon = canonicalMetric(metricId);
     if (!canon) continue;
-    if (STRIP_NICHE_METRICS.has(metricId) && !renderNicheInline(metricId)) {
-      nicheDeferred.push(finalOrder[i]);
-      continue;
-    }
     let cardHtml;
     if (empty) {
       cardHtml = renderEmptyManualCard(metricId, canon);
@@ -477,22 +443,6 @@ export function renderWearableStrip() {
       </div>`;
     }
     html += cardHtml;
-  }
-
-  // Render the niche cards behind a disclosure so users can opt-in without
-  // them dominating the strip.
-  if (nicheDeferred.length > 0) {
-    const nicheLabels = nicheDeferred.map(d => canonicalMetric(d.id)?.label || d.id).join(' · ');
-    html += `<details class="wearable-niche-disclosure"><summary class="wearable-niche-summary" aria-label="Show ${escapeHTML(nicheDeferred.length === 1 ? '1 vendor-specific score' : nicheDeferred.length + ' vendor-specific scores')}: ${escapeHTML(nicheLabels)}">+ ${nicheDeferred.length} vendor-specific ${nicheDeferred.length === 1 ? 'score' : 'scores'} (${escapeHTML(nicheLabels)})</summary><div class="wearable-niche-grid">`;
-    for (const { id: metricId, empty } of nicheDeferred) {
-      const canon = canonicalMetric(metricId);
-      if (!canon) continue;
-      if (empty) { html += renderEmptyManualCard(metricId, canon); continue; }
-      const metric = summary.metrics[metricId];
-      if (!metric) continue;
-      html += renderCard(metricId, canon, metric, showSourceBadges);
-    }
-    html += `</div></details>`;
   }
 
   html += `</div>`;

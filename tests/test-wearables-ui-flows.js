@@ -227,6 +227,9 @@ return (async function() {
   if (window._labState.importedData.wearableSummary?.sources?.oura) {
     window._labState.importedData.wearableSummary.sources.oura.coverageDays = 1;
   }
+  // v1.30.1: cardio_age + resilience render inline alongside the rest —
+  // the "vendor-specific scores" disclosure was removed (single-metric
+  // collapse with a misleading label, plus pin-drift bugs across origins).
   const sum = window._labState.importedData.wearableSummary;
   if (sum) {
     sum.metrics.cardio_age = { primarySource: 'oura', latest: 35, latestDate: '2026-04-22',
@@ -237,15 +240,14 @@ return (async function() {
       rolling: { d7: 3, d30: 3, d90: 3 }, trend30d: 'flat', weekly: [3] };
     if (window.navigate) window.navigate('dashboard');
     await new Promise(r => setTimeout(r, 300));
-    const disclosure = document.querySelector('.wearable-niche-disclosure');
-    assert('Niche-card disclosure rendered with cardio_age + resilience inside',
-      !!disclosure);
-    if (disclosure) {
-      assert('Disclosure summary advertises the deferred count + names',
-        /Cardio age|Resilience/i.test(disclosure.querySelector('summary')?.textContent || ''));
-      assert('Disclosure is collapsed by default (open=false)',
-        disclosure.open === false);
-    }
+    assert('Niche disclosure container is gone',
+      !document.querySelector('.wearable-niche-disclosure'));
+    const cards = document.querySelectorAll('.wearable-card-grid .wearable-card');
+    const labels = Array.from(cards).map(c => c.textContent || '');
+    assert('Cardio age renders inline as a regular card',
+      labels.some(t => /Cardio age/i.test(t)));
+    assert('Resilience renders inline as a regular card',
+      labels.some(t => /Resilience/i.test(t)));
   }
 
   // ─────────────────────────────────────────────────────────

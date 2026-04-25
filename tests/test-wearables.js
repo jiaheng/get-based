@@ -1280,9 +1280,9 @@ return (async function() {
   assert('Strip-header role="button" carries an aria-label distinct from the live source list',
     /aria-label="\$\{collapsed\s*\?\s*'Expand wearables strip'\s*:\s*'Collapse wearables strip'\}"/.test(wearablesSrcP2));
 
-  // P2 a11y: niche disclosure summary copy reads as "vendor-specific scores".
-  assert('Niche disclosure copy says "vendor-specific score(s)" not just "+ N more"',
-    /vendor-specific \$\{nicheDeferred\.length === 1 \? 'score' : 'scores'\}/.test(wearablesSrcP2));
+  // (Niche-disclosure copy assertion was here. The disclosure was removed in
+  // v1.30.1 — see the matching "STRIP_NICHE_METRICS / disclosure / nicheDeferred
+  // all gone" check below.)
 
   // P2 copy: Settings → Agent Access label includes "and context".
   const settingsSrcP2 = await fetch('/js/settings.js').then(r => r.text());
@@ -1574,32 +1574,19 @@ return (async function() {
   assert('Reorder mode shows a banner pill in the header',
     /wearable-strip-reorder-pill/.test(wearablesSrc2));
 
-  // P1-8: niche-card disclosure. v1.30.1 lifted cardio_age out — it's
-  // interesting enough to surface inline; resilience_level (1-5 enum) is
-  // the only metric users found truly opaque, so it's the lone niche today.
-  assert('resilience_level is deferred to a "More" disclosure by default',
-    /STRIP_NICHE_METRICS\s*=\s*new Set\(\[\s*'resilience_level'\s*\]\)/.test(wearablesSrc2));
-  assert('cardio_age renders inline (no longer in STRIP_NICHE_METRICS)',
-    !/STRIP_NICHE_METRICS[\s\S]{0,80}'cardio_age'/.test(wearablesSrc2));
-  assert('Disclosure renders only when at least one niche metric is deferred',
-    /nicheDeferred\.length\s*>\s*0/.test(wearablesSrc2));
-  // v1.30.1 niche-grid layout fix: cards inside the disclosure go in a
-  // nested grid so they reflow side-by-side instead of stacking full-width.
-  assert('Niche disclosure wraps deferred cards in .wearable-niche-grid',
-    /wearable-niche-grid/.test(wearablesSrc2));
+  // P1-8: the "vendor-specific scores" disclosure was removed in v1.30.1
+  // — it framed Oura-only resilience as different from Oura-only cardio
+  // age (already inline) and added pin-drift bugs across origins. Every
+  // canonical metric the registry produces now renders inline alongside
+  // the others; the only filter is STRIP_HIDDEN_METRICS for the daytime
+  // companion cards (which live in the detail modal as sub-stats).
+  assert('STRIP_NICHE_METRICS / disclosure / nicheDeferred all gone',
+    !/STRIP_NICHE_METRICS/.test(wearablesSrc2) &&
+    !/wearable-niche-disclosure/.test(wearablesSrc2) &&
+    !/nicheDeferred/.test(wearablesSrc2));
   const stylesSrc = await fetch('/styles.css').then(r => r.text());
-  assert('.wearable-niche-grid uses the same auto-fit track as the main strip grid',
-    /\.wearable-niche-grid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(220px,\s*1fr\)\)/.test(stylesSrc));
-  // v1.30.1 niche auto-pin regression: a niche metric is "pinned inline"
-  // only when its index in savedOrder sits BEFORE the last non-niche entry.
-  // moveWearableCard saves the full visible list (including niche cards
-  // shown in reorder mode) — without the BEFORE-last-non-niche check, the
-  // first reorder of any non-niche card would auto-pin every niche metric.
-  assert('userPinnedNiche check requires niche index < lastNonNicheIdx',
-    /lastNonNicheIdx/.test(wearablesSrc2) &&
-    /STRIP_NICHE_METRICS\.has\(savedOrder\[i\]\)/.test(wearablesSrc2));
-  assert('renderNicheInline still falls open under reorderMode',
-    /renderNicheInline\s*=\s*\([^)]+\)\s*=>\s*reorderMode\s*\|\|/.test(wearablesSrc2));
+  assert('Niche-disclosure CSS dropped (was a v1.30.0 regression source)',
+    !/wearable-niche-(disclosure|summary|grid)/.test(stylesSrc));
 
   // ═══════════════════════════════════════
   // 17. Day/night HRV + RHR canonicals (v1.25.0)

@@ -3968,33 +3968,6 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
 .apple-health-howto ol li { margin-bottom: 4px; }
 .apple-health-privacy { font-style: italic; color: var(--text-muted); margin: 6px 0 0; }
 
-/* "More" disclosure for niche cards (cardio_age, resilience_level) — keeps
-   the primary strip calm at 6-8 cards while leaving the data accessible. */
-.wearable-niche-disclosure {
-  grid-column: 1 / -1;
-  margin-top: 6px;
-  border-top: 1px dashed rgba(255, 255, 255, 0.06);
-  padding-top: 6px;
-}
-.wearable-niche-summary {
-  cursor: pointer;
-  font-size: 12px;
-  color: var(--text-muted);
-  list-style: none;
-  padding: 4px 0;
-  user-select: none;
-}
-.wearable-niche-summary::-webkit-details-marker { display: none; }
-.wearable-niche-summary:hover { color: var(--text-primary); }
-.wearable-niche-disclosure[open] .wearable-niche-summary { margin-bottom: 8px; }
-/* Niche cards live inside the <details>, not the parent grid, so they need
-   their own grid track or they collapse to a stacked list of full-width
-   cards (the v1.30.0 launch regression). Mirror the parent track. */
-.wearable-niche-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 10px;
-}
 .wearable-strip-meta {
   display: flex; align-items: center; gap: 12px;
   font-size: 12px; color: var(--text-muted);
