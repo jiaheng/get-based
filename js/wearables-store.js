@@ -185,11 +185,19 @@ export async function deleteMeta(profileId, key) {
 }
 
 // Delete the entire wearable database for this profile — used by the nuke
-// path in Settings → Data.
+// path in Settings → Data and by deleteProfile.
 export async function deleteWearablesDB(profileId) {
+  // Close the cached connection first — a held-open connection blocks
+  // indexedDB.deleteDatabase. Without this, the delete fires `onblocked`
+  // and the actual disk-level removal waits until every tab closes.
+  const name = dbNameFor(profileId);
+  const cached = _dbPromises.get(name);
+  if (cached) {
+    try { (await cached)?.close?.(); } catch { /* connection might be in error state */ }
+  }
   resetWearablesDB(profileId);
   return new Promise((resolve, reject) => {
-    const req = indexedDB.deleteDatabase(dbNameFor(profileId));
+    const req = indexedDB.deleteDatabase(name);
     req.onsuccess = () => resolve();
     req.onerror = () => reject(req.error);
     req.onblocked = () => resolve(); // other tabs still hold it; deletion runs when they close

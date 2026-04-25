@@ -26,6 +26,18 @@ import { isDebugMode, showNotification } from './utils.js';
 
 const BACKFILL_DAYS = 90;
 
+// Defense-in-depth: scrub any token-shaped substring out of an error message
+// before surfacing it to the user. Vendors occasionally echo the access
+// token back in error bodies (Withings has done this historically); we
+// don't want it leaking into a toast.
+function _scrubError(msg) {
+  if (typeof msg !== 'string') return String(msg);
+  return msg
+    .replace(/[Bb]earer\s+[A-Za-z0-9._\-]+/g, 'Bearer [redacted]')
+    .replace(/access[_\s-]?token['"\s:=]+[A-Za-z0-9._\-]{16,}/gi, 'access_token=[redacted]')
+    .replace(/refresh[_\s-]?token['"\s:=]+[A-Za-z0-9._\-]{16,}/gi, 'refresh_token=[redacted]');
+}
+
 // ─────────────────────────────────────────────────────────
 // importedData.wearableConnections read/write
 // ─────────────────────────────────────────────────────────
@@ -192,7 +204,11 @@ export async function handleOAuthCallbackOnLoad() {
     lastSyncAt: 0,
   });
   const conn0 = getConnection(adapterId);
-  const info = await disp.fetchAccountInfo(result.tokens.accessToken, conn0);
+  // Pass a MINIMAL arg shape — fetchAccountInfo only needs userId for vendors
+  // that scope by user (Polar). Don't hand the whole connection object
+  // (with refreshToken) to a per-vendor function — defensive against a
+  // future contributor logging the second arg for debugging.
+  const info = await disp.fetchAccountInfo(result.tokens.accessToken, { userId: conn0?.userId });
   saveConnection(adapterId, { ...getConnection(adapterId), account: info.ok ? info.account : null });
   // Polar-only one-time user registration (409 if already registered — fine).
   if (typeof disp.postConnect === 'function') {
@@ -231,7 +247,7 @@ export async function handleOAuthCallbackOnLoad() {
       showNotification?.(`${disp.displayName} backfilled ${bf.rows} days`, 'success');
       if (window.navigate) window.navigate('dashboard');
     } catch (e) {
-      showNotification?.(`${disp.displayName} backfill failed: ${e.message}`, 'error', 5000);
+      showNotification?.(`${disp.displayName} backfill failed: ${_scrubError(e.message)}`, 'error', 5000);
     }
   })();
   return true;
@@ -316,7 +332,9 @@ export async function backfillWearable(adapterId, daysBack = BACKFILL_DAYS) {
   if (isDebugMode?.()) console.log(`[wearables] ${adapterId} backfill ${startDate}..${endDate}: ${rows.length} rows`);
 
   if (rows.length > 0) await upsertDailyBatch(profileId, rows);
-  await commitAfterWriteIfAny(adapterId, rows);
+  // Pass the pre-await connection snapshot so a profile swap mid-flight
+  // can't make the commit run against the new profile's token.
+  await commitAfterWriteIfAny(adapterId, rows, conn);
   await setMeta(profileId, `last-sync:${adapterId}`, { at: Date.now(), rows: rows.length, startDate, endDate });
 
   // Re-read the live connection — if it disappeared mid-flight (profile swap,
@@ -331,12 +349,18 @@ export async function backfillWearable(adapterId, daysBack = BACKFILL_DAYS) {
 
 // Adapter-specific post-write hook. Polar uses this to commit open AccessLink
 // transactions once rows safely landed in L1. No-op for every other adapter.
-async function commitAfterWriteIfAny(adapterId, rows) {
+// `connSnapshot` is the connection captured BEFORE the upsertDailyBatch await
+// — if the user swaps profiles mid-flight, we'd otherwise read the new
+// profile's connection (or null) and commit the OLD profile's transactions
+// against the wrong token.
+async function commitAfterWriteIfAny(adapterId, rows, connSnapshot) {
   const disp = OAUTH_DISPATCH[adapterId];
   const pending = rows?._polarTransactions;
   if (!disp?.commitAfterWrite || !pending?.length) return;
   try {
-    const conn = getConnection(adapterId);
+    // Prefer the snapshot when present; fall back to live read for callers
+    // that haven't been migrated yet.
+    const conn = connSnapshot || getConnection(adapterId);
     if (conn?.accessToken) await disp.commitAfterWrite(conn.accessToken, pending);
   } catch (e) { if (isDebugMode?.()) console.warn(`[wearables] ${adapterId} commit failed:`, e); }
 }
@@ -356,7 +380,9 @@ export async function incrementalSyncWearable(adapterId) {
   const adapter = adapterById(adapterId);
   const rows = await fetchRange(adapter, startDate, endDate);
   if (rows.length > 0) await upsertDailyBatch(profileId, rows);
-  await commitAfterWriteIfAny(adapterId, rows);
+  // Snapshot connection (see backfillWearable) — profile-swap mid-flight
+  // safety.
+  await commitAfterWriteIfAny(adapterId, rows, conn);
   await setMeta(profileId, `last-sync:${adapterId}`, { at: Date.now(), rows: rows.length, startDate, endDate });
 
   // Same guard as backfillWearable — never overwrite a full connection with
@@ -413,7 +439,7 @@ export async function syncNow(adapterId) {
       showNotification?.(`${displayName} token rejected — reconnect`, 'error');
     } else {
       if (isDebugMode?.()) console.warn(`[wearables] syncNow ${adapterId} failed:`, e.message);
-      showNotification?.(`${displayName} sync failed: ${e.message}`, 'error', 4000);
+      showNotification?.(`${displayName} sync failed: ${_scrubError(e.message)}`, 'error', 4000);
     }
     throw e;
   }

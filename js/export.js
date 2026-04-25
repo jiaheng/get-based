@@ -729,7 +729,19 @@ export function importDataJSON(file) {
         state.importedData.wearableCardOrder = json.wearableCardOrder;
       }
       if (json.wearablePrimaryOverride && typeof json.wearablePrimaryOverride === 'object') {
-        state.importedData.wearablePrimaryOverride = json.wearablePrimaryOverride;
+        // Prune entries pointing at sources that don't exist on this device
+        // (no IDB rows yet, no connection record). The L2 picker would fall
+        // through to auto anyway, but a stale override produces a misleading
+        // ✓ in the source picker until the user re-OAuths the missing vendor.
+        const liveSources = new Set([
+          ...Object.keys(state.importedData?.wearableConnections || {}),
+          ...Object.keys(json.wearableSummary?.sources || {}),
+        ]);
+        const pruned = {};
+        for (const [metricId, sourceId] of Object.entries(json.wearablePrimaryOverride)) {
+          if (liveSources.has(sourceId)) pruned[metricId] = sourceId;
+        }
+        state.importedData.wearablePrimaryOverride = pruned;
       }
       // Import chat summaries (merge by threadId)
       if (Array.isArray(json.chatSummaries)) {

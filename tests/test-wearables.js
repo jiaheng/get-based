@@ -883,6 +883,92 @@ return (async function() {
   assert('WebCrypto+base64url yields RFC 7636 challenge', b64url === RFC_CHALLENGE, `got ${b64url}`);
 
   // ═══════════════════════════════════════
+  // 17w. P2 cleanup pass (v1.28.0)
+  // ═══════════════════════════════════════
+  console.log('%c 17w. P2 Cleanup ', 'font-weight:bold;color:#f59e0b');
+
+  // P2: loadProfile triggers wearable-summary refresh on profile switch
+  // (was only running once at boot in main.js).
+  const profileSrcP2 = await fetch('/js/profile.js').then(r => r.text());
+  assert('loadProfile dispatches migrateBiometricsToManual + syncWearableSummary on every load',
+    /export\s+async\s+function\s+loadProfile[\s\S]*?migrateBiometricsToManual\(profileId/.test(profileSrcP2) &&
+    /loadProfile[\s\S]*?syncWearableSummary\(profileId,\s*connectMod\.listConnectedSources\(\)\)/.test(profileSrcP2));
+
+  // P2: deleteWearablesDB closes the cached connection before deleting
+  // (otherwise indexedDB.deleteDatabase hits onblocked).
+  const storeSrc = await fetch('/js/wearables-store.js').then(r => r.text());
+  assert('deleteWearablesDB closes the cached connection before deleting',
+    /export\s+async\s+function\s+deleteWearablesDB[\s\S]*?\(await cached\)\?\.close\?\.\(\)/.test(storeSrc));
+
+  // P2: coverageDays counts non-null rows only (was rows.length).
+  const summarySrc = await fetch('/js/wearables-summary.js').then(r => r.text());
+  assert('coverageDays counts rows with at least one finite metric value (not bare stubs)',
+    /coverageDays:\s*nonEmpty/.test(summarySrc) &&
+    /hasAnyValue\s*=\s*Object\.entries\(row\)\.some/.test(summarySrc));
+
+  // P2: wearablePrimaryOverride pruned on import.
+  const exportSrcP2 = await fetch('/js/export.js').then(r => r.text());
+  assert('importDataJSON prunes wearablePrimaryOverride to live sources only',
+    /liveSources\s*=\s*new Set\(\[[\s\S]{0,120}wearableConnections[\s\S]{0,120}wearableSummary\?\.sources/.test(exportSrcP2));
+
+  // P2: commitAfterWriteIfAny accepts pre-await connection snapshot.
+  const connectSrcP2 = await fetch('/js/wearables-connect.js').then(r => r.text());
+  assert('commitAfterWriteIfAny accepts a connection snapshot (profile-swap safety)',
+    /async function commitAfterWriteIfAny\(adapterId,\s*rows,\s*connSnapshot\)/.test(connectSrcP2));
+  assert('Backfill + incremental pass the pre-await `conn` snapshot to commitAfterWriteIfAny',
+    /commitAfterWriteIfAny\(adapterId,\s*rows,\s*conn\)/.test(connectSrcP2));
+
+  // P2: per-metric monotonic op token for manual save/delete.
+  const wearablesSrcP2 = await fetch('/js/wearables.js').then(r => r.text());
+  assert('Manual save/delete uses per-metric op counter (Map keyed on metricId)',
+    /_manualEntryOps\s*=\s*new Map\(\)/.test(wearablesSrcP2) &&
+    /_bumpManualEntryOp\(metricId\)/.test(wearablesSrcP2));
+  assert('Bail-out check compares against current op for the SAME metric',
+    /op\s*!==\s*_currentManualEntryOp\(metricId\)/.test(wearablesSrcP2));
+
+  // P2 security: minimal arg shape passed to disp.fetchAccountInfo.
+  assert('disp.fetchAccountInfo receives only { userId } not the whole connection',
+    /disp\.fetchAccountInfo\(result\.tokens\.accessToken,\s*\{\s*userId:\s*conn0\?\.userId\s*\}\)/.test(connectSrcP2));
+
+  // P2 security: error-toast token scrubber.
+  assert('_scrubError redacts Bearer tokens in error messages',
+    /_scrubError[\s\S]*?Bearer\s+\[redacted\]/.test(connectSrcP2));
+  assert('Backfill + sync error toasts run their messages through _scrubError',
+    /_scrubError\(e\.message\)/.test(connectSrcP2));
+
+  // P2 a11y: friendlier aria on manual delete button + collapse-arrow header.
+  assert('Manual-entry delete aria reads as a sentence (long date + value + unit)',
+    /aria-label="\$\{escapeHTML\(ariaText\)\}"/.test(wearablesSrcP2) &&
+    /Delete\s+\$\{metricLabel\.toLowerCase\(\)\}\s+reading\s+from/.test(wearablesSrcP2));
+  assert('Strip-header role="button" carries an aria-label distinct from the live source list',
+    /aria-label="\$\{collapsed\s*\?\s*'Expand wearables strip'\s*:\s*'Collapse wearables strip'\}"/.test(wearablesSrcP2));
+
+  // P2 a11y: niche disclosure summary copy reads as "vendor-specific scores".
+  assert('Niche disclosure copy says "vendor-specific score(s)" not just "+ N more"',
+    /vendor-specific \$\{nicheDeferred\.length === 1 \? 'score' : 'scores'\}/.test(wearablesSrcP2));
+
+  // P2 copy: Settings → Agent Access label includes "and context".
+  const settingsSrcP2 = await fetch('/js/settings.js').then(r => r.text());
+  assert('Settings Agent Access description says "labs and context" (covers wearables + cards too)',
+    /Let AI agents query your labs and context/.test(settingsSrcP2));
+
+  // P2: detail-modal focus trap.
+  assert('Detail modal installs Tab/Shift-Tab focus trap on open',
+    /_installWearableModalFocusTrap/.test(wearablesSrcP2) &&
+    /focusable\s*=\s*modal\.querySelectorAll/.test(wearablesSrcP2));
+
+  // P2: recommendations gain wearable-trend hooks.
+  const recsSrc = await fetch('/js/recommendations.js').then(r => r.text());
+  assert('detectWearableTrendSlots exported',
+    /export\s+function\s+detectWearableTrendSlots/.test(recsSrc));
+  assert('Trend hook fires magnesium slot when 7d HRV < baselineP25',
+    /m\.hrv_rmssd\.rolling\.d7\s*<\s*m\.hrv_rmssd\.baselineP25/.test(recsSrc));
+  assert('Trend hook fires magnesium slot when 7d RHR > baselineP75',
+    /m\.rhr\.rolling\.d7\s*>\s*m\.rhr\.baselineP75/.test(recsSrc));
+  assert('Trend hook fires melatonin slot when sleep_score < 70 AND below baseline',
+    /m\.sleep_score\.rolling\.d7\s*<\s*70/.test(recsSrc));
+
+  // ═══════════════════════════════════════
   // 17x. Behavioral coverage — replaces fragile source-grep guards (v1.27.5)
   // ═══════════════════════════════════════
   console.log('%c 17x. Behavioral Replacements ', 'font-weight:bold;color:#f59e0b');
@@ -1255,9 +1341,15 @@ return (async function() {
   // Importer round-trip
   assert('importDataJSON restores wearableSummary',
     /json\.wearableSummary[\s\S]{0,80}state\.importedData\.wearableSummary\s*=\s*json\.wearableSummary/.test(exportSrc));
-  assert('importDataJSON restores wearableCardOrder + wearablePrimaryOverride',
-    /state\.importedData\.wearableCardOrder\s*=\s*json\.wearableCardOrder/.test(exportSrc) &&
-    /state\.importedData\.wearablePrimaryOverride\s*=\s*json\.wearablePrimaryOverride/.test(exportSrc));
+  assert('importDataJSON restores wearableCardOrder',
+    /state\.importedData\.wearableCardOrder\s*=\s*json\.wearableCardOrder/.test(exportSrc));
+  // v1.28.0: wearablePrimaryOverride is PRUNED on import — entries pointing
+  // at sources without a connection or rows get dropped. Assert the prune
+  // logic exists; the destination assignment uses the pruned object, not
+  // raw json.wearablePrimaryOverride.
+  assert('importDataJSON prunes wearablePrimaryOverride to live sources only',
+    /state\.importedData\.wearablePrimaryOverride\s*=\s*pruned/.test(exportSrc) &&
+    /pruned\[metricId\]\s*=\s*sourceId/.test(exportSrc));
 
   // ═══════════════════════════════════════
   // 18. Agent series — daily-values matrix for MCP tools (v1.27.0)

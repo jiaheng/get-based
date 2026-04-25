@@ -306,6 +306,20 @@ export async function loadProfile(profileId) {
   window.updateHeaderDates();
   window.updateHeaderRangeToggle();
   window.renderProfileButton();
+  // Refresh wearable summary for the freshly-loaded profile so the strip
+  // reflects THIS profile's L1 IDB rather than carrying over stale state
+  // from the boot profile. Both modules dynamic-imported to avoid circular
+  // deps (profile.js → wearables-* → profile.js for getActiveProfileId).
+  // Migration runs first (idempotent — it self-flag-gates after one run per
+  // profile), then summary recomputes from this profile's IDB.
+  Promise.all([
+    import('./wearables-manual.js'),
+    import('./wearables-summary.js'),
+    import('./wearables-connect.js'),
+  ]).then(async ([manualMod, summaryMod, connectMod]) => {
+    try { await manualMod.migrateBiometricsToManual(profileId, state.importedData?.biometrics); } catch {}
+    try { await summaryMod.syncWearableSummary(profileId, connectMod.listConnectedSources()); } catch {}
+  }).catch(() => {});
 }
 
 export function createProfile(name, opts = {}) {

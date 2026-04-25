@@ -153,10 +153,22 @@ export function computeWearableSummary(rowsBySource, connectedSources, primaryOv
   const pickedPrimary = {}; // metricId → sourceId
 
   for (const [sid, rows] of Object.entries(rowsBySource)) {
+    // coverageDays counts rows that carry at least ONE non-null canonical
+    // value — bare {source, date} stubs (which can survive Apple Health
+    // imports of all-null fields, or stale empty rows) shouldn't inflate
+    // the number the strip header advertises.
+    let nonEmpty = 0;
+    for (const row of rows) {
+      const hasAnyValue = Object.entries(row).some(([k, v]) =>
+        k !== 'source' && k !== 'date' && k !== 'importedAt' && k !== 'tags' &&
+        typeof v === 'number' && isFinite(v)
+      );
+      if (hasAnyValue) nonEmpty++;
+    }
     sources[sid] = {
       connectedSince: connectedSources?.[sid]?.connectedSince || null,
       lastSyncAt: connectedSources?.[sid]?.lastSyncAt || null,
-      coverageDays: rows.length,
+      coverageDays: nonEmpty,
     };
   }
 

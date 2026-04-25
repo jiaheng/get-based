@@ -5,6 +5,22 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.28.0', date: '2026-04-25', title: 'Wearables P2 cleanup — profile-switch refresh, recommendations hooks, focus trap, security polish',
+    items: [
+      '<b>Profile switch now refreshes the wearable summary.</b> Was only running once at boot — switching profiles left a stale strip until the next adapter sync. Now <code>loadProfile</code> runs migrate + summary recompute for the freshly-loaded profile.',
+      '<b>Detail modal traps Tab inside the dialog.</b> Keyboard navigation could leak past the modal onto background controls (strip, supplements, chat FAB). Standard focus-trap with Tab and Shift-Tab.',
+      '<b>Wearable trends now drive supplement suggestions.</b> New <code>detectWearableTrendSlots</code> hook: 7-day overnight HRV below your own P25 → magnesium; 7-day resting HR above your own P75 → magnesium (overtraining/illness signal); chronic sleep score below 70 → melatonin. Conservative thresholds — only fires against your own baseline IQR, not a fixed cutoff.',
+      '<b>Coverage days counts non-null rows only.</b> Was inflating with bare <code>{source, date}</code> stubs that survived from Apple Health imports of all-null fields.',
+      '<b>Polar profile-swap mid-sync no longer commits stale transactions.</b> The pre-await connection snapshot is now passed into <code>commitAfterWriteIfAny</code> so a profile swap during a long-running backfill can\'t commit the old profile\'s transactions against the new profile\'s token.',
+      '<b>Manual save / delete double-clicks are now per-metric.</b> The op-token counter was module-scoped — clicking Save on one card while another was mid-save bailed the first one silently. Now keyed by metric.',
+      '<b>Profile-delete IndexedDB cleanup.</b> <code>deleteWearablesDB</code> now closes any cached connection before <code>indexedDB.deleteDatabase</code> — was silently hitting <code>onblocked</code> and waiting for tab close.',
+      '<b>JSON import prunes stale source overrides.</b> <code>wearablePrimaryOverride</code> entries pointing at sources without a connection or rows are now dropped on import, rather than producing a misleading ✓ in the source picker until the user re-OAuths.',
+      '<b>Security polish.</b> <code>fetchAccountInfo</code> now receives only <code>{ userId }</code> rather than the whole connection object (defensive against future contributors logging the second arg with refresh token attached). Error toasts run through a token-scrubber that redacts <i>Bearer …</i> / <i>access_token=…</i> / <i>refresh_token=…</i> patterns before showing — defends against vendors echoing tokens in error bodies.',
+      '<b>Accessibility.</b> Manual-entry delete button reads as a sentence to screen readers ("Delete weight reading from April 23, 2026, 75.5 kg"). Strip-header has an explicit aria-label distinct from the live source list. Niche disclosure summary reads as "+ N vendor-specific scores" instead of the bare "+ N more". Settings → Agent Access label includes "and context" (covers wearables + cards too, not just labs).',
+      '<b>Encryption-at-rest gap documented.</b> <code>docs/guide/encryption.md</code> now flags that the wearable IndexedDB raw rows are NOT wrapped by the encryption-at-rest passphrase layer — only localStorage is. The L2 summary that flows into sync IS encrypted; raw rows are local-only and at-rest cleartext. Documented honestly.',
+    ]
+  },
+  {
     version: '1.27.5', date: '2026-04-25', title: 'Wearables test integrity — replaces fragile source-greps with behavioral assertions',
     items: [
       '<b>No user-visible change.</b> Test-only commit closing the audit\'s test-integrity findings: behavioral coverage of the v1.26 source-badge gate fix (renders strip with 2 sources, asserts ≥2 source-badge buttons in HTML), the v1.26 daytime-empty tooltip (opens HRV modal, asserts "Not from Oura · why?" text + title attr carries the long explanation), the v1.27.0 series-append-not-replace ordering (builds both blocks, asserts series block follows base context). Direct token-leak prevention test for <code>buildLabContext</code> against sentinel access/refresh tokens. Source-grep coverage for the <code>wearableConnections</code> preserve-on-pull merge (Evolu pull is hard to drive without a fully-mocked engine — kept as grep with documentation).',

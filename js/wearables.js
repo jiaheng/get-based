@@ -392,7 +392,7 @@ export function renderWearableStrip() {
     : '';
 
   let html = `<section class="wearable-strip" id="wearable-strip">
-    <div class="wearable-strip-header" role="button" tabindex="0" aria-expanded="${!collapsed}" onclick="toggleWearableStrip()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleWearableStrip()}">
+    <div class="wearable-strip-header" role="button" tabindex="0" aria-expanded="${!collapsed}" aria-label="${collapsed ? 'Expand wearables strip' : 'Collapse wearables strip'}" onclick="toggleWearableStrip()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleWearableStrip()}">
       <div class="wearable-strip-title">
         <span class="wearable-strip-icon" aria-hidden="true">⌬</span>
         <span>Wearables: <span class="wearable-source-label">${escapeHTML(sourceLabel)}${coverageLabel}</span></span>
@@ -462,7 +462,8 @@ export function renderWearableStrip() {
   // Render the niche cards behind a disclosure so users can opt-in without
   // them dominating the strip.
   if (nicheDeferred.length > 0) {
-    html += `<details class="wearable-niche-disclosure"><summary class="wearable-niche-summary">+ ${nicheDeferred.length} more (${nicheDeferred.map(d => canonicalMetric(d.id)?.label || d.id).join(' · ')})</summary>`;
+    const nicheLabels = nicheDeferred.map(d => canonicalMetric(d.id)?.label || d.id).join(' · ');
+    html += `<details class="wearable-niche-disclosure"><summary class="wearable-niche-summary" aria-label="Show ${escapeHTML(nicheDeferred.length === 1 ? '1 vendor-specific score' : nicheDeferred.length + ' vendor-specific scores')}: ${escapeHTML(nicheLabels)}">+ ${nicheDeferred.length} vendor-specific ${nicheDeferred.length === 1 ? 'score' : 'scores'} (${escapeHTML(nicheLabels)})</summary>`;
     for (const { id: metricId, empty } of nicheDeferred) {
       const canon = canonicalMetric(metricId);
       if (!canon) continue;
@@ -571,11 +572,50 @@ async function openWearableDetail(metricId) {
   overlay.classList.add('show');
   // Move focus to the close button so keyboard users land inside the modal.
   modal.querySelector('.modal-close')?.focus?.();
+  // Trap Tab / Shift-Tab inside the modal so keyboard navigation can't
+  // accidentally land on background controls (the strip, supplements,
+  // chat FAB, etc.). One listener per modal-open; cleared on close via
+  // the overlay's existing close path.
+  _installWearableModalFocusTrap(modal);
 
   const canvas = document.getElementById('chart-modal');
   if (canvas && typeof window.Chart !== 'undefined' && series.length > 0) {
     renderWearableChart(canvas, canon, m, series);
   }
+}
+
+let _modalTrapHandler = null;
+function _installWearableModalFocusTrap(modal) {
+  // Remove any prior listener (e.g. previous modal open) so we don't stack.
+  if (_modalTrapHandler) {
+    document.removeEventListener('keydown', _modalTrapHandler, true);
+    _modalTrapHandler = null;
+  }
+  _modalTrapHandler = (e) => {
+    if (e.key !== 'Tab') return;
+    // Modal is gone (closed) — uninstall.
+    const overlay = document.getElementById('modal-overlay');
+    if (!overlay?.classList?.contains('show')) {
+      document.removeEventListener('keydown', _modalTrapHandler, true);
+      _modalTrapHandler = null;
+      return;
+    }
+    const focusable = modal.querySelectorAll(
+      'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    );
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+    if (e.shiftKey && active === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && active === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  };
+  document.addEventListener('keydown', _modalTrapHandler, true);
 }
 
 // Render the Manual entries list + add-reading form inside the detail modal.
@@ -595,15 +635,27 @@ function buildManualEntriesSection(metricId, manualEntries) {
   }
   const canon = canonicalMetric(metricId);
   const unit = canon?.unit || '';
+  const metricLabel = canon?.label || metricId;
+  // Friendlier aria — screen-readers should hear a sentence, not an ISO
+  // date + raw number. Localised long-date format for the spoken text;
+  // the visible cell still shows the ISO YYYY-MM-DD.
+  const formatSpokenDate = (iso) => {
+    try {
+      const d = new Date(iso + 'T00:00:00');
+      return d.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+    } catch { return iso; }
+  };
   const rows = manualEntries.map(e => {
     const tagChips = Array.isArray(e.tags) && e.tags.length
       ? `<span class="wearable-manual-entry-tags">${e.tags.map(t => `<span class="wearable-manual-entry-tag">${escapeHTML(t)}</span>`).join('')}</span>`
       : '';
+    const valueRead = formatValue(e.v, unit);
+    const ariaText = `Delete ${metricLabel.toLowerCase()} reading from ${formatSpokenDate(e.date)}, ${valueRead}${unit ? ' ' + unit : ''}`;
     return `<li class="wearable-manual-entry" data-entry-date="${escapeHTML(e.date)}">
       <span class="wearable-manual-entry-date">${escapeHTML(e.date)}</span>
-      <span class="wearable-manual-entry-val">${formatValue(e.v, unit)}${unit ? ` <span class="wearable-manual-entry-unit">${escapeHTML(unit)}</span>` : ''}</span>
+      <span class="wearable-manual-entry-val">${valueRead}${unit ? ` <span class="wearable-manual-entry-unit">${escapeHTML(unit)}</span>` : ''}</span>
       ${tagChips}
-      <button type="button" class="wearable-manual-entry-del" title="Delete this reading" aria-label="Delete ${escapeHTML(e.date)} ${formatValue(e.v, unit)}" onclick="deleteManualEntryFromDetail('${escapeHTML(metricId)}','${escapeHTML(e.date)}')">×</button>
+      <button type="button" class="wearable-manual-entry-del" title="Delete this reading" aria-label="${escapeHTML(ariaText)}" onclick="deleteManualEntryFromDetail('${escapeHTML(metricId)}','${escapeHTML(e.date)}')">×</button>
     </li>`;
   }).join('');
   return `<section class="wearable-manual-entries">
@@ -1264,13 +1316,23 @@ function closeManualAddFromDetail() {
   if (slot) slot.innerHTML = '';
 }
 
-// Monotonic op token — rapid double-clicks on Save / × Delete fire duplicate
-// writes and flashes of "Saved" / "Deleted" toasts before the re-render
-// settles. IDB serializes so data is safe, but the paint is ugly.
-let _manualEntryOp = 0;
+// Per-metric monotonic op token — rapid double-clicks on Save / × Delete
+// fire duplicate writes and flashes of "Saved" / "Deleted" toasts before
+// the re-render settles. IDB serializes so data is safe, but the paint is
+// ugly. Per-metric (not module-wide) so a save on one metric doesn't
+// silently bail out a save on another.
+const _manualEntryOps = new Map(); // metricId → counter
+function _bumpManualEntryOp(metricId) {
+  const next = (_manualEntryOps.get(metricId) || 0) + 1;
+  _manualEntryOps.set(metricId, next);
+  return next;
+}
+function _currentManualEntryOp(metricId) {
+  return _manualEntryOps.get(metricId) || 0;
+}
 
 async function saveManualEntryFromDetail(metricId, kind) {
-  const op = ++_manualEntryOp;
+  const op = _bumpManualEntryOp(metricId);
   const { logManualMetric, logManualBP, refreshManualSummary } = await import('./wearables-manual.js');
   const profileId = getActiveProfileId();
   const date = document.getElementById('wlad-date')?.value;
@@ -1296,7 +1358,7 @@ async function saveManualEntryFromDetail(metricId, kind) {
       await logManualBP(profileId, { date, systolic: sys, diastolic: dia, pulse: isFinite(pulse) && pulse > 0 ? pulse : undefined });
     }
     await refreshManualSummary(profileId);
-    if (op !== _manualEntryOp) return; // superseded by a later click — bail
+    if (op !== _currentManualEntryOp(metricId)) return; // superseded by a later click on the SAME metric — bail
     showNotification?.('Saved', 'success');
     // Re-render the dashboard strip so the populated card reflects the new
     // value, then re-open the detail modal on top with the refreshed list.
@@ -1308,7 +1370,7 @@ async function saveManualEntryFromDetail(metricId, kind) {
 }
 
 async function deleteManualEntryFromDetail(metricId, date) {
-  const op = ++_manualEntryOp;
+  const op = _bumpManualEntryOp(metricId);
   if (typeof window.showConfirmDialog !== 'function') return;
   const canon = canonicalMetric(metricId);
   const label = canon?.label || metricId;
@@ -1326,7 +1388,7 @@ async function deleteManualEntryFromDetail(metricId, date) {
         await deleteManualMetric(profileId, metricId, date);
       }
       await refreshManualSummary(profileId);
-      if (op !== _manualEntryOp) return; // superseded by a later click — bail
+      if (op !== _currentManualEntryOp(metricId)) return; // superseded by a later click on the SAME metric — bail
       showNotification?.('Deleted', 'success');
       // Re-render the dashboard strip first so the card visibly updates (or
       // disappears if that was the last reading). If the metric still has

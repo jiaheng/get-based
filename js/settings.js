@@ -882,7 +882,7 @@ function renderMessengerSection() {
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${enabled ? '16' : '8'}px">
       <div>
         <div style="font-size:13px;font-weight:600;color:var(--text-primary)">Agent Access</div>
-        <div style="font-size:12px;color:var(--text-muted);margin-top:2px">Let AI agents query your labs via MCP, Hermes Agent, or OpenClaw</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:2px">Let AI agents query your labs and context via MCP, Hermes Agent, or OpenClaw</div>
       </div>
       <label class="chat-websearch-toggle-label" style="display:flex" aria-label="Toggle Agent Access">
         <input type="checkbox" ${enabled ? 'checked' : ''} onchange="toggleMessenger(this.checked)" style="display:none">
