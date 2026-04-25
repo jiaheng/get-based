@@ -1163,8 +1163,11 @@ return (async function() {
 
   // IDB encryption — round-trip a row through encrypt+decrypt assuming
   // encryption is OFF in tests (default), assert plaintext pass-through.
-  const storeV29 = await import('/js/wearables-store.js?bust=' + Date.now());
-  const cryptoV29 = await import('/js/crypto.js?bust=' + Date.now());
+  // CRITICAL: do NOT cache-bust crypto.js — its bottom-of-file
+  // Object.assign(window, …) rebinds window.updateKeyCache to a fresh
+  // _keyCache, which the production module's getCachedKey can't see. That
+  // leak surfaced as the test-custom-api / test-custom-lens flakes in CI.
+  const cryptoV29 = await import('/js/crypto.js');
   assert('crypto.js exports encryptObject / decryptObject / isEncryptedObject',
     typeof cryptoV29.encryptObject === 'function' &&
     typeof cryptoV29.decryptObject === 'function' &&
