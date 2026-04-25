@@ -1764,5 +1764,59 @@ return (async function() {
   assert('window.pushContextToGateway is exposed (toggle re-pushes immediately)',
     typeof window.pushContextToGateway === 'function');
 
+  // ═══════════════════════════════════════
+  // 18. Beta-hidden vendors at v1.30.0 launch
+  // ═══════════════════════════════════════
+  // WHOOP + Ultrahuman ship code-complete but hidden from the connect list
+  // pending partner-credential validation. The strip and connection layer
+  // still work normally for anyone who's already connected (or maintainers
+  // with the escape-hatch flag).
+  console.log('%c 18. Beta-Hidden Vendors ', 'font-weight:bold;color:#f59e0b');
+  const adaptersMod = await import('/js/wearable-adapters.js');
+  const ouraEntry = adaptersMod.ADAPTERS.find(a => a.id === 'oura');
+  const whoopEntry = adaptersMod.ADAPTERS.find(a => a.id === 'whoop');
+  const uhEntry    = adaptersMod.ADAPTERS.find(a => a.id === 'ultrahuman');
+  assert('WHOOP entry carries betaHidden:true', whoopEntry?.betaHidden === true);
+  assert('Ultrahuman entry carries betaHidden:true', uhEntry?.betaHidden === true);
+  assert('Oura entry is NOT betaHidden (sanity check)', !ouraEntry?.betaHidden);
+
+  const escapeKey = 'labcharts-show-beta-wearables';
+  const escapeSv = localStorage.getItem(escapeKey);
+  try {
+    localStorage.removeItem(escapeKey);
+    const visibleNoConn = adaptersMod.visibleAdapters([]);
+    const ids = visibleNoConn.map(a => a.id);
+    assert('visibleAdapters() hides whoop without override or connection', !ids.includes('whoop'));
+    assert('visibleAdapters() hides ultrahuman without override or connection', !ids.includes('ultrahuman'));
+    assert('visibleAdapters() still shows oura', ids.includes('oura'));
+    assert('visibleAdapters() still shows fitbit', ids.includes('fitbit'));
+
+    const visibleWithConn = adaptersMod.visibleAdapters(['whoop']);
+    assert('visibleAdapters() keeps whoop visible if already connected',
+      visibleWithConn.some(a => a.id === 'whoop'));
+
+    localStorage.setItem(escapeKey, 'true');
+    const visibleEscape = adaptersMod.visibleAdapters([]);
+    assert('Maintainer escape hatch un-hides hidden adapters',
+      visibleEscape.some(a => a.id === 'whoop') &&
+      visibleEscape.some(a => a.id === 'ultrahuman'));
+  } finally {
+    if (escapeSv === null) localStorage.removeItem(escapeKey);
+    else localStorage.setItem(escapeKey, escapeSv);
+  }
+
+  // Settings → Wearables row markup must omit hidden adapters.
+  if (typeof window.renderWearablesSettingsSection === 'function') {
+    localStorage.removeItem(escapeKey);
+    const html = window.renderWearablesSettingsSection();
+    assert('Settings render omits WHOOP row when hidden + not connected',
+      !/data-adapter-id="whoop"/.test(html) && !/connectAdapter\('whoop'\)/.test(html));
+    assert('Settings render omits Ultrahuman row when hidden + not connected',
+      !/data-adapter-id="ultrahuman"/.test(html) && !/connectAdapter\('ultrahuman'\)/.test(html));
+    assert('Settings render still shows Oura row',
+      /data-adapter-id="oura"|connectAdapter\('oura'\)|adapter\.id === 'oura'/i.test(html) ||
+      /Oura/.test(html));
+  }
+
   console.log(`\nResults: ${pass} passed, ${fail} failed, ${pass + fail} total`);
 })();

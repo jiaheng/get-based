@@ -17,7 +17,7 @@
 
 import { escapeHTML, showNotification, showConfirmDialog } from './utils.js';
 import { state } from './state.js';
-import { ADAPTERS, adapterById, canonicalMetric, metricsForSources } from './wearable-adapters.js';
+import { ADAPTERS, adapterById, canonicalMetric, metricsForSources, visibleAdapters } from './wearable-adapters.js';
 import { brandMarkMono } from './brand-assets.js';
 
 // Vendor logo / mark beside the adapter name. Backed by brands/<vendor>/
@@ -1009,7 +1009,8 @@ async function syncWearableNow(triggerEl) {
 
 export function renderWearablesSettingsSection() {
   const connected = listConnectedSources();
-  const rows = ADAPTERS.map(a => renderAdapterRow(a, !!connected[a.id])).join('');
+  const rows = visibleAdapters(Object.keys(connected))
+    .map(a => renderAdapterRow(a, !!connected[a.id])).join('');
   // BETA badge moves out of every row to a single section-level note. Every
   // wearable adapter is currently beta — the per-row chip was redundant.
   return `<div class="settings-section-header" style="display:block">

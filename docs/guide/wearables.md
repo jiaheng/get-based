@@ -1,6 +1,6 @@
 # Wearable Integrations
 
-getbased connects to seven wearable / device platforms and also treats your own **manual entries** as a first-class source. Everything surfaces on one dashboard strip alongside your blood-work data.
+getbased connects to five wearable / device platforms today and also treats your own **manual entries** as a first-class source. Everything surfaces on one dashboard strip alongside your blood-work data. (WHOOP and Ultrahuman support is built but hidden from the connect list while we validate partner credentials — see [Beta status](#beta-status).)
 
 ## What you get
 
@@ -13,12 +13,12 @@ If you have more than one source for a metric, tap the small *via {vendor}* badg
 | Vendor | Auth | Setup |
 |---|---|---|
 | **Oura** | OAuth 2.0 | One-click. Need an Oura account + ring. |
-| **Ultrahuman** | OAuth 2.0 | *Waiting on partner credentials* — gated in the UI. |
-| **WHOOP** | OAuth 2.0 (PKCE) | *Waiting on partner credentials* — gated in the UI. |
 | **Fitbit** | OAuth 2.0 (PKCE) | One-click. Need a Fitbit account + device. Sleep score is approximated from `efficiency` (Fitbit's API doesn't expose the in-app Sleep Score). |
 | **Withings** | OAuth 2.0 | One-click. Need a Withings account + scale / BPM / Scanwatch. |
 | **Polar** | OAuth 2.0 | One-click. Need a Polar account and **at least one device sync to Polar Flow first** — Polar AccessLink uses a transactions model that returns nothing until the device has uploaded data. HRV is workout-only (recorded with a chest strap), not overnight. |
 | **Apple Health** | File import (no OAuth) | Export from your iPhone Health app and drop the `.zip` here. |
+| **WHOOP** | *Hidden until creds validated* | Code is shipped; the connect row is hidden from Settings until WHOOP partner credentials are validated. |
+| **Ultrahuman** | *Hidden until creds validated* | Code is shipped; the connect row is hidden from Settings until Ultrahuman partner credentials land. |
 | **Manual** | No auth — you type the value | Built-in. Tap any empty weight / blood pressure / resting HR card on the dashboard → inline form → Enter to save. Context chips (post-workout, morning-fasted, etc.) optional. See [Manual entry](#manual-entry) below. |
 
 ## How to connect
@@ -76,8 +76,8 @@ Vendors that uniquely provide a metric (only Withings does weight) don't show a 
 - **"needs reconnection" pill** — refresh token expired or revoked. Click Reconnect.
 - **Wearable not in the dropdown when picking a metric source** — the vendor doesn't expose that canonical metric (e.g. WHOOP doesn't do `weight`, Withings doesn't do `hrv_rmssd`).
 - **Apple Health import is slow** — the XML can be 100 MB+ for multi-year history. Parsing happens in-browser; expect 30–60 seconds for large exports.
-- **"waiting on partner credentials"** for WHOOP / Ultrahuman — I don't yet have production OAuth client IDs from these vendors. Watch the changelog.
+- **WHOOP / Ultrahuman not in the list** — both are hidden until production OAuth credentials are validated. Watch the changelog. Maintainers can un-hide locally with `localStorage.setItem('labcharts-show-beta-wearables', 'true')` and reload.
 
 ## Beta status
 
-All seven integrations are in beta. Please report issues on [GitHub](https://github.com/elkimek/get-based/issues) or in the [Discord](https://discord.gg/zJdVB9zgQB).
+The five live integrations are in beta. Please report issues on [GitHub](https://github.com/elkimek/get-based/issues) or in the [Discord](https://discord.gg/zJdVB9zgQB). WHOOP and Ultrahuman code paths exist and are tested but hidden from the connect list until partner credentials are validated.

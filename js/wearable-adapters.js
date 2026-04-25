@@ -126,6 +126,11 @@ export const ADAPTERS = [
     authType: 'oauth2',
     authDocsUrl: 'https://vision.ultrahuman.com/developer-docs?type=oauth',
     beta: true,
+    // Hidden from the Settings → Wearables list at v1.30.0 launch — partner
+    // credentials are still pending. Maintainer escape hatch:
+    // localStorage.setItem('labcharts-show-beta-wearables', 'true').
+    // Already-connected installs stay visible (visibleAdapters keeps them).
+    betaHidden: true,
     oauth: {
       // Ultrahuman OAuth2 confidential client (has client_secret). Paste the
       // Client ID from the partner credentials email reply here; the matching
@@ -162,6 +167,10 @@ export const ADAPTERS = [
     authType: 'oauth2',
     authDocsUrl: 'https://developer.whoop.com/docs/developing/oauth',
     beta: true,
+    // Hidden from the Settings → Wearables list at v1.30.0 launch — WHOOP
+    // dev portal needs a paid consumer membership we haven't validated.
+    // Maintainer escape hatch: localStorage labcharts-show-beta-wearables=true.
+    betaHidden: true,
     oauth: {
       // PKCE flow — no client secret needed in browser. WHOOP dev portal
       // requires an active paid consumer membership (sign up via the free
@@ -355,6 +364,20 @@ export const ADAPTERS = [
 
 export function adapterById(id) {
   return ADAPTERS.find(a => a.id === id) || null;
+}
+
+// Filter the registry for the Settings → Wearables list. Hides any adapter
+// flagged `betaHidden` unless either: (a) the maintainer escape hatch is set,
+// or (b) the adapter is already in `connectedIds` (so existing connections
+// stay manageable across version bumps). Always returns a new array.
+export function visibleAdapters(connectedIds = []) {
+  const escape = (() => {
+    try { return localStorage.getItem('labcharts-show-beta-wearables') === 'true'; }
+    catch { return false; }
+  })();
+  if (escape) return ADAPTERS.slice();
+  const connected = new Set(connectedIds);
+  return ADAPTERS.filter(a => !a.betaHidden || connected.has(a.id));
 }
 
 export function adapterSupportsMetric(adapterId, metricId) {
