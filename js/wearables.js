@@ -1160,42 +1160,38 @@ async function deleteManualEntryFromDetail(metricId, date) {
   if (typeof window.showConfirmDialog !== 'function') return;
   const canon = canonicalMetric(metricId);
   const label = canon?.label || metricId;
-  const ok = await window.showConfirmDialog(
-    `Delete this ${label.toLowerCase()} reading?`,
-    `The ${escapeHTML(date)} reading will be removed. Other readings on that date (if any) are kept.`,
-    'Delete',
-    'Cancel'
-  );
-  if (!ok) return;
-  try {
-    const { deleteManualMetric, refreshManualSummary } = await import('./wearables-manual.js');
-    const profileId = getActiveProfileId();
-    // For BP cards we clear both systolic + diastolic for this date so the
-    // reading disappears from the paired card too.
-    if (metricId === 'bp_systolic' || metricId === 'bp_diastolic') {
-      await deleteManualMetric(profileId, 'bp_systolic', date);
-      await deleteManualMetric(profileId, 'bp_diastolic', date);
-    } else {
-      await deleteManualMetric(profileId, metricId, date);
+  // showConfirmDialog is callback-style: (message, onConfirm). Cancel is a no-op.
+  window.showConfirmDialog(`Delete this ${label.toLowerCase()} reading from ${date}?`, async () => {
+    try {
+      const { deleteManualMetric, refreshManualSummary } = await import('./wearables-manual.js');
+      const profileId = getActiveProfileId();
+      // For BP cards we clear both systolic + diastolic for this date so the
+      // reading disappears from the paired card too.
+      if (metricId === 'bp_systolic' || metricId === 'bp_diastolic') {
+        await deleteManualMetric(profileId, 'bp_systolic', date);
+        await deleteManualMetric(profileId, 'bp_diastolic', date);
+      } else {
+        await deleteManualMetric(profileId, metricId, date);
+      }
+      await refreshManualSummary(profileId);
+      if (op !== _manualEntryOp) return; // superseded by a later click — bail
+      showNotification?.('Deleted', 'success');
+      // Re-render the dashboard strip first so the card visibly updates (or
+      // disappears if that was the last reading). If the metric still has
+      // data, re-open the detail modal on top to refresh its entries list.
+      // If not, close the modal — re-opening `openWearableDetail` on an
+      // empty metric would flash an error toast instead.
+      if (window.navigate) window.navigate('dashboard');
+      const stillHasMetric = !!state.importedData?.wearableSummary?.metrics?.[metricId];
+      if (stillHasMetric) {
+        openWearableDetail(metricId);
+      } else if (window.closeModal) {
+        window.closeModal();
+      }
+    } catch (e) {
+      showNotification?.(`Couldn't delete: ${e.message}`, 'error', 4000);
     }
-    await refreshManualSummary(profileId);
-    if (op !== _manualEntryOp) return; // superseded by a later click — bail
-    showNotification?.('Deleted', 'success');
-    // Re-render the dashboard strip first so the card visibly updates (or
-    // disappears if that was the last reading). If the metric still has
-    // data, re-open the detail modal on top to refresh its entries list.
-    // If not, close the modal — re-opening `openWearableDetail` on an
-    // empty metric would flash an error toast instead.
-    if (window.navigate) window.navigate('dashboard');
-    const stillHasMetric = !!state.importedData?.wearableSummary?.metrics?.[metricId];
-    if (stillHasMetric) {
-      openWearableDetail(metricId);
-    } else if (window.closeModal) {
-      window.closeModal();
-    }
-  } catch (e) {
-    showNotification?.(`Couldn't delete: ${e.message}`, 'error', 4000);
-  }
+  });
 }
 
 // Manual source — UI handlers. Settings → Integrations → Manual exposes a
@@ -1214,35 +1210,34 @@ function handleManualOpenDashboard() {
 
 async function handleManualDisconnect() {
   if (typeof window.showConfirmDialog !== 'function') return;
-  const ok = await window.showConfirmDialog(
-    'Delete all manual entries?',
-    'This removes every weight / BP / pulse entry you\'ve logged manually. Any data from connected wearables (Oura, Withings, etc.) is untouched. Can\'t be undone.',
-    'Delete all manual entries',
-    'Cancel'
-  );
-  if (!ok) return;
-  try {
-    const { clearSource } = await import('./wearables-store.js');
-    const { refreshManualSummary } = await import('./wearables-manual.js');
-    const profileId = getActiveProfileId();
-    await clearSource(profileId, 'manual');
-    // Drop the connection record too — the row disappears from the strip
-    // source header and the Settings integrations list.
-    if (state.importedData.wearableConnections) {
-      delete state.importedData.wearableConnections.manual;
-      const { saveImportedData } = await import('./data.js');
-      await saveImportedData();
+  // showConfirmDialog is callback-style: (message, onConfirm). Cancel is a no-op.
+  window.showConfirmDialog(
+    'Delete all manual entries? This removes every weight / BP / pulse entry you\'ve logged manually. Data from connected wearables (Oura, Withings, etc.) is untouched. Can\'t be undone.',
+    async () => {
+      try {
+        const { clearSource } = await import('./wearables-store.js');
+        const { refreshManualSummary } = await import('./wearables-manual.js');
+        const profileId = getActiveProfileId();
+        await clearSource(profileId, 'manual');
+        // Drop the connection record too — the row disappears from the strip
+        // source header and the Settings integrations list.
+        if (state.importedData.wearableConnections) {
+          delete state.importedData.wearableConnections.manual;
+          const { saveImportedData } = await import('./data.js');
+          await saveImportedData();
+        }
+        await refreshManualSummary(profileId);
+        showNotification?.('All manual entries deleted', 'success');
+        // Re-render the Settings section + dashboard strip.
+        const section = document.querySelector('[data-wearables-settings-host]') ||
+                        document.querySelector('.wearables-adapter-list')?.parentElement;
+        if (section) section.innerHTML = renderWearablesSettingsSection();
+        if (window.navigate) window.navigate('dashboard');
+      } catch (e) {
+        showNotification?.(`Couldn't delete: ${e.message}`, 'error', 4000);
+      }
     }
-    await refreshManualSummary(profileId);
-    showNotification?.('All manual entries deleted', 'success');
-    // Re-render the Settings section + dashboard strip.
-    const section = document.querySelector('[data-wearables-settings-host]') ||
-                    document.querySelector('.wearables-adapter-list')?.parentElement;
-    if (section) section.innerHTML = renderWearablesSettingsSection();
-    if (window.navigate) window.navigate('dashboard');
-  } catch (e) {
-    showNotification?.(`Couldn't delete: ${e.message}`, 'error', 4000);
-  }
+  );
 }
 
 // Populate the "X weight, Y BP, Z pulse" counts line in the manual

@@ -5,6 +5,12 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.24.1', date: '2026-04-25', title: 'Fix: deleting manual readings actually deletes them',
+    items: [
+      'The × on each manual reading inside a wearable detail modal threw silently and the row stayed in storage. Confirming the dialog now removes the entry, refreshes the L2 summary, and repaints the strip card. Same fix for the <i>Delete all manual entries</i> action under Settings → Integrations → Manual.',
+    ]
+  },
+  {
     version: '1.23.0', date: '2026-04-24', title: 'DNA + mtDNA overhaul: 5 new SNPs, 11 sub-haplogroups, valence-aware UI',
     items: [
       '<b>5 new SNPs</b> across three new categories: ALDH2 (alcohol flush + cancer risk), CYP1A2 (caffeine metabolism), MTNR1B (late-eating glucose impact), FTO (obesity, exercise-attenuated), and CETP I405V (longevity variant). Curated set: 42 → 47.',
