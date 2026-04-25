@@ -883,6 +883,32 @@ return (async function() {
   assert('WebCrypto+base64url yields RFC 7636 challenge', b64url === RFC_CHALLENGE, `got ${b64url}`);
 
   // ═══════════════════════════════════════
+  // 17v. Test isolation regression guard (v1.28.1)
+  // ═══════════════════════════════════════
+  console.log('%c 17v. Test Isolation ', 'font-weight:bold;color:#f59e0b');
+
+  // Tests that swap profiles MUST also swap state.currentProfile, not just
+  // the localStorage 'labcharts-active-profile' key — saveImportedData()
+  // keys off state.currentProfile, so a half-swapped test that triggers a
+  // save (via e.g. backfillWearable's saveConnection chain) writes the test's
+  // fake state into the USER's REAL profile storage. This bit me once on the
+  // wearables worktree (Oura tokens overwritten with `test-rfr` placeholders;
+  // wearableConnections.manual wiped). Pin both source files so the
+  // anti-pattern can't come back.
+  const syncFlowSrc = await fetch('/tests/test-wearables-sync-flow.js').then(r => r.text());
+  const uiFlowSrc = await fetch('/tests/test-wearables-ui-flows.js').then(r => r.text());
+  for (const [name, src] of [['sync-flow', syncFlowSrc], ['ui-flows', uiFlowSrc]]) {
+    assert(`${name}: snapshots window._labState.currentProfile before swapping profile`,
+      /origCurrentProfile\s*=\s*window\._labState\.currentProfile/.test(src));
+    assert(`${name}: assigns TEST_PROFILE_ID to window._labState.currentProfile (not just localStorage)`,
+      /window\._labState\.currentProfile\s*=\s*TEST_PROFILE_ID/.test(src));
+    assert(`${name}: cleanup restores window._labState.currentProfile`,
+      /window\._labState\.currentProfile\s*=\s*origCurrentProfile/.test(src));
+    assert(`${name}: cleanup removes the test profile's localStorage imported key`,
+      /localStorage\.removeItem\(`labcharts-\$\{TEST_PROFILE_ID\}-imported`\)/.test(src));
+  }
+
+  // ═══════════════════════════════════════
   // 17w. P2 cleanup pass (v1.28.0)
   // ═══════════════════════════════════════
   console.log('%c 17w. P2 Cleanup ', 'font-weight:bold;color:#f59e0b');

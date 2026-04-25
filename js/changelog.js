@@ -5,6 +5,13 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.28.1', date: '2026-04-25', title: 'Test isolation fix — tests no longer write into the user\'s real profile',
+    items: [
+      '<b>Critical test-isolation bug.</b> The v1.27.5 sync-flow + UI-flow tests swapped the localStorage <code>labcharts-active-profile</code> key but didn\'t also assign <code>state.currentProfile</code>. Because <code>saveImportedData()</code> keys off the in-memory <code>state.currentProfile</code> (not localStorage), any save inside the test wrote the test\'s fake state into the USER\'S real profile storage. On a wearables worktree this overwrote real Oura access tokens with <code>test-rfr</code> placeholders and wiped <code>wearableConnections.manual</code>. Tests now snapshot + restore both, plus drop their own storage keys on cleanup. New regression guard in <code>test-wearables.js</code> that pins the correct pattern in both test files so a future contributor can\'t reintroduce the half-swap.',
+      'No production-code change. If you noticed your Oura saying it needed reconnection or "Manual — waiting on first device sync" after a recent build, that\'s why. Re-OAuth Oura; the manual connection rebuilt itself from existing IDB rows on the next sync.',
+    ]
+  },
+  {
     version: '1.28.0', date: '2026-04-25', title: 'Wearables P2 cleanup — profile-switch refresh, recommendations hooks, focus trap, security polish',
     items: [
       '<b>Profile switch now refreshes the wearable summary.</b> Was only running once at boot — switching profiles left a stale strip until the next adapter sync. Now <code>loadProfile</code> runs migrate + summary recompute for the freshly-loaded profile.',

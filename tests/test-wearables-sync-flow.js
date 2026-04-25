@@ -22,7 +22,14 @@ return (async function() {
   // ─────────────────────────────────────────────────────────
   const TEST_PROFILE_ID = 'sync-flow-test-' + Date.now().toString(36);
   const origActiveProfile = localStorage.getItem('labcharts-active-profile');
+  // CRITICAL: saveImportedData() keys off state.currentProfile, NOT the
+  // localStorage active-profile entry. If we only swap the localStorage
+  // value, any save inside the test (e.g. backfillWearable's saveConnection)
+  // writes the test's fake state to the USER'S real profile storage key.
+  // Snapshot AND restore both.
+  const origCurrentProfile = window._labState.currentProfile;
   localStorage.setItem('labcharts-active-profile', TEST_PROFILE_ID);
+  window._labState.currentProfile = TEST_PROFILE_ID;
 
   const origState = window._labState.importedData;
   window._labState.importedData = {
@@ -328,9 +335,16 @@ return (async function() {
   // Cleanup — restore live state.
   // ─────────────────────────────────────────────────────────
   await wipeWearableIDB();
+  // Drop the test profile's storage keys before restoring active-profile so
+  // a partial write during the test can't survive.
+  localStorage.removeItem(`labcharts-${TEST_PROFILE_ID}-imported`);
   if (origActiveProfile) localStorage.setItem('labcharts-active-profile', origActiveProfile);
   else localStorage.removeItem('labcharts-active-profile');
+  window._labState.currentProfile = origCurrentProfile;
   window._labState.importedData = origState;
+  // Wipe the test wearable IDB outright so deleted-test-profile data
+  // doesn't accumulate.
+  try { const { deleteWearablesDB } = await import('/js/wearables-store.js'); await deleteWearablesDB(TEST_PROFILE_ID); } catch {}
 
   console.log(`\n%c Tests complete: ${pass} passed, ${fail} failed `, fail ? 'background:#ef4444;color:#fff;padding:4px 12px;border-radius:4px' : 'background:#22c55e;color:#fff;padding:4px 12px;border-radius:4px');
   if (typeof window.__TEST_RESULTS !== 'undefined') window.__TEST_RESULTS = { pass, fail };

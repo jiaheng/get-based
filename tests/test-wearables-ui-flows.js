@@ -22,7 +22,12 @@ return (async function() {
   // ─────────────────────────────────────────────────────────
   const TEST_PROFILE_ID = 'ui-flow-test-' + Date.now().toString(36);
   const origActive = localStorage.getItem('labcharts-active-profile');
+  // CRITICAL: saveImportedData() keys off state.currentProfile, NOT the
+  // localStorage active-profile entry. Swap both — otherwise any save
+  // inside the test writes the fake state to the USER'S real profile.
+  const origCurrentProfile = window._labState.currentProfile;
   localStorage.setItem('labcharts-active-profile', TEST_PROFILE_ID);
+  window._labState.currentProfile = TEST_PROFILE_ID;
   const origState = window._labState.importedData;
   window._labState.importedData = {
     entries: [],
@@ -248,9 +253,14 @@ return (async function() {
   // ─────────────────────────────────────────────────────────
   try { await store.clearSource(TEST_PROFILE_ID, 'manual'); } catch {}
   try { await store.clearSource(TEST_PROFILE_ID, 'oura'); } catch {}
+  // Drop test-profile storage keys first so a partial write during the test
+  // can't survive across the swap-back.
+  localStorage.removeItem(`labcharts-${TEST_PROFILE_ID}-imported`);
   if (origActive) localStorage.setItem('labcharts-active-profile', origActive);
   else localStorage.removeItem('labcharts-active-profile');
+  window._labState.currentProfile = origCurrentProfile;
   window._labState.importedData = origState;
+  try { const { deleteWearablesDB } = await import('/js/wearables-store.js'); await deleteWearablesDB(TEST_PROFILE_ID); } catch {}
   if (window.navigate) window.navigate('dashboard');
 
   console.log(`\n%c Tests complete: ${pass} passed, ${fail} failed `, fail ? 'background:#ef4444;color:#fff;padding:4px 12px;border-radius:4px' : 'background:#22c55e;color:#fff;padding:4px 12px;border-radius:4px');
