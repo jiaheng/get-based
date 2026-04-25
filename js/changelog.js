@@ -5,6 +5,12 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.25.2', date: '2026-04-25', title: 'Daytime HRV / HR show 7-day + 30-day averages, not just today',
+    items: [
+      'A single quiet or active day can swing daytime HR by 20+ bpm, so showing only the latest value made the companion stat noisy. The HRV / RHR detail modal now adds <i>Daytime (7d)</i> and <i>Daytime (30d)</i> averages alongside <i>Daytime (latest)</i>, the same shape as the overnight stats. The 30-day cell is suppressed until there\'s at least 2 weeks of data so it doesn\'t lie about a one-week trend.',
+    ]
+  },
+  {
     version: '1.25.1', date: '2026-04-25', title: 'Fix: Oura daytime HR backfill now populates the full 90 days',
     items: [
       'The v1.25.0 daytime-HR work fetched Oura\'s <code>heartrate</code> endpoint with a 90-day window in one shot — but the endpoint caps each query at 30 days and quietly returns 400. The error was swallowed and the backfill silently produced rows with no daytime HR. Now chunked into 29-day slices so a 90-day backfill actually populates <i>Daytime HR</i> for every day. <b>Re-sync Oura once</b> via Settings → Integrations → Oura → <i>Re-sync last 90 days</i>.',

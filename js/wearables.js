@@ -597,12 +597,30 @@ function buildWearableDetailHtml(canon, m, series, metricId, manualEntries = [])
     ['P25 – P75', `${formatV(m.baselineP25)} – ${formatV(m.baselineP75)}${unitSpaced}`, 'interquartile'],
     ['Coverage', `${series.length}d`, `of last 90 days`],
   ];
+  // Daytime companion: emit up to three sub-stats — latest, 7-day average,
+  // 30-day average — so the user gets the trend, not just today (a single
+  // quiet/active day can swing the latest by 20+ bpm). The 30-day cell is
+  // skipped when there's not enough history to make it meaningful.
   if (companion && companionLabel && typeof companion.latest === 'number') {
     baseStats.push([
-      companionLabel,
+      `${companionLabel} (latest)`,
       `${formatV(companion.latest)}${companionUnitSpaced}`,
       companion.latestDate ? `daytime · ${companion.latestDate}` : 'daytime',
     ]);
+    if (typeof companion.rolling?.d7 === 'number') {
+      baseStats.push([
+        `${companionLabel} (7d)`,
+        `${formatV(companion.rolling.d7)}${companionUnitSpaced}`,
+        'daytime · 7-day avg',
+      ]);
+    }
+    if (typeof companion.rolling?.d30 === 'number' && companion.weekly && companion.weekly.length >= 2) {
+      baseStats.push([
+        `${companionLabel} (30d)`,
+        `${formatV(companion.rolling.d30)}${companionUnitSpaced}`,
+        'daytime · 30-day avg',
+      ]);
+    }
   }
   const statsCells = baseStats.map(([label, val, sub]) => `
     <div class="wearable-detail-stat">
