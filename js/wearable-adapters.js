@@ -65,14 +65,30 @@ export const CANONICAL_METRICS = {
   // roll-up line to keep the token budget honest. Only populates for users
   // with a device that produces the underlying measType, so the strip
   // auto-hides them for everyone else.
-  pwv:                { id: 'pwv',                label: 'PWV',          sub: '',      unit: 'm/s',   worseWhen: 'up'     }, // pulse wave velocity — vascular stiffness; preferred over Withings' computed Vascular Age
+  pwv:                { id: 'pwv',                label: 'PWV',          sub: '',      unit: 'm/s',   worseWhen: 'up'     }, // pulse wave velocity — vascular stiffness
+  vascular_age:       { id: 'vascular_age',       label: 'Vascular age', sub: '',      unit: 'yrs',   worseWhen: 'up'     }, // Withings' PWV-derived age estimate (distinct from Oura's cardio_age which uses HRV/rhr)
+  cardio_fitness:     { id: 'cardio_fitness',     label: 'Cardio fit',   sub: 'score', unit: '',      worseWhen: 'down'   }, // Withings VO2 estimate (0-100ish)
   body_fat_pct:       { id: 'body_fat_pct',       label: 'Body fat',     sub: '',      unit: '%',     worseWhen: 'up'     },
+  fat_mass_kg:        { id: 'fat_mass_kg',        label: 'Fat mass',     sub: '',      unit: 'kg',    worseWhen: 'up'     }, // measType 8 — absolute kg of fat tissue
   muscle_mass_kg:     { id: 'muscle_mass_kg',     label: 'Muscle',       sub: '',      unit: 'kg',    worseWhen: 'down'   },
-  lean_mass_kg:       { id: 'lean_mass_kg',       label: 'Lean mass',    sub: '',      unit: 'kg',    worseWhen: 'down',  ariaLabel: 'Lean (fat-free) mass' }, // distinct from muscle — Withings reports both
+  lean_mass_kg:       { id: 'lean_mass_kg',       label: 'Lean mass',    sub: '',      unit: 'kg',    worseWhen: 'down',  ariaLabel: 'Lean (fat-free) mass' },
   bone_mass_kg:       { id: 'bone_mass_kg',       label: 'Bone',         sub: '',      unit: 'kg',    worseWhen: 'down'   },
   water_mass_kg:      { id: 'water_mass_kg',      label: 'Water',        sub: '',      unit: 'kg',    worseWhen: 'either' }, // hydration — too high or too low both bad
   visceral_fat:       { id: 'visceral_fat',       label: 'Visceral fat', sub: '',      unit: '',      worseWhen: 'up'     }, // Withings 1-30 score
-  nerve_health_score: { id: 'nerve_health_score', label: 'Nerve health', sub: 'score', unit: '',      worseWhen: 'down'   }, // Body Scan peripheral-nerve activity
+  nerve_health_score: { id: 'nerve_health_score', label: 'Nerve health', sub: 'score', unit: '',      worseWhen: 'down'   },
+  body_temp:          { id: 'body_temp',          label: 'Body temp',    sub: '',      unit: '°C',    worseWhen: 'either' }, // measType 71 — absolute reading (Body Scan IR sensor)
+  skin_temp:          { id: 'skin_temp',          label: 'Skin temp',    sub: '',      unit: '°C',    worseWhen: 'either' }, // measType 73 — wrist sensor (ScanWatch)
+  // Sleep architecture — Withings getsleepsummary returns these as seconds;
+  // the fetcher converts to minutes for display sanity.
+  sleep_total_min:      { id: 'sleep_total_min',      label: 'Sleep total', sub: '',      unit: 'min', worseWhen: 'down'   },
+  sleep_deep_min:       { id: 'sleep_deep_min',       label: 'Deep sleep',  sub: '',      unit: 'min', worseWhen: 'down'   },
+  sleep_light_min:      { id: 'sleep_light_min',      label: 'Light sleep', sub: '',      unit: 'min', worseWhen: 'either' }, // too much light = poor architecture; too little also bad
+  sleep_rem_min:        { id: 'sleep_rem_min',        label: 'REM sleep',   sub: '',      unit: 'min', worseWhen: 'down'   },
+  sleep_awake_min:      { id: 'sleep_awake_min',      label: 'Awake',       sub: 'in bed', unit: 'min', worseWhen: 'up'    },
+  sleep_hr_avg:         { id: 'sleep_hr_avg',         label: 'Sleep HR',    sub: 'avg',   unit: 'bpm', worseWhen: 'up'     }, // distinct from rhr (= hr_min) — average overnight
+  sleep_breathing_rate: { id: 'sleep_breathing_rate', label: 'Breathing',   sub: 'sleep', unit: 'rpm', worseWhen: 'up'     },
+  sleep_snoring_min:    { id: 'sleep_snoring_min',    label: 'Snoring',     sub: '',      unit: 'min', worseWhen: 'up'     },
+  sleep_breath_disturb: { id: 'sleep_breath_disturb', label: 'Apnea',       sub: 'level', unit: '',    worseWhen: 'up'     }, // breathing-disturbances intensity 0-100 (Withings' apnea-class signal)
 };
 
 // Default display order for the dashboard strip. A canonical metric not listed
@@ -86,12 +102,17 @@ export const DEFAULT_METRIC_ORDER = [
   'activity_score', 'steps',
   'weight', 'bp_systolic', 'bp_diastolic',
   'stress_high_min', 'resilience_level', 'cardio_age',
-  // Withings Body Scan extras — placed after the headline cards so users
-  // without a Body Scan don't notice (auto-hidden when summary lacks the
-  // metric). PWV first because vascular stiffness is the headline number;
-  // body composition cluster after; nerve health last (most niche).
-  'pwv',
-  'body_fat_pct', 'muscle_mass_kg', 'lean_mass_kg', 'bone_mass_kg', 'water_mass_kg', 'visceral_fat',
+  // Withings full-coverage cluster — strip auto-hides anything the user's
+  // device doesn't measure, so a weight-only scale user sees no change. Owners
+  // of a Body Scan + ScanWatch + BPM see the cards their hardware produces.
+  // Vascular stack first (headline of cardiovascular health), body comp
+  // next, then temperature, then sleep architecture. Nerve health last
+  // because it's the most niche reading.
+  'pwv', 'vascular_age', 'cardio_fitness',
+  'body_fat_pct', 'fat_mass_kg', 'muscle_mass_kg', 'lean_mass_kg', 'bone_mass_kg', 'water_mass_kg', 'visceral_fat',
+  'body_temp', 'skin_temp',
+  'sleep_total_min', 'sleep_deep_min', 'sleep_light_min', 'sleep_rem_min', 'sleep_awake_min',
+  'sleep_hr_avg', 'sleep_breathing_rate', 'sleep_snoring_min', 'sleep_breath_disturb',
   'nerve_health_score',
   // Daytime companions are summarised so the AI / detail modal can read them,
   // but intentionally placed AFTER the overnight cards — the strip stays calm.
@@ -280,23 +301,37 @@ export const ADAPTERS = [
     },
     apiHost: 'wbsapi.withings.net',
     metrics: {
-      weight:             { endpoint: 'measure',  measType: 1   },
-      bp_diastolic:       { endpoint: 'measure',  measType: 9   },
-      bp_systolic:        { endpoint: 'measure',  measType: 10  },
-      hr_day:             { endpoint: 'measure',  measType: 11  }, // scale pulse — daytime spot reading
-      rhr:                { endpoint: 'v2/sleep', field: 'hr_min' }, // sleep min HR is the true overnight RHR
-      sleep_score:        { endpoint: 'v2/sleep', field: 'sleep_score' },
-      // Body Scan + BPM-class extras — issue #143 / #5 follow-up. The
-      // measure-endpoint loop in wearables-withings.js auto-handles every
-      // measType in this map; new ones land just by adding a row here.
-      body_fat_pct:       { endpoint: 'measure',  measType: 6   },
-      lean_mass_kg:       { endpoint: 'measure',  measType: 5   }, // fat-free mass
-      muscle_mass_kg:     { endpoint: 'measure',  measType: 76  },
-      water_mass_kg:      { endpoint: 'measure',  measType: 77  }, // hydration
-      bone_mass_kg:       { endpoint: 'measure',  measType: 88  },
-      pwv:                { endpoint: 'measure',  measType: 91  }, // pulse wave velocity (m/s) — preferred over Withings' Vascular Age (130)
-      visceral_fat:       { endpoint: 'measure',  measType: 167 },
-      nerve_health_score: { endpoint: 'measure',  measType: 168 },
+      // /measure endpoint — measType-keyed body / cardio readings.
+      weight:               { endpoint: 'measure',  measType: 1   },
+      lean_mass_kg:         { endpoint: 'measure',  measType: 5   }, // fat-free mass
+      body_fat_pct:         { endpoint: 'measure',  measType: 6   },
+      fat_mass_kg:          { endpoint: 'measure',  measType: 8   },
+      bp_diastolic:         { endpoint: 'measure',  measType: 9   },
+      bp_systolic:          { endpoint: 'measure',  measType: 10  },
+      hr_day:               { endpoint: 'measure',  measType: 11  }, // scale pulse — daytime spot reading
+      spo2_avg:             { endpoint: 'measure',  measType: 54  }, // ScanWatch overnight measurement
+      body_temp:            { endpoint: 'measure',  measType: 71  }, // Body Scan IR sensor (°C absolute)
+      skin_temp:            { endpoint: 'measure',  measType: 73  }, // ScanWatch wrist sensor (°C absolute)
+      muscle_mass_kg:       { endpoint: 'measure',  measType: 76  },
+      water_mass_kg:        { endpoint: 'measure',  measType: 77  }, // hydration
+      bone_mass_kg:         { endpoint: 'measure',  measType: 88  },
+      pwv:                  { endpoint: 'measure',  measType: 91  }, // pulse wave velocity (m/s)
+      vascular_age:         { endpoint: 'measure',  measType: 130 }, // Withings PWV-derived age
+      visceral_fat:         { endpoint: 'measure',  measType: 167 },
+      nerve_health_score:   { endpoint: 'measure',  measType: 168 },
+      cardio_fitness:       { endpoint: 'measure',  measType: 169 }, // VO2 estimate
+      // /v2/sleep getsleepsummary — nightly aggregates.
+      rhr:                  { endpoint: 'v2/sleep', field: 'hr_min' }, // sleep min HR is the true overnight RHR
+      sleep_score:          { endpoint: 'v2/sleep', field: 'sleep_score' },
+      sleep_total_min:      { endpoint: 'v2/sleep', field: 'asleepduration', transform: 'sec→min' },
+      sleep_deep_min:       { endpoint: 'v2/sleep', field: 'deepsleepduration', transform: 'sec→min' },
+      sleep_light_min:      { endpoint: 'v2/sleep', field: 'lightsleepduration', transform: 'sec→min' },
+      sleep_rem_min:        { endpoint: 'v2/sleep', field: 'remsleepduration', transform: 'sec→min' },
+      sleep_awake_min:      { endpoint: 'v2/sleep', field: 'wakeupduration', transform: 'sec→min' },
+      sleep_hr_avg:         { endpoint: 'v2/sleep', field: 'hr_average' },
+      sleep_breathing_rate: { endpoint: 'v2/sleep', field: 'rr_average' },
+      sleep_snoring_min:    { endpoint: 'v2/sleep', field: 'snoring', transform: 'sec→min' },
+      sleep_breath_disturb: { endpoint: 'v2/sleep', field: 'breathing_disturbances_intensity' },
     },
     accountInfo: { endpoint: 'v2/user', identityField: 'email' },
   },

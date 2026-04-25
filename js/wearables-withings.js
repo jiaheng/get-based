@@ -20,29 +20,55 @@ import { isDebugMode } from './utils.js';
 const WITHINGS_API = 'https://wbsapi.withings.net';
 const PROXY_URL    = '/api/proxy';
 
-// Withings measure-type codes → canonical fields. Scale pulse (type 11) is
-// a daytime spot reading at the moment of standing — emphatically NOT a
-// resting heart rate. Route it to hr_day; the true rhr slot is filled by
-// sleep summary's hr_min below.
-//
-// Body Scan extras (#143): body composition + PWV + nerve health. Vascular
-// Age (130) is intentionally NOT mapped — overlaps semantically with Oura's
-// `cardio_age`; we expose the underlying PWV (91) and let AI reason from
-// that, per Marian's request.
+// Withings measure-type codes → canonical fields. We aim for full coverage
+// of /measure: every measType the user's hardware produces flows to a
+// canonical so the strip can decide whether to surface it (auto-hidden if
+// no rows). Scale pulse (type 11) is a daytime spot reading at the moment
+// of standing — NOT resting heart rate — so it routes to hr_day; rhr
+// comes from sleep summary's hr_min below.
 const MEAS_TYPES = {
   1:   'weight',             // kg
+  5:   'lean_mass_kg',       // kg (fat-free mass)
+  6:   'body_fat_pct',       // %
+  8:   'fat_mass_kg',        // kg (absolute fat tissue)
   9:   'bp_diastolic',       // mmHg
   10:  'bp_systolic',        // mmHg
   11:  'hr_day',             // bpm (scale pulse — taken while standing on the scale)
-  6:   'body_fat_pct',       // %
-  5:   'lean_mass_kg',       // kg (fat-free mass)
+  54:  'spo2_avg',           // % (ScanWatch overnight)
+  71:  'body_temp',          // °C (Body Scan IR sensor — absolute, NOT delta)
+  73:  'skin_temp',          // °C (ScanWatch wrist sensor — absolute)
   76:  'muscle_mass_kg',     // kg
   77:  'water_mass_kg',      // kg (hydration)
   88:  'bone_mass_kg',       // kg
   91:  'pwv',                // m/s (pulse wave velocity)
-  167: 'visceral_fat',       // 1-30 score (no unit)
-  168: 'nerve_health_score', // score (no unit)
+  130: 'vascular_age',       // years (Withings PWV-derived)
+  167: 'visceral_fat',       // 1-30 score
+  168: 'nerve_health_score', // score
+  169: 'cardio_fitness',     // VO2 estimate
 };
+
+// /v2/sleep getsleepsummary fields → canonical. Some need unit conversion
+// from seconds to minutes (Withings' default for *duration fields).
+const SLEEP_FIELDS = {
+  sleep_score:          { key: 'sleep_score' },
+  hr_min:               { canonical: 'rhr' },
+  hr_average:           { canonical: 'sleep_hr_avg' },
+  rr_average:           { canonical: 'sleep_breathing_rate' },
+  asleepduration:       { canonical: 'sleep_total_min', secToMin: true },
+  deepsleepduration:    { canonical: 'sleep_deep_min', secToMin: true },
+  lightsleepduration:   { canonical: 'sleep_light_min', secToMin: true },
+  remsleepduration:     { canonical: 'sleep_rem_min', secToMin: true },
+  wakeupduration:       { canonical: 'sleep_awake_min', secToMin: true },
+  snoring:              { canonical: 'sleep_snoring_min', secToMin: true },
+  breathing_disturbances_intensity: { canonical: 'sleep_breath_disturb' },
+};
+// Withings caps `data_fields` at one comma-delimited list per request.
+const SLEEP_DATA_FIELDS = [
+  'asleepduration', 'wakeupduration', 'durationtosleep',
+  'deepsleepduration', 'lightsleepduration', 'remsleepduration',
+  'hr_average', 'hr_min', 'hr_max', 'rr_average',
+  'sleep_score', 'snoring', 'breathing_disturbances_intensity',
+].join(',');
 
 // Withings status codes → friendly messages. Source: Withings Developer
 // documentation error-code table (https://developer.withings.com/api-reference/#section/Response-status).
@@ -188,7 +214,7 @@ export async function fetchWithingsDailyRange(accessToken, startDate, endDate) {
     }).catch(e => { logDebug('getmeas', e); return {}; }),
     withingsPOST('getsleepsummary', accessToken, {
       startdateymd: startDate, enddateymd: endDate,
-      data_fields: 'asleepduration,wakeupduration,deepsleepduration,hr_average,hr_min,rr_average,sleep_score',
+      data_fields: SLEEP_DATA_FIELDS,
     }).catch(e => { logDebug('getsleepsummary', e); return {}; }),
   ]);
 
@@ -205,10 +231,17 @@ export async function fetchWithingsDailyRange(accessToken, startDate, endDate) {
         stress_high_min: null, resilience_level: null, cardio_age: null,
         weight: null, bp_systolic: null, bp_diastolic: null,
         spo2_avg: null, body_temp_delta: null, glucose_avg: null,
-        // Body Scan extras (#143)
-        body_fat_pct: null, muscle_mass_kg: null, lean_mass_kg: null,
+        // Withings full-coverage canonicals (one slot per registered metric).
+        body_fat_pct: null, fat_mass_kg: null,
+        muscle_mass_kg: null, lean_mass_kg: null,
         bone_mass_kg: null, water_mass_kg: null,
-        pwv: null, visceral_fat: null, nerve_health_score: null,
+        pwv: null, vascular_age: null, cardio_fitness: null,
+        visceral_fat: null, nerve_health_score: null,
+        body_temp: null, skin_temp: null,
+        sleep_total_min: null, sleep_deep_min: null, sleep_light_min: null,
+        sleep_rem_min: null, sleep_awake_min: null,
+        sleep_hr_avg: null, sleep_breathing_rate: null,
+        sleep_snoring_min: null, sleep_breath_disturb: null,
       });
     }
     return byDate.get(day);
@@ -232,16 +265,25 @@ export async function fetchWithingsDailyRange(accessToken, startDate, endDate) {
     }
   }
 
-  // Sleep summary — Withings gives nightly aggregates; sleep_score is a
-  // 0-100 composite (may be null if data is thin).
+  // Sleep summary — Withings gives nightly aggregates. Walk SLEEP_FIELDS
+  // so adding a new field is a one-line registry change. Duration values
+  // come back in seconds; `secToMin` flag normalises to minutes.
   for (const s of (sleep?.series || [])) {
     const day = s?.date;
     if (!day) continue;
     const row = ensureRow(day);
     const d = s.data || {};
-    if (typeof d.sleep_score === 'number') row.sleep_score = d.sleep_score;
-    // hr_average from sleep summary is a reasonable RHR proxy when no scale exists
-    if (row.rhr == null && typeof d.hr_min === 'number') row.rhr = d.hr_min;
+    for (const [apiField, spec] of Object.entries(SLEEP_FIELDS)) {
+      const v = d[apiField];
+      if (typeof v !== 'number' || !isFinite(v)) continue;
+      const target = spec.canonical || spec.key;
+      if (!target) continue;
+      // Don't overwrite a value already set by /measure (true for fields
+      // like rhr where /measure has no entry, but defensive in general).
+      if (row[target] != null) continue;
+      const out = spec.secToMin ? Math.round(v / 60) : v;
+      row[target] = out;
+    }
   }
 
   return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));

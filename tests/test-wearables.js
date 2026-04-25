@@ -281,10 +281,12 @@ return (async function() {
     assert(`CANONICAL_METRICS has ${mid}`, !!reg.CANONICAL_METRICS[mid]);
     assert(`Oura adapter maps ${mid}`, reg.adapterSupportsMetric('oura', mid));
   }
-  // 14 (pre-#143) + 8 Withings Body Scan extras = 22 today. Each new
-  // canonical metric should bump this assertion intentionally so the
-  // count drift shows up in code review.
-  assert('DEFAULT_METRIC_ORDER is 22 metrics (4 core + 5 extended + 3 biometric + 8 Body Scan + 2 daytime)', reg.DEFAULT_METRIC_ORDER.length === 22);
+  // Total canonicals: 14 (pre-#143) + 8 Body Scan body-comp + 6
+  // additional /measure (fat_mass, spo2, body_temp, skin_temp,
+  // vascular_age, cardio_fitness) + 9 sleep-arch = 37. Each new
+  // canonical metric bumps this assertion intentionally so count
+  // drift surfaces in code review.
+  assert('DEFAULT_METRIC_ORDER is 36 metrics (full Withings coverage round)', reg.DEFAULT_METRIC_ORDER.length === 36);
   // Biometric metrics must be in the default order so the summary pipeline
   // iterates them for manual / Withings / Fitbit rows.
   assert('DEFAULT_METRIC_ORDER includes weight', reg.DEFAULT_METRIC_ORDER.includes('weight'));
@@ -622,50 +624,82 @@ return (async function() {
   assert('Withings rhr is sourced from sleep summary hr_min',
     withingsReg.metrics.rhr?.endpoint === 'v2/sleep' && withingsReg.metrics.rhr?.field === 'hr_min');
 
-  // Body Scan extras (#143) — wired through the same /measure endpoint.
-  // The fetcher's MEAS_TYPES table is the source of truth; this just
-  // double-asserts the registry side so a missing wire-up is caught here
-  // before it costs anyone a real device test.
-  assert('Withings body_fat_pct → measType 6', withingsReg.metrics.body_fat_pct?.measType === 6);
-  assert('Withings lean_mass_kg → measType 5 (fat-free mass)', withingsReg.metrics.lean_mass_kg?.measType === 5);
-  assert('Withings muscle_mass_kg → measType 76', withingsReg.metrics.muscle_mass_kg?.measType === 76);
-  assert('Withings bone_mass_kg → measType 88', withingsReg.metrics.bone_mass_kg?.measType === 88);
-  assert('Withings water_mass_kg → measType 77', withingsReg.metrics.water_mass_kg?.measType === 77);
-  assert('Withings pwv → measType 91 (m/s)', withingsReg.metrics.pwv?.measType === 91);
-  assert('Withings visceral_fat → measType 167', withingsReg.metrics.visceral_fat?.measType === 167);
-  assert('Withings nerve_health_score → measType 168', withingsReg.metrics.nerve_health_score?.measType === 168);
-  // Withings vascular_age (measType 130) is intentionally NOT mapped — we
-  // expose underlying PWV instead. If we later add vascular_age, it should
-  // be a separate canonical so both Oura and Withings can flag stiffness.
-  assert('Withings does NOT also expose vascular_age (PWV preferred per #143)',
-    !withingsReg.metrics.vascular_age);
+  // Withings full-coverage map. The fetcher's MEAS_TYPES table is source
+  // of truth for /measure; this double-asserts the registry side so a
+  // missing wire-up surfaces here before any real-device test.
+  const expectedMeasTypes = {
+    weight: 1, lean_mass_kg: 5, body_fat_pct: 6, fat_mass_kg: 8,
+    bp_diastolic: 9, bp_systolic: 10, hr_day: 11,
+    spo2_avg: 54, body_temp: 71, skin_temp: 73,
+    muscle_mass_kg: 76, water_mass_kg: 77, bone_mass_kg: 88,
+    pwv: 91, vascular_age: 130, visceral_fat: 167,
+    nerve_health_score: 168, cardio_fitness: 169,
+  };
+  for (const [canonical, measType] of Object.entries(expectedMeasTypes)) {
+    assert(`Withings ${canonical} → /measure measType ${measType}`,
+      withingsReg.metrics[canonical]?.measType === measType);
+  }
+  // /v2/sleep getsleepsummary — registered fields and their transforms.
+  const expectedSleepFields = {
+    sleep_score: { field: 'sleep_score' },
+    rhr: { field: 'hr_min' },
+    sleep_total_min: { field: 'asleepduration', transform: 'sec→min' },
+    sleep_deep_min: { field: 'deepsleepduration', transform: 'sec→min' },
+    sleep_light_min: { field: 'lightsleepduration', transform: 'sec→min' },
+    sleep_rem_min: { field: 'remsleepduration', transform: 'sec→min' },
+    sleep_awake_min: { field: 'wakeupduration', transform: 'sec→min' },
+    sleep_hr_avg: { field: 'hr_average' },
+    sleep_breathing_rate: { field: 'rr_average' },
+    sleep_snoring_min: { field: 'snoring', transform: 'sec→min' },
+    sleep_breath_disturb: { field: 'breathing_disturbances_intensity' },
+  };
+  for (const [canonical, spec] of Object.entries(expectedSleepFields)) {
+    const reg = withingsReg.metrics[canonical];
+    assert(`Withings ${canonical} → /v2/sleep field "${spec.field}"`,
+      reg?.endpoint === 'v2/sleep' && reg?.field === spec.field);
+    if (spec.transform) {
+      assert(`Withings ${canonical} carries transform: ${spec.transform}`,
+        reg?.transform === spec.transform);
+    }
+  }
 
-  // Body comp roll-up in AI context — eight metrics × ~20 tokens each =
-  // ~160 tokens if emitted per-line. The single roll-up keeps it under
-  // ~50. Worth a regression guard.
-  const labCtxSrc = await fetch('/js/lab-context.js').then(r => r.text());
-  assert('Body comp cluster collapses into a "Body comp:" roll-up line',
-    /BODY_COMP_KEYS\s*=\s*\[[\s\S]*?'body_fat_pct'[\s\S]*?'visceral_fat'[\s\S]*?\]/.test(labCtxSrc) &&
-    /Body comp:.*\$\{parts\.join/.test(labCtxSrc));
-  assert('Body-comp metrics are skipped in the per-metric loop',
-    /BODY_COMP_KEYS\.includes\(mid\)\)\s*continue/.test(labCtxSrc));
-
-  // CANONICAL_METRICS registers each new id so renderer + summary picker
-  // have labels/units. Cheap registry sanity check.
-  for (const id of ['pwv', 'body_fat_pct', 'muscle_mass_kg', 'lean_mass_kg', 'bone_mass_kg', 'water_mass_kg', 'visceral_fat', 'nerve_health_score']) {
+  // CANONICAL_METRICS — cheap presence sanity for every new canonical.
+  const NEW_CANONICALS = [
+    'pwv', 'vascular_age', 'cardio_fitness',
+    'body_fat_pct', 'fat_mass_kg', 'muscle_mass_kg', 'lean_mass_kg',
+    'bone_mass_kg', 'water_mass_kg', 'visceral_fat', 'nerve_health_score',
+    'body_temp', 'skin_temp',
+    'sleep_total_min', 'sleep_deep_min', 'sleep_light_min', 'sleep_rem_min',
+    'sleep_awake_min', 'sleep_hr_avg', 'sleep_breathing_rate',
+    'sleep_snoring_min', 'sleep_breath_disturb',
+  ];
+  for (const id of NEW_CANONICALS) {
     assert(`CANONICAL_METRICS includes '${id}'`, !!reg.canonicalMetric(id));
   }
   // Card label polish — body comp metrics shouldn't carry a redundant
   // 'mass' or 'index' sub. The label itself already disambiguates.
-  for (const id of ['muscle_mass_kg', 'bone_mass_kg', 'water_mass_kg', 'visceral_fat', 'body_fat_pct']) {
+  for (const id of ['muscle_mass_kg', 'bone_mass_kg', 'water_mass_kg', 'visceral_fat', 'body_fat_pct', 'fat_mass_kg']) {
     assert(`${id} card sub is empty (no redundant noise)`, reg.canonicalMetric(id)?.sub === '');
   }
-  // Lean mass keeps a label distinct from Muscle so the strip can show
-  // both side-by-side without ambiguity. Aria-label disambiguates further.
+  // Lean mass keeps a distinct label so the strip can show Muscle and
+  // Lean side-by-side without ambiguity. Aria-label clarifies further.
   assert('lean_mass_kg label reads "Lean mass" not just "Lean"',
     reg.canonicalMetric('lean_mass_kg')?.label === 'Lean mass');
   assert('lean_mass_kg has aria-label clarifying "fat-free"',
     /fat-free/i.test(reg.canonicalMetric('lean_mass_kg')?.ariaLabel || ''));
+
+  // AI context cluster roll-ups — body comp + sleep architecture each
+  // collapse into one line to keep prompt budget predictable. The
+  // detail modal still drills each metric individually.
+  const labCtxSrc = await fetch('/js/lab-context.js').then(r => r.text());
+  assert('Body-comp roll-up keeps 8 keys (incl. fat_mass_kg)',
+    /BODY_COMP_KEYS\s*=\s*\[[\s\S]*?'body_fat_pct'[\s\S]*?'fat_mass_kg'[\s\S]*?'nerve_health_score'[\s\S]*?\]/.test(labCtxSrc));
+  assert('Sleep-arch roll-up covers the nine sleep canonicals',
+    /SLEEP_ARCH_KEYS\s*=\s*\[[\s\S]*?'sleep_total_min'[\s\S]*?'sleep_breath_disturb'[\s\S]*?\]/.test(labCtxSrc));
+  assert('Both clusters skip the per-metric loop via ROLLED_UP set',
+    /ROLLED_UP\.has\(mid\)\)\s*continue/.test(labCtxSrc));
+  assert('Roll-up emits "Body comp:" line', /Body comp:.*parts\.join/.test(labCtxSrc));
+  assert('Roll-up emits "Sleep arch:" line', /Sleep arch:.*parts\.join/.test(labCtxSrc));
 
   const withingsFetcher = await import('../js/wearables-withings.js');
   assert('fetchWithingsDailyRange exists', typeof withingsFetcher.fetchWithingsDailyRange === 'function');

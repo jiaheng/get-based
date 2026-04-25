@@ -207,19 +207,24 @@ return (async function() {
           measuregrps: [{
             date: 1776902400, // 2026-04-23 UTC (Date.UTC(2026, 3, 23) / 1000)
             measures: [
-              { type: 1, value: 723, unit: -1 },   // 72.3 kg
-              { type: 10, value: 122, unit: 0 },   // BP sys 122
-              { type: 9, value: 78, unit: 0 },     // BP dia 78
-              { type: 11, value: 71, unit: 0 },    // pulse 71 → hr_day
-              // Body Scan extras (#143)
-              { type: 6, value: 184, unit: -1 },   // 18.4% body fat
+              { type: 1, value: 723, unit: -1 },   // 72.3 kg weight
               { type: 5, value: 590, unit: -1 },   // 59.0 kg lean (fat-free) mass
+              { type: 6, value: 184, unit: -1 },   // 18.4% body fat
+              { type: 8, value: 133, unit: -1 },   // 13.3 kg fat mass (#143 follow-up)
+              { type: 9, value: 78, unit: 0 },     // BP dia 78
+              { type: 10, value: 122, unit: 0 },   // BP sys 122
+              { type: 11, value: 71, unit: 0 },    // pulse 71 → hr_day
+              { type: 54, value: 96, unit: 0 },    // SpO2 96%
+              { type: 71, value: 365, unit: -1 },  // 36.5 °C body temp
+              { type: 73, value: 339, unit: -1 },  // 33.9 °C skin temp
               { type: 76, value: 320, unit: -1 },  // 32.0 kg muscle mass
-              { type: 88, value: 26, unit: -1 },   // 2.6 kg bone mass
               { type: 77, value: 410, unit: -1 },  // 41.0 kg water mass
+              { type: 88, value: 26, unit: -1 },   // 2.6 kg bone mass
               { type: 91, value: 73, unit: -1 },   // 7.3 m/s PWV
+              { type: 130, value: 41, unit: 0 },   // 41 yrs vascular age
               { type: 167, value: 8, unit: 0 },    // visceral fat index 8
               { type: 168, value: 71, unit: 0 },   // nerve health score 71
+              { type: 169, value: 47, unit: 0 },   // cardio fitness 47
             ],
           }],
         },
@@ -227,7 +232,21 @@ return (async function() {
       { matcher: /\/v2\/sleep$/, body: {
         status: 0,
         body: {
-          series: [{ date: '2026-04-23', data: { sleep_score: 76, hr_min: 55, hr_average: 62 } }],
+          series: [{
+            date: '2026-04-23',
+            data: {
+              sleep_score: 76,
+              hr_min: 55, hr_average: 62, hr_max: 78,
+              rr_average: 14,
+              asleepduration: 27000,    // 7.5 h → 450 min
+              deepsleepduration: 4500,  // 75 min
+              lightsleepduration: 14400, // 240 min
+              remsleepduration: 5400,    // 90 min
+              wakeupduration: 1800,      // 30 min
+              snoring: 600,              // 10 min
+              breathing_disturbances_intensity: 12,
+            },
+          }],
         },
       }},
     ]);
@@ -240,16 +259,32 @@ return (async function() {
     assert('Withings hr_day from scale pulse (measType 11) — NOT rhr', r?.hr_day === 71);
     assert('Withings rhr from sleep summary hr_min (true overnight RHR)', r?.rhr === 55);
     assert('Withings sleep_score from sleep summary', r?.sleep_score === 76);
-    // Body Scan extras (#143). Each measType maps to the new canonical
-    // field; unit-shift decoding shared with weight/BP path.
+    // Body Scan + ScanWatch full-coverage roll-up. Each measType maps to
+    // its canonical field; unit-shift decoding shared with weight/BP path.
     assert('Withings body_fat_pct decoded (184 × 10^-1 = 18.4)', r?.body_fat_pct === 18.4);
+    assert('Withings fat_mass_kg from measType 8', r?.fat_mass_kg === 13.3);
     assert('Withings lean_mass_kg from measType 5', r?.lean_mass_kg === 59);
     assert('Withings muscle_mass_kg from measType 76', r?.muscle_mass_kg === 32);
     assert('Withings bone_mass_kg from measType 88 (decoded with unit-shift)', r?.bone_mass_kg === 2.6);
     assert('Withings water_mass_kg from measType 77', r?.water_mass_kg === 41);
     assert('Withings PWV from measType 91 (m/s, decoded)', r?.pwv === 7.3);
-    assert('Withings visceral_fat from measType 167 (no unit-shift)', r?.visceral_fat === 8);
+    assert('Withings visceral_fat from measType 167', r?.visceral_fat === 8);
     assert('Withings nerve_health_score from measType 168', r?.nerve_health_score === 71);
+    assert('Withings spo2_avg from measType 54 (ScanWatch)', r?.spo2_avg === 96);
+    assert('Withings body_temp from measType 71 (Body Scan IR, °C)', r?.body_temp === 36.5);
+    assert('Withings skin_temp from measType 73 (ScanWatch wrist)', r?.skin_temp === 33.9);
+    assert('Withings vascular_age from measType 130 (yrs)', r?.vascular_age === 41);
+    assert('Withings cardio_fitness from measType 169', r?.cardio_fitness === 47);
+    // Sleep architecture — fetcher converts seconds to minutes.
+    assert('sleep_total_min: 27000 s → 450 min', r?.sleep_total_min === 450);
+    assert('sleep_deep_min: 4500 s → 75 min', r?.sleep_deep_min === 75);
+    assert('sleep_light_min: 14400 s → 240 min', r?.sleep_light_min === 240);
+    assert('sleep_rem_min: 5400 s → 90 min', r?.sleep_rem_min === 90);
+    assert('sleep_awake_min: 1800 s → 30 min', r?.sleep_awake_min === 30);
+    assert('sleep_hr_avg from hr_average (62 bpm — distinct from rhr=hr_min)', r?.sleep_hr_avg === 62);
+    assert('sleep_breathing_rate from rr_average (14 rpm)', r?.sleep_breathing_rate === 14);
+    assert('sleep_snoring_min: 600 s → 10 min', r?.sleep_snoring_min === 10);
+    assert('sleep_breath_disturb intensity passes through (no transform)', r?.sleep_breath_disturb === 12);
   } finally { restoreFetch(); }
 
   // Withings status-code error surfacing

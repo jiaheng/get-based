@@ -804,16 +804,20 @@ export function buildWearableContext(importedData) {
   const maxCov = Math.max(0, ...sourceNames.map(s => summary.sources[s].coverageDays || 0));
   const lines = [`## Wearables (${sourceNames.join(' + ')}, ${maxCov}d coverage)`];
 
-  // Body composition cluster (#143). Seven Withings Body Scan metrics —
-  // emitting them as one roll-up line saves ~75 tokens vs seven per-metric
-  // lines (measured: 401 → 96 bytes for a typical user), and AI tools
-  // reason about body comp holistically anyway. The detail modal still
-  // drills each metric individually.
-  const BODY_COMP_KEYS = ['body_fat_pct', 'muscle_mass_kg', 'lean_mass_kg', 'bone_mass_kg', 'water_mass_kg', 'visceral_fat', 'nerve_health_score'];
+  // Cluster roll-ups (#143 + Withings full-coverage). Body composition
+  // and sleep architecture each collapse into a single line — eight
+  // body-comp + nine sleep metrics × ~50 bytes per line would balloon the
+  // wearable section by ~400 bytes / ~100 tokens. The detail modal still
+  // drills each metric individually; rolling up just keeps the AI prompt
+  // budget honest.
+  const BODY_COMP_KEYS = ['body_fat_pct', 'fat_mass_kg', 'muscle_mass_kg', 'lean_mass_kg', 'bone_mass_kg', 'water_mass_kg', 'visceral_fat', 'nerve_health_score'];
+  const SLEEP_ARCH_KEYS = ['sleep_total_min', 'sleep_deep_min', 'sleep_light_min', 'sleep_rem_min', 'sleep_awake_min', 'sleep_hr_avg', 'sleep_breathing_rate', 'sleep_snoring_min', 'sleep_breath_disturb'];
+  const ROLLED_UP = new Set([...BODY_COMP_KEYS, ...SLEEP_ARCH_KEYS]);
   const bodyCompPresent = BODY_COMP_KEYS.filter(k => summary.metrics[k]);
+  const sleepArchPresent = SLEEP_ARCH_KEYS.filter(k => summary.metrics[k]);
 
   for (const [mid, m] of Object.entries(summary.metrics)) {
-    if (BODY_COMP_KEYS.includes(mid)) continue; // rolled up below
+    if (ROLLED_UP.has(mid)) continue; // rolled up below
     const label = metricLabel(mid);
     const unit = metricUnit(mid);
     const deltaPct = m.baseline ? ((m.latest - m.baseline) / m.baseline * 100) : 0;
@@ -823,23 +827,40 @@ export function buildWearableContext(importedData) {
     lines.push(`${label}: ${m.latest}${unitStr} latest · baseline ${m.baseline} · ${deltaLabel} · ${m.trend30d} 30d`);
   }
 
+  // Body composition roll-up.
   if (bodyCompPresent.length) {
+    const shortLabels = {
+      body_fat_pct: 'fat', fat_mass_kg: 'fatkg', muscle_mass_kg: 'muscle', lean_mass_kg: 'lean',
+      bone_mass_kg: 'bone', water_mass_kg: 'water', visceral_fat: 'visceral', nerve_health_score: 'nerve',
+    };
     const parts = bodyCompPresent.map(k => {
       const m = summary.metrics[k];
       const unit = metricUnit(k);
       const v = unit === '%' ? `${m.latest}%`
               : unit === 'kg' ? `${m.latest}kg`
               : `${m.latest}`;
-      const shortLabel = k === 'body_fat_pct' ? 'fat'
-                       : k === 'muscle_mass_kg' ? 'muscle'
-                       : k === 'lean_mass_kg' ? 'lean'
-                       : k === 'bone_mass_kg' ? 'bone'
-                       : k === 'water_mass_kg' ? 'water'
-                       : k === 'visceral_fat' ? 'visceral'
-                       : k === 'nerve_health_score' ? 'nerve' : k;
-      return `${shortLabel} ${v}`;
+      return `${shortLabels[k] || k} ${v}`;
     });
     lines.push(`Body comp: ${parts.join(' / ')}`);
+  }
+
+  // Sleep architecture roll-up — Withings nightly stages + breathing.
+  if (sleepArchPresent.length) {
+    const shortLabels = {
+      sleep_total_min: 'total', sleep_deep_min: 'deep', sleep_light_min: 'light',
+      sleep_rem_min: 'REM', sleep_awake_min: 'awake', sleep_hr_avg: 'HR',
+      sleep_breathing_rate: 'br', sleep_snoring_min: 'snore', sleep_breath_disturb: 'apnea',
+    };
+    const parts = sleepArchPresent.map(k => {
+      const m = summary.metrics[k];
+      const unit = metricUnit(k);
+      const v = unit === 'min' ? `${m.latest}m`
+              : unit === 'bpm' ? `${m.latest}bpm`
+              : unit === 'rpm' ? `${m.latest}rpm`
+              : `${m.latest}`;
+      return `${shortLabels[k] || k} ${v}`;
+    });
+    lines.push(`Sleep arch: ${parts.join(' / ')}`);
   }
 
   // Compact weekly series for every default-order metric that has data — lets
