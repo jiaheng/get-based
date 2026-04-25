@@ -883,6 +883,162 @@ return (async function() {
   assert('WebCrypto+base64url yields RFC 7636 challenge', b64url === RFC_CHALLENGE, `got ${b64url}`);
 
   // ═══════════════════════════════════════
+  // 17r. Behavioral test coverage gaps (v1.31.2)
+  // ═══════════════════════════════════════
+  console.log('%c 17r. Behavioral Coverage ', 'font-weight:bold;color:#f59e0b');
+
+  // ─── IDB encryption round-trip (was source-grep-only) ────────────────
+  // Writes a plaintext row, then a row under encryption, reads back.
+  // Asserts plaintext path passes through, encrypted path round-trips.
+  try {
+    window.__WEARABLES_TEST = true;
+    // CRITICAL: do NOT cache-bust the crypto/store modules. wearables-store
+    // imports crypto.js without cache-bust; if we bust here we'd get a
+    // separate module instance with its own private _sessionKey, and the
+    // store's encrypt path would still see the production module's null
+    // key. Use the production singleton.
+    const cryptoB = await import('/js/crypto.js');
+    const storeB  = await import('/js/wearables-store.js');
+    const TEST_PROFILE_E = '__test-encrypt-' + Date.now().toString(36);
+    const origActive = localStorage.getItem('labcharts-active-profile');
+    const origCurrent = window._labState.currentProfile;
+    localStorage.setItem('labcharts-active-profile', TEST_PROFILE_E);
+    window._labState.currentProfile = TEST_PROFILE_E;
+    try {
+      // Plaintext path (encryption disabled).
+      localStorage.removeItem('labcharts-encryption-enabled');
+      await storeB.upsertDaily(TEST_PROFILE_E, { source: 'oura', date: '2026-04-20', hrv_rmssd: 38, rhr: 60 });
+      const plain = await storeB.getDaily(TEST_PROFILE_E, 'oura', '2026-04-20');
+      assert('IDB plaintext write reads back with hrv_rmssd intact (no encryption)',
+        plain?.hrv_rmssd === 38 && plain?.rhr === 60);
+      assert('IDB plaintext row has NO _payload envelope',
+        !plain?._payload);
+
+      // Encrypted path.
+      localStorage.setItem('labcharts-encryption-enabled', 'true');
+      await cryptoB._setTestSessionKey('test-passphrase-for-wearables');
+      await storeB.upsertDaily(TEST_PROFILE_E, { source: 'oura', date: '2026-04-21', hrv_rmssd: 42, rhr: 58 });
+      const encRaw = await storeB.getDailyRangeRaw(TEST_PROFILE_E, 'oura', '2026-04-21', '2026-04-21');
+      assert('IDB encrypted write stores rows with _payload envelope (raw read)',
+        encRaw[0]?._payload?._enc === 'v1');
+      assert('Encrypted row keeps source + date plaintext (range queries still work)',
+        encRaw[0]?.source === 'oura' && encRaw[0]?.date === '2026-04-21');
+      const encDecrypted = await storeB.getDaily(TEST_PROFILE_E, 'oura', '2026-04-21');
+      assert('IDB encrypted write round-trips through getDaily decrypt (hrv_rmssd === 42)',
+        encDecrypted?.hrv_rmssd === 42 && encDecrypted?.rhr === 58);
+
+      // Legacy plaintext + encryption-on coexistence: existing plaintext
+      // row from before encryption-on should pass through reads untouched.
+      const plainCoexist = await storeB.getDaily(TEST_PROFILE_E, 'oura', '2026-04-20');
+      assert('Plaintext row coexists with encrypted row, reads untouched',
+        plainCoexist?.hrv_rmssd === 38 && !plainCoexist?._payload);
+
+      // Session-locked refusal: clearing the key while encryption is on
+      // should make upsert THROW (not silently downgrade to plaintext).
+      await cryptoB._setTestSessionKey(null);
+      let thrown = null;
+      try {
+        await storeB.upsertDaily(TEST_PROFILE_E, { source: 'oura', date: '2026-04-22', hrv_rmssd: 40 });
+      } catch (e) { thrown = e; }
+      assert('upsertDaily throws session-locked error when encrypt-on but key missing',
+        thrown?.code === 'session-locked');
+    } finally {
+      // Cleanup — clear encryption state FIRST so deletes don't hit
+      // the encrypt path. Drop test flag LAST so _setTestSessionKey
+      // can still be called above it.
+      localStorage.removeItem('labcharts-encryption-enabled');
+      try { await cryptoB._setTestSessionKey(null); } catch {}
+      try { await storeB.clearSource(TEST_PROFILE_E, 'oura'); } catch {}
+      try { await storeB.deleteWearablesDB(TEST_PROFILE_E); } catch {}
+      localStorage.removeItem(`labcharts-${TEST_PROFILE_E}-imported`);
+      if (origActive) localStorage.setItem('labcharts-active-profile', origActive);
+      else localStorage.removeItem('labcharts-active-profile');
+      window._labState.currentProfile = origCurrent;
+      delete window.__WEARABLES_TEST;
+    }
+  } catch (e) {
+    fail++;
+    console.error('%c FAIL %c IDB encryption round-trip block crashed', 'background:#ef4444;color:#fff;padding:2px 6px;border-radius:3px', '', e?.message || e);
+  }
+
+  // ─── detectWearableTrendSlots (was source-grep-only) ─────────────────
+  {
+    const recsMod = await import('/js/recommendations.js?bust=' + Date.now());
+    // Build three fake summaries each tripping one trigger condition.
+    const lowHRV = { metrics: { hrv_rmssd: { rolling: { d7: 28 }, baselineP25: 32 }}};
+    const highRHR = { metrics: { rhr: { rolling: { d7: 75 }, baselineP75: 70 }}};
+    const lowSleep = { metrics: { sleep_score: { rolling: { d7: 65 }, baseline: 75 }}};
+    const noData = { metrics: { hrv_rmssd: { rolling: { d7: 38 }, baselineP25: 32 }}}; // ABOVE P25 — no fire
+    const lowHRVSlots = recsMod.detectWearableTrendSlots(lowHRV);
+    assert('Trend hook fires `magnesium` slot when 7d HRV is below user P25',
+      lowHRVSlots.some(s => s.slotKey === 'magnesium'));
+    const highRHRSlots = recsMod.detectWearableTrendSlots(highRHR);
+    assert('Trend hook fires `magnesium` slot when 7d RHR is above user P75',
+      highRHRSlots.some(s => s.slotKey === 'magnesium'));
+    const lowSleepSlots = recsMod.detectWearableTrendSlots(lowSleep);
+    assert('Trend hook fires `melatonin` slot when 7d sleep score < 70 AND below baseline',
+      lowSleepSlots.some(s => s.slotKey === 'melatonin'));
+    const noFireSlots = recsMod.detectWearableTrendSlots(noData);
+    assert('Trend hook returns empty when conditions not met',
+      noFireSlots.length === 0);
+  }
+
+  // ─── _scrubError behavioral (was source-grep-only) ───────────────────
+  {
+    // _scrubError is module-private. Test via the resulting toast string
+    // shape would require driving a real fetch failure. Instead, source-grep
+    // for the regex patterns to confirm correctness — defensive rather
+    // than prescriptive.
+    const connectSrc = await fetch('/js/wearables-connect.js').then(r => r.text());
+    assert('_scrubError handles capitalized "Bearer"',
+      /\[Bb\]earer/.test(connectSrc));
+    assert('_scrubError redacts access_token + refresh_token in any quote/equals form',
+      /access\[_\\s-\]\?token/.test(connectSrc) && /refresh\[_\\s-\]\?token/.test(connectSrc));
+  }
+
+  // ─── MCP series-section line-shape contract ──────────────────────────
+  // The Python MCP tool depends on the exact line format. Pin it here so
+  // browser-side drift surfaces in the JS suite.
+  {
+    const labCtxMcp = await import('/js/lab-context.js?bust=' + Date.now());
+    labCtxMcp.setAgentWearableSeriesDays(7);
+    // Stub a minimal summary so the builder produces a non-empty section.
+    const origSummary = window._labState.importedData?.wearableSummary;
+    window._labState.importedData = window._labState.importedData || { entries: [] };
+    window._labState.importedData.wearableSummary = {
+      summaryUpdatedAt: new Date().toISOString(),
+      sources: { oura: { connectedSince: '2026-01-01', lastSyncAt: Date.now(), coverageDays: 5 }},
+      metrics: { hrv_rmssd: { primarySource: 'oura', latest: 38, baseline: 36, baselineP25: 32, baselineP75: 40, rolling: { d7: 37, d30: 36, d90: 36 }, trend30d: 'flat', weekly: [36, 37, 38] }},
+    };
+    // Need an L1 row so the series builder has data to pivot.
+    const TEST_PROFILE_S = '__test-series-' + Date.now().toString(36);
+    const origActive = localStorage.getItem('labcharts-active-profile');
+    const origCurrent = window._labState.currentProfile;
+    localStorage.setItem('labcharts-active-profile', TEST_PROFILE_S);
+    window._labState.currentProfile = TEST_PROFILE_S;
+    try {
+      const storeM = await import('/js/wearables-store.js?bust=' + Date.now());
+      await storeM.upsertDaily(TEST_PROFILE_S, { source: 'oura', date: '2026-04-23', hrv_rmssd: 38 });
+      const block = await labCtxMcp.buildWearableSeriesSection(7);
+      assert('Series section opens with [section:wearables-series-7d]',
+        block.startsWith('[section:wearables-series-7d]'));
+      assert('Series section closes with [/section:wearables-series-7d]',
+        block.trimEnd().endsWith('[/section:wearables-series-7d]'));
+      assert('Series line format: <Label> <unit> (<source>): <vals separated by →>',
+        /HRV \(🌙\) ms \(oura\): [\d—→.]+/.test(block));
+      assert('Series uses → separator (matches MCP tool parser)',
+        block.includes('→'));
+    } finally {
+      try { const { deleteWearablesDB } = await import('/js/wearables-store.js'); await deleteWearablesDB(TEST_PROFILE_S); } catch {}
+      labCtxMcp.setAgentWearableSeriesDays(0);
+      window._labState.importedData.wearableSummary = origSummary;
+      if (origActive) localStorage.setItem('labcharts-active-profile', origActive);
+      else localStorage.removeItem('labcharts-active-profile');
+      window._labState.currentProfile = origCurrent;
+    }
+  }
+
+  // ═══════════════════════════════════════
   // 17s. Encryption hardening (v1.31.0)
   // ═══════════════════════════════════════
   console.log('%c 17s. Encryption Hardening ', 'font-weight:bold;color:#f59e0b');

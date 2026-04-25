@@ -5,6 +5,18 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.31.2', date: '2026-04-25', title: 'Behavioral test coverage — encryption round-trip, trend hooks, MCP series format',
+    items: [
+      '<b>No user-visible change.</b> Test-only commit closing the audit\'s coverage gaps. Behavioral round-trip tests now drive the IDB encrypt/decrypt path end-to-end (write→read with encryption on, plaintext coexistence after enable, session-locked refusal). Trend-detection hooks (HRV/RHR/sleep) tested with synthetic summaries instead of just source-grep. MCP series-section line format pinned (the parser on the agent side depends on it). Total wearable assertions: 446 → 463 in test-wearables.js, 652 across 5 files.',
+    ]
+  },
+  {
+    version: '1.31.1', date: '2026-04-25', title: 'Wearables UX/copy + correctness polish from final audit',
+    items: [
+      'Six small fixes from the final audit pass: changelog "via {vendor}" placeholder → "via Oura / via Fitbit"; "we\'re waiting" → single-maintainer voice; settings panel title "Wearable Integrations" → "Connected devices"; encryption status copy now lists "wearable history"; openSettingsModal redirects legacy <code>integrations</code> tab id; detail-modal focus trap explicitly uninstalls on close. MCP <code>getbased_wearables_series</code> alias table fixed for the paren-glyph label format (was returning "Metric not found" for <code>hrv_rmssd</code>, the headline metric).',
+    ]
+  },
+  {
     version: '1.31.0', date: '2026-04-25', title: 'Encryption hardening — disable + passphrase change now walk wearable storage',
     items: [
       '<b>Disabling encryption rewrites every wearable row in plaintext first.</b> Was leaving wrapped rows in storage that could never be decrypted again — strip silently went blank.',
