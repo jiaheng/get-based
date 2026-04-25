@@ -3987,6 +3987,14 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
 .wearable-niche-summary::-webkit-details-marker { display: none; }
 .wearable-niche-summary:hover { color: var(--text-primary); }
 .wearable-niche-disclosure[open] .wearable-niche-summary { margin-bottom: 8px; }
+/* Niche cards live inside the <details>, not the parent grid, so they need
+   their own grid track or they collapse to a stacked list of full-width
+   cards (the v1.30.0 launch regression). Mirror the parent track. */
+.wearable-niche-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
 .wearable-strip-meta {
   display: flex; align-items: center; gap: 12px;
   font-size: 12px; color: var(--text-muted);

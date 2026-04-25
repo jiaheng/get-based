@@ -1574,11 +1574,22 @@ return (async function() {
   assert('Reorder mode shows a banner pill in the header',
     /wearable-strip-reorder-pill/.test(wearablesSrc2));
 
-  // P1-8: niche-card disclosure
-  assert('cardio_age + resilience_level are deferred to a "More" disclosure by default',
-    /STRIP_NICHE_METRICS\s*=\s*new Set\(\[\s*'cardio_age',\s*'resilience_level'/.test(wearablesSrc2));
+  // P1-8: niche-card disclosure. v1.30.1 lifted cardio_age out — it's
+  // interesting enough to surface inline; resilience_level (1-5 enum) is
+  // the only metric users found truly opaque, so it's the lone niche today.
+  assert('resilience_level is deferred to a "More" disclosure by default',
+    /STRIP_NICHE_METRICS\s*=\s*new Set\(\[\s*'resilience_level'\s*\]\)/.test(wearablesSrc2));
+  assert('cardio_age renders inline (no longer in STRIP_NICHE_METRICS)',
+    !/STRIP_NICHE_METRICS[\s\S]{0,80}'cardio_age'/.test(wearablesSrc2));
   assert('Disclosure renders only when at least one niche metric is deferred',
     /nicheDeferred\.length\s*>\s*0/.test(wearablesSrc2));
+  // v1.30.1 niche-grid layout fix: cards inside the disclosure go in a
+  // nested grid so they reflow side-by-side instead of stacking full-width.
+  assert('Niche disclosure wraps deferred cards in .wearable-niche-grid',
+    /wearable-niche-grid/.test(wearablesSrc2));
+  const stylesSrc = await fetch('/styles.css').then(r => r.text());
+  assert('.wearable-niche-grid uses the same auto-fit track as the main strip grid',
+    /\.wearable-niche-grid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(220px,\s*1fr\)\)/.test(stylesSrc));
 
   // ═══════════════════════════════════════
   // 17. Day/night HRV + RHR canonicals (v1.25.0)

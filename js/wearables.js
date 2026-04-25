@@ -335,10 +335,12 @@ export function renderWearableStrip() {
   // Daytime companions live in the detail modal as sub-stats, not as their
   // own cards — keeps the strip calm at 6-8 cards instead of 10.
   const STRIP_HIDDEN_METRICS = new Set(['hrv_day', 'hr_day']);
-  // Niche signals (Oura's vendor-proprietary scores) are collapsed under a
-  // "More" disclosure unless the user has reordered them up. Most users won't
-  // know what 1/5 resilience or "37 years vascular age" means at a glance.
-  const STRIP_NICHE_METRICS = new Set(['cardio_age', 'resilience_level']);
+  // Niche signals (Oura's vendor-proprietary 1/5 scores) collapse under a
+  // "More" disclosure unless the user has reordered them up. cardio_age
+  // (vascular-age estimate) used to live here too but it's interesting
+  // enough at a glance to keep inline; resilience_level (1-5 enum) is the
+  // only one users find truly opaque.
+  const STRIP_NICHE_METRICS = new Set(['resilience_level']);
   const displayOrder = [];
   const seenDisplay = new Set();
   for (const id of baseMetricOrder) {
@@ -463,7 +465,7 @@ export function renderWearableStrip() {
   // them dominating the strip.
   if (nicheDeferred.length > 0) {
     const nicheLabels = nicheDeferred.map(d => canonicalMetric(d.id)?.label || d.id).join(' · ');
-    html += `<details class="wearable-niche-disclosure"><summary class="wearable-niche-summary" aria-label="Show ${escapeHTML(nicheDeferred.length === 1 ? '1 vendor-specific score' : nicheDeferred.length + ' vendor-specific scores')}: ${escapeHTML(nicheLabels)}">+ ${nicheDeferred.length} vendor-specific ${nicheDeferred.length === 1 ? 'score' : 'scores'} (${escapeHTML(nicheLabels)})</summary>`;
+    html += `<details class="wearable-niche-disclosure"><summary class="wearable-niche-summary" aria-label="Show ${escapeHTML(nicheDeferred.length === 1 ? '1 vendor-specific score' : nicheDeferred.length + ' vendor-specific scores')}: ${escapeHTML(nicheLabels)}">+ ${nicheDeferred.length} vendor-specific ${nicheDeferred.length === 1 ? 'score' : 'scores'} (${escapeHTML(nicheLabels)})</summary><div class="wearable-niche-grid">`;
     for (const { id: metricId, empty } of nicheDeferred) {
       const canon = canonicalMetric(metricId);
       if (!canon) continue;
@@ -472,7 +474,7 @@ export function renderWearableStrip() {
       if (!metric) continue;
       html += renderCard(metricId, canon, metric, showSourceBadges);
     }
-    html += `</details>`;
+    html += `</div></details>`;
   }
 
   html += `</div>`;
