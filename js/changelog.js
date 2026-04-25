@@ -5,6 +5,12 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.25.1', date: '2026-04-25', title: 'Fix: Oura daytime HR backfill now populates the full 90 days',
+    items: [
+      'The v1.25.0 daytime-HR work fetched Oura\'s <code>heartrate</code> endpoint with a 90-day window in one shot — but the endpoint caps each query at 30 days and quietly returns 400. The error was swallowed and the backfill silently produced rows with no daytime HR. Now chunked into 29-day slices so a 90-day backfill actually populates <i>Daytime HR</i> for every day. <b>Re-sync Oura once</b> via Settings → Integrations → Oura → <i>Re-sync last 90 days</i>.',
+    ]
+  },
+  {
     version: '1.25.0', date: '2026-04-25', title: 'Daytime HRV + heart rate, alongside overnight',
     items: [
       '<b>Wearable adapters now distinguish overnight from daytime HRV / RHR.</b> Until today, every adapter dumped whatever signal the vendor calls "daily HRV" into one slot — but Oura/WHOOP/Fitbit measure overnight rMSSD during sleep, while Polar measures workout HRV during exercise, and Withings reports a daytime spot pulse from the scale. Same slot, three different numbers. v1.25.0 splits them.',

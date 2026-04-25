@@ -871,6 +871,17 @@ return (async function() {
   // ═══════════════════════════════════════
   console.log('%c 17. Day/Night HRV+RHR ', 'font-weight:bold;color:#f59e0b');
 
+  // Oura's heartrate endpoint caps queries at 30 days per request — anything
+  // larger 400s with "Timerange ... has to be less than or equal to 30 days".
+  // The v1.25.0 backfill silently swallowed that error; v1.25.1 chunks the
+  // request via ouraCollectHeartrate. Pin the chunking call site so a future
+  // refactor can't accidentally revert to a single-shot fetch.
+  const ouraSrc = await fetch('/js/wearables-oura.js').then(r => r.text());
+  assert('Oura uses ouraCollectHeartrate (chunks 90d window into ≤30d slices)',
+    /ouraCollectHeartrate\(accessToken,\s*startDt,\s*endDt\)/.test(ouraSrc));
+  assert('ouraCollectHeartrate splits the window in 29-day chunks (under the 30d cap)',
+    /CHUNK_MS\s*=\s*29\s*\*\s*24/.test(ouraSrc));
+
   // Per-vendor adapter declarations: every adapter that has a day-window
   // signal we know how to harvest must declare it. Conversely, vendors with
   // no day signal yet (Fitbit hr_day, Apple Health hr_day) must NOT declare

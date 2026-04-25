@@ -58,6 +58,33 @@ async function ouraCollect(path, accessToken, params) {
   return all;
 }
 
+// Heartrate endpoint caps the time range at 30 days per request — anything
+// larger gets a 400 "Timerange ... has to be less than or equal to 30 days".
+// Walk the requested window in 30-day chunks and concatenate.
+async function ouraCollectHeartrate(accessToken, startDt, endDt) {
+  const out = [];
+  const startMs = Date.parse(startDt);
+  const endMs   = Date.parse(endDt);
+  if (!isFinite(startMs) || !isFinite(endMs) || endMs <= startMs) return out;
+  const CHUNK_MS = 29 * 24 * 60 * 60 * 1000; // 29d to stay safely under the 30d cap
+  let cursor = startMs;
+  while (cursor < endMs) {
+    const chunkEnd = Math.min(cursor + CHUNK_MS, endMs);
+    const params = {
+      start_datetime: new Date(cursor).toISOString().replace(/\.\d+Z$/, 'Z'),
+      end_datetime:   new Date(chunkEnd).toISOString().replace(/\.\d+Z$/, 'Z'),
+    };
+    try {
+      const samples = await ouraCollect('v2/usercollection/heartrate', accessToken, params);
+      out.push(...samples);
+    } catch (e) {
+      logDebug('heartrate-chunk', e);
+    }
+    cursor = chunkEnd + 1; // +1ms to avoid duplicating the boundary sample
+  }
+  return out;
+}
+
 // ─────────────────────────────────────────────────────────
 // Account info (replaces the PAT-era verifyOuraPAT)
 // ─────────────────────────────────────────────────────────
@@ -119,9 +146,10 @@ export async function fetchOuraDailyRange(accessToken, startDate, endDate) {
   // Fetch collections in parallel — independent endpoints. New (daily_activity,
   // daily_stress, daily_resilience, daily_cardiovascular_age) are covered by
   // the `daily` scope we already request, so no reconnect needed for them.
-  // heartrate samples are large (5-min granularity = 288/day). Use a
-  // start_datetime/end_datetime ISO range so Oura returns awake-tagged
-  // samples we can use to derive `hr_day`.
+  // heartrate samples are large (5-min granularity = 288/day) AND Oura caps
+  // the endpoint at 30 days per request. ouraCollectHeartrate chunks the
+  // requested window in 29-day slices and concatenates the awake-tagged
+  // samples so a 90-day backfill actually returns data instead of 400-ing.
   const startDt = `${startDate}T00:00:00Z`;
   const endDt   = `${endDate}T23:59:59Z`;
 
@@ -138,7 +166,7 @@ export async function fetchOuraDailyRange(accessToken, startDate, endDate) {
     ouraCollect('v2/usercollection/daily_stress',             accessToken, params).catch(e => { logDebug('daily_stress', e); return []; }),
     ouraCollect('v2/usercollection/daily_resilience',         accessToken, params).catch(e => { logDebug('daily_resilience', e); return []; }),
     ouraCollect('v2/usercollection/daily_cardiovascular_age', accessToken, params).catch(e => { logDebug('daily_cardiovascular_age', e); return []; }),
-    ouraCollect('v2/usercollection/heartrate', accessToken, { start_datetime: startDt, end_datetime: endDt })
+    ouraCollectHeartrate(accessToken, startDt, endDt)
       .catch(e => { logDebug('heartrate', e); return []; }),
   ]);
 
