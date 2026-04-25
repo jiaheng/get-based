@@ -67,11 +67,11 @@ export const CANONICAL_METRICS = {
   // auto-hides them for everyone else.
   pwv:                { id: 'pwv',                label: 'PWV',          sub: '',      unit: 'm/s',   worseWhen: 'up'     }, // pulse wave velocity — vascular stiffness; preferred over Withings' computed Vascular Age
   body_fat_pct:       { id: 'body_fat_pct',       label: 'Body fat',     sub: '',      unit: '%',     worseWhen: 'up'     },
-  muscle_mass_kg:     { id: 'muscle_mass_kg',     label: 'Muscle',       sub: 'mass',  unit: 'kg',    worseWhen: 'down'   },
-  lean_mass_kg:       { id: 'lean_mass_kg',       label: 'Lean',         sub: 'mass',  unit: 'kg',    worseWhen: 'down'   }, // fat-free mass — distinct from muscle (Withings reports both)
-  bone_mass_kg:       { id: 'bone_mass_kg',       label: 'Bone',         sub: 'mass',  unit: 'kg',    worseWhen: 'down'   },
-  water_mass_kg:      { id: 'water_mass_kg',      label: 'Water',        sub: 'mass',  unit: 'kg',    worseWhen: 'either' }, // hydration — too high or too low both bad
-  visceral_fat:       { id: 'visceral_fat',       label: 'Visceral fat', sub: 'index', unit: '',      worseWhen: 'up'     }, // Withings 1-30 score
+  muscle_mass_kg:     { id: 'muscle_mass_kg',     label: 'Muscle',       sub: '',      unit: 'kg',    worseWhen: 'down'   },
+  lean_mass_kg:       { id: 'lean_mass_kg',       label: 'Lean mass',    sub: '',      unit: 'kg',    worseWhen: 'down',  ariaLabel: 'Lean (fat-free) mass' }, // distinct from muscle — Withings reports both
+  bone_mass_kg:       { id: 'bone_mass_kg',       label: 'Bone',         sub: '',      unit: 'kg',    worseWhen: 'down'   },
+  water_mass_kg:      { id: 'water_mass_kg',      label: 'Water',        sub: '',      unit: 'kg',    worseWhen: 'either' }, // hydration — too high or too low both bad
+  visceral_fat:       { id: 'visceral_fat',       label: 'Visceral fat', sub: '',      unit: '',      worseWhen: 'up'     }, // Withings 1-30 score
   nerve_health_score: { id: 'nerve_health_score', label: 'Nerve health', sub: 'score', unit: '',      worseWhen: 'down'   }, // Body Scan peripheral-nerve activity
 };
 

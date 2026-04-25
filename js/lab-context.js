@@ -804,10 +804,11 @@ export function buildWearableContext(importedData) {
   const maxCov = Math.max(0, ...sourceNames.map(s => summary.sources[s].coverageDays || 0));
   const lines = [`## Wearables (${sourceNames.join(' + ')}, ${maxCov}d coverage)`];
 
-  // Body composition cluster (#143). Eight Withings Body Scan metrics —
-  // emitting them as one roll-up line saves ~150 tokens vs eight per-metric
-  // lines, and AI tools reason about body comp holistically anyway. The
-  // detail modal still drills each metric individually.
+  // Body composition cluster (#143). Seven Withings Body Scan metrics —
+  // emitting them as one roll-up line saves ~75 tokens vs seven per-metric
+  // lines (measured: 401 → 96 bytes for a typical user), and AI tools
+  // reason about body comp holistically anyway. The detail modal still
+  // drills each metric individually.
   const BODY_COMP_KEYS = ['body_fat_pct', 'muscle_mass_kg', 'lean_mass_kg', 'bone_mass_kg', 'water_mass_kg', 'visceral_fat', 'nerve_health_score'];
   const bodyCompPresent = BODY_COMP_KEYS.filter(k => summary.metrics[k]);
 

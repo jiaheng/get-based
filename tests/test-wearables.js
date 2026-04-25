@@ -655,6 +655,17 @@ return (async function() {
   for (const id of ['pwv', 'body_fat_pct', 'muscle_mass_kg', 'lean_mass_kg', 'bone_mass_kg', 'water_mass_kg', 'visceral_fat', 'nerve_health_score']) {
     assert(`CANONICAL_METRICS includes '${id}'`, !!reg.canonicalMetric(id));
   }
+  // Card label polish — body comp metrics shouldn't carry a redundant
+  // 'mass' or 'index' sub. The label itself already disambiguates.
+  for (const id of ['muscle_mass_kg', 'bone_mass_kg', 'water_mass_kg', 'visceral_fat', 'body_fat_pct']) {
+    assert(`${id} card sub is empty (no redundant noise)`, reg.canonicalMetric(id)?.sub === '');
+  }
+  // Lean mass keeps a label distinct from Muscle so the strip can show
+  // both side-by-side without ambiguity. Aria-label disambiguates further.
+  assert('lean_mass_kg label reads "Lean mass" not just "Lean"',
+    reg.canonicalMetric('lean_mass_kg')?.label === 'Lean mass');
+  assert('lean_mass_kg has aria-label clarifying "fat-free"',
+    /fat-free/i.test(reg.canonicalMetric('lean_mass_kg')?.ariaLabel || ''));
 
   const withingsFetcher = await import('../js/wearables-withings.js');
   assert('fetchWithingsDailyRange exists', typeof withingsFetcher.fetchWithingsDailyRange === 'function');
