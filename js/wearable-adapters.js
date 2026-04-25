@@ -29,18 +29,20 @@
 
 export const CANONICAL_METRICS = {
   // Sleep-window: rMSSD computed during the main sleep period (gold-standard
-  // recovery signal — what Oura/WHOOP/Fitbit "daily HRV" actually is).
-  hrv_rmssd:        { id: 'hrv_rmssd',        label: 'HRV',         sub: 'overnight', unit: 'ms', worseWhen: 'down'   },
+  // recovery signal — what Oura/WHOOP/Fitbit "daily HRV" actually is). The
+  // 🌙 sub-glyph signals the window without adding a noisy English word.
+  hrv_rmssd:        { id: 'hrv_rmssd',        label: 'HRV',         sub: '🌙',        unit: 'ms', worseWhen: 'down'   },
   hrv_sdnn:         { id: 'hrv_sdnn',         label: 'HRV',         sub: 'SDNN',      unit: 'ms', worseWhen: 'down'   }, // Apple Health (deep HRV)
   // Waking-window: HRV measured during the day. Tracks acute stress / load
   // reactivity, distinct from overnight recovery. Most vendors expose this
   // separately (Oura daily_stress, WHOOP recovery, Apple awake-window samples).
-  hrv_day:          { id: 'hrv_day',          label: 'HRV',         sub: 'daytime',   unit: 'ms', worseWhen: 'down'   },
-  rhr:              { id: 'rhr',              label: 'Resting HR',  sub: 'overnight', unit: 'bpm', worseWhen: 'up'     },
+  hrv_day:          { id: 'hrv_day',          label: 'HRV',         sub: '☀️',        unit: 'ms', worseWhen: 'down'   },
+  // "Resting HR" already implies overnight to most users — no sub-label noise.
+  rhr:              { id: 'rhr',              label: 'Resting HR',  sub: '',          unit: 'bpm', worseWhen: 'up'     },
   // Daytime average HR (NOT resting). Captures activity / stress load. Polar
   // and Withings naturally expose this; Oura/WHOOP/Fitbit derive it from
   // intraday or activity streams.
-  hr_day:           { id: 'hr_day',           label: 'Heart rate',  sub: 'daytime',   unit: 'bpm', worseWhen: 'either' },
+  hr_day:           { id: 'hr_day',           label: 'Heart rate',  sub: '☀️',        unit: 'bpm', worseWhen: 'either' },
   sleep_score:      { id: 'sleep_score',      label: 'Sleep',       sub: 'score', unit: '',      worseWhen: 'down'   },
   readiness_score:  { id: 'readiness_score',  label: 'Readiness',   sub: 'score', unit: '',      worseWhen: 'down'   },
   activity_score:   { id: 'activity_score',   label: 'Activity',    sub: 'score', unit: '',      worseWhen: 'down'   },
@@ -52,8 +54,8 @@ export const CANONICAL_METRICS = {
   // Biometric-rooted canonicals (Withings scale/BP cuff, etc.) — these overlap
   // with manual biometrics entries; Phase 3 will decide on a merge policy.
   weight:           { id: 'weight',           label: 'Weight',      sub: '',      unit: 'kg',    worseWhen: 'either' },
-  bp_systolic:      { id: 'bp_systolic',      label: 'BP',          sub: 'syst',  unit: 'mmHg',  worseWhen: 'up'     },
-  bp_diastolic:     { id: 'bp_diastolic',     label: 'BP',          sub: 'dia',   unit: 'mmHg',  worseWhen: 'up'     },
+  bp_systolic:      { id: 'bp_systolic',      label: 'BP',          sub: 'syst',  unit: 'mmHg',  worseWhen: 'up',    ariaLabel: 'Blood pressure systolic' },
+  bp_diastolic:     { id: 'bp_diastolic',     label: 'BP',          sub: 'dia',   unit: 'mmHg',  worseWhen: 'up',    ariaLabel: 'Blood pressure diastolic' },
   // Canonical extras — adapters opt in by mapping to them
   spo2_avg:         { id: 'spo2_avg',         label: 'SpO₂',        sub: '',      unit: '%',     worseWhen: 'down'   },
   body_temp_delta:  { id: 'body_temp_delta',  label: 'Body temp',   sub: 'Δ',     unit: '°C',    worseWhen: 'either' },

@@ -210,6 +210,9 @@ export function openSettingsModal(tab) {
   loadBackupSnapshots();
   loadSettingsCommitHash();
   if (isSyncEnabled()) { loadMnemonic(); updateRelayStatus(); }
+  // Always fire so wearables Manual-row reading counts populate on first paint
+  // (whether the user lands on the Integrations tab or switches into it).
+  document.dispatchEvent(new CustomEvent('settings:wearables-rendered'));
 }
 
 function loadSettingsCommitHash() {
@@ -252,6 +255,11 @@ export function switchSettingsTab(tabId) {
   if (tabId === 'data') {
     refreshDataEntriesSection();
     loadBackupSnapshots();
+  }
+  if (tabId === 'integrations') {
+    // Notify the wearables module so it can populate the Manual-row reading
+    // counts on first paint, not just on details-toggle.
+    document.dispatchEvent(new CustomEvent('settings:wearables-rendered'));
   }
 }
 

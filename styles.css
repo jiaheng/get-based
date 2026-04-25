@@ -365,7 +365,16 @@ body {
   font-size: 14px; color: var(--text-secondary); line-height: 1.5;
 }
 .changelog-item::before { content: '–'; position: absolute; left: 0; color: var(--accent); font-weight: 600; }
-.modal .modal-unit { color: var(--text-muted); font-size: 14px; margin-bottom: 8px; }
+.modal .modal-unit {
+  color: var(--text-muted); font-size: 14px; margin-bottom: 8px;
+  /* Source-name + delta + trend separated by middle-dots; let them wrap
+     gracefully on narrow viewports rather than overflow the modal box. */
+  display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center;
+}
+.modal .wearable-modal-source-swap {
+  margin-left: auto;
+  font-size: 11px;
+}
 .ref-editable { cursor: pointer; border-bottom: 1px dashed var(--text-muted); padding-bottom: 1px; }
 .ref-editable:hover { color: var(--accent); border-color: var(--accent); }
 .ref-edit-field { display: inline-flex; align-items: center; position: relative; }
@@ -3881,7 +3890,15 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 14px 16px 12px;
+  /* On mobile the chat + import FABs sit at the bottom-right and overlap the
+     last strip card. Reserve enough bottom margin so the FABs don't obscure
+     readings. (Desktop FAB is smaller and the strip isn't bottom-anchored.) */
   box-shadow: var(--shadow);
+}
+@media (max-width: 600px) {
+  .wearable-strip {
+    margin-bottom: 80px; /* room for chat FAB + import FAB stacked */
+  }
 }
 .wearable-strip-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -3903,6 +3920,60 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
   padding: 2px 7px; border-radius: 8px;
   border: 1px solid rgba(251, 191, 36, 0.25);
 }
+/* Reorder-mode banner — visible cue that the strip is in arrange-mode so the
+   user knows the ◀ ▶ arrows are intentional, not accidental. */
+.wearable-strip-reorder-pill {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.02em;
+  background: var(--accent-bg, rgba(96, 165, 250, 0.12)); color: var(--accent, #60a5fa);
+  padding: 3px 9px; border-radius: 8px;
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  white-space: nowrap;
+}
+/* Grid tint while reordering — a subtle accent so it's obviously different. */
+.wearable-card-grid-reorder {
+  background: var(--accent-bg, rgba(96, 165, 250, 0.04));
+  border-radius: 14px;
+  padding: 8px;
+  margin: -8px;
+  outline: 1px dashed rgba(96, 165, 250, 0.25);
+}
+/* Apple Health export how-to disclosure — long instructions live behind a
+   "How to export from your iPhone" summary so the dropzone is the headline. */
+.apple-health-howto { margin: 6px 0 8px; cursor: pointer; }
+.apple-health-howto > summary {
+  font-weight: 500; color: var(--text-primary); padding: 4px 0;
+  list-style: none;
+}
+.apple-health-howto > summary::-webkit-details-marker { display: none; }
+.apple-health-howto > summary::before {
+  content: "▸ "; color: var(--text-muted);
+}
+.apple-health-howto[open] > summary::before { content: "▾ "; }
+.apple-health-howto ol {
+  margin: 6px 0 8px 18px; padding: 0; color: var(--text-muted);
+}
+.apple-health-howto ol li { margin-bottom: 4px; }
+.apple-health-privacy { font-style: italic; color: var(--text-muted); margin: 6px 0 0; }
+
+/* "More" disclosure for niche cards (cardio_age, resilience_level) — keeps
+   the primary strip calm at 6-8 cards while leaving the data accessible. */
+.wearable-niche-disclosure {
+  grid-column: 1 / -1;
+  margin-top: 6px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.06);
+  padding-top: 6px;
+}
+.wearable-niche-summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-muted);
+  list-style: none;
+  padding: 4px 0;
+  user-select: none;
+}
+.wearable-niche-summary::-webkit-details-marker { display: none; }
+.wearable-niche-summary:hover { color: var(--text-primary); }
+.wearable-niche-disclosure[open] .wearable-niche-summary { margin-bottom: 8px; }
 .wearable-strip-meta {
   display: flex; align-items: center; gap: 12px;
   font-size: 12px; color: var(--text-muted);
@@ -4160,6 +4231,15 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
 .wearable-unit {
   font-size: 12px; color: var(--text-muted); font-weight: 500;
 }
+/* Tight unit hugs the value with no separating space — used for "/5" and
+   similar prefix-slash units so "1/5" reads as one token, not "1 /5". */
+.wearable-unit-tight {
+  margin-left: 0 !important;
+}
+.wearable-value-row .wearable-unit-tight {
+  /* Value-row default has flex gap; tight unit cancels it. */
+  margin-left: -4px !important;
+}
 .wearable-baseline {
   margin-left: auto; font-size: 10px; color: var(--text-muted);
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
@@ -4209,13 +4289,28 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
   min-width: 0; max-width: 100%;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* On narrow viewports the badge is large enough that all-caps reads as
+   shouty next to the lowercase metric labels — switch to title-case + a
+   slightly larger size so it sits more naturally. */
+@media (max-width: 600px) {
+  .wearable-source-badge {
+    font-size: 10px;
+    text-transform: none;
+    letter-spacing: 0.01em;
+  }
+}
 
 .wearable-strip-footer {
   margin-top: 10px; padding-top: 8px;
   border-top: 1px dashed var(--border);
   font-size: 11px; color: var(--text-muted); font-style: italic;
+  display: flex; flex-wrap: wrap; gap: 4px 14px;
 }
 .wearable-strip-footer.hidden { display: none; }
+.wearable-strip-footer-note { display: inline-block; }
+.wearable-strip-footer-note + .wearable-strip-footer-note::before {
+  content: "·"; margin-right: 14px; opacity: 0.5;
+}
 
 /* ── Wearable detail modal ── */
 .wearable-detail-stats {
@@ -4543,6 +4638,18 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
   border-color: var(--accent); color: var(--accent); background: var(--bg-secondary);
 }
 .wearable-action:disabled { opacity: 0.7; cursor: progress; }
+.wearable-action-secondary {
+  /* "Re-sync 90 days" / disconnect-style actions — heavier than incremental
+     "Sync." Use a softer styling so a routine sync isn't visually identical
+     to a 90-day refetch that hits rate limits and takes 30s+. */
+  font-weight: 400; opacity: 0.8;
+}
+.wearable-action-secondary:hover:not(:disabled) {
+  opacity: 1;
+}
+.wearable-action-hint {
+  font-size: 10px; color: var(--text-muted); margin-left: 4px;
+}
 .wearable-action-icon { flex-shrink: 0; transition: transform 0.2s ease; }
 .wearable-action.is-syncing .wearable-action-icon {
   animation: wearable-spin 0.9s linear infinite;

@@ -291,10 +291,15 @@ return (async function() {
   // can read them, even though they're hidden from the strip cards themselves.
   assert('DEFAULT_METRIC_ORDER includes hrv_day', reg.DEFAULT_METRIC_ORDER.includes('hrv_day'));
   assert('DEFAULT_METRIC_ORDER includes hr_day', reg.DEFAULT_METRIC_ORDER.includes('hr_day'));
-  assert('CANONICAL_METRICS has hrv_day with daytime sub-label', reg.CANONICAL_METRICS.hrv_day?.sub === 'daytime');
-  assert('CANONICAL_METRICS has hr_day with daytime sub-label', reg.CANONICAL_METRICS.hr_day?.sub === 'daytime');
-  assert('CANONICAL_METRICS hrv_rmssd sub-label is overnight', reg.CANONICAL_METRICS.hrv_rmssd?.sub === 'overnight');
-  assert('CANONICAL_METRICS rhr sub-label is overnight', reg.CANONICAL_METRICS.rhr?.sub === 'overnight');
+  // v1.26.0 swapped English sub-labels for sun/moon glyphs to declutter cards.
+  // RHR drops the sub entirely ("Resting" already implies overnight). aria
+  // labels still translate the glyphs back to spoken words.
+  assert('CANONICAL_METRICS has hrv_day with ☀️ sub-glyph', reg.CANONICAL_METRICS.hrv_day?.sub === '☀️');
+  assert('CANONICAL_METRICS has hr_day with ☀️ sub-glyph', reg.CANONICAL_METRICS.hr_day?.sub === '☀️');
+  assert('CANONICAL_METRICS hrv_rmssd sub-glyph is 🌙 (overnight)', reg.CANONICAL_METRICS.hrv_rmssd?.sub === '🌙');
+  assert('CANONICAL_METRICS rhr drops the redundant sub (Resting implies overnight)', reg.CANONICAL_METRICS.rhr?.sub === '');
+  assert('CANONICAL_METRICS bp_systolic carries spoken-aria override', reg.CANONICAL_METRICS.bp_systolic?.ariaLabel === 'Blood pressure systolic');
+  assert('CANONICAL_METRICS bp_diastolic carries spoken-aria override', reg.CANONICAL_METRICS.bp_diastolic?.ariaLabel === 'Blood pressure diastolic');
   assert('Steps is mapped to the same endpoint as activity_score (both from daily_activity)',
     reg.adapterById('oura').metrics.steps.endpoint === reg.adapterById('oura').metrics.activity_score.endpoint);
 
@@ -350,7 +355,12 @@ return (async function() {
   window._labState.importedData.wearableSummary = zeroBaselineSummary;
   const html = window.renderWearableStrip();
   assert('render never emits NaN% on zero baseline', !/NaN/.test(html));
-  assert('render shows dash marker for zero-baseline delta', /→\s*—/.test(html) || /→—/.test(html));
+  // v1.26.0: zero-baseline metrics suppress the delta entirely (was "→ —"),
+  // since "→ —" reads like "we measured something." A missing delta pill is
+  // more honest. Regression guard: ensure no delta pill appears for the
+  // zero-baseline activity_score card.
+  assert('render suppresses delta for zero-baseline activity score',
+    !/wearable-delta[^"]*"[^>]*>\s*[↑↓→]/.test(html));
   delete window._labState.importedData.wearableSummary;
 
   // ── Zero-coverage source: header drops it, footer surfaces "waiting on first sync" ──
@@ -865,6 +875,65 @@ return (async function() {
   const b64 = btoa(String.fromCharCode(...new Uint8Array(hash)));
   const b64url = b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   assert('WebCrypto+base64url yields RFC 7636 challenge', b64url === RFC_CHALLENGE, `got ${b64url}`);
+
+  // ═══════════════════════════════════════
+  // 17a. UX audit follow-ups (v1.26.0)
+  // ═══════════════════════════════════════
+  console.log('%c 17a. UX Audit Fixes ', 'font-weight:bold;color:#f59e0b');
+
+  // P0-1: every populated card carries the source badge whenever ≥2 wearables
+  // are connected. Previously the badge only rendered when ≥2 adapters declared
+  // the SAME metric, which left HRV/Sleep/Steps with no source attribution.
+  const wearablesSrc2 = await fetch('/js/wearables.js').then(r => r.text());
+  assert('Strip passes showSourceBadges (whole-strip flag) into renderCard, not the per-metric provider count',
+    /renderCard\(metricId,\s*canon,\s*metric,\s*showSourceBadges\)/.test(wearablesSrc2));
+  assert('No leftover per-metric providersForMetric.length > 1 gate',
+    !/providersForMetric\.length\s*>\s*1/.test(wearablesSrc2));
+
+  // P0-2/3/4: delta-honesty rules
+  assert('formatDelta accepts metricId so steps can suppress',
+    /function formatDelta\(latest,\s*baseline,\s*metricId\)/.test(wearablesSrc2));
+  assert('formatDelta suppresses delta on steps',
+    /metricId\s*===\s*'steps'\)\s*return\s*''/.test(wearablesSrc2));
+  assert('formatDelta suppresses delta when latest is 0 vs non-trivial baseline',
+    /latest\s*===\s*0\s*&&\s*Math\.abs\(baseline\)\s*>\s*0\.5\)\s*return\s*''/.test(wearablesSrc2));
+  assert('Detail modal mirrors delta-suppression rules',
+    /suppressDelta\s*=[\s\S]*metricId\s*===\s*'steps'/.test(wearablesSrc2));
+
+  // P0-5: source-swap reachable from the detail modal when ≥2 wearables connected
+  assert('Detail modal renders source-swap button when ≥2 wearables connected',
+    /wearable-modal-source-swap/.test(wearablesSrc2));
+
+  // P1-1: glyph subs + RHR drops sub
+  assert('hrv_rmssd uses 🌙 glyph not "overnight" word',
+    reg.CANONICAL_METRICS.hrv_rmssd.sub === '🌙');
+  assert('rhr drops the sub label entirely',
+    reg.CANONICAL_METRICS.rhr.sub === '');
+  assert('aria translates 🌙 → "overnight" and ☀️ → "daytime" for screen readers',
+    /subRead\s*=\s*canon\.sub\s*===\s*'🌙'\s*\?\s*'overnight'/.test(wearablesSrc2) &&
+    /'☀️'\s*\?\s*'daytime'/.test(wearablesSrc2));
+
+  // P1-2: daytime empty-state shortened + tooltip carries the long explanation
+  assert('Daytime-empty state passes a tooltip as the 4th tuple element',
+    /baseStats\.push\(\[[\s\S]{0,200}companionLabel,[\s\S]{0,80}'—',[\s\S]{0,200}`Not from \${sourceDisplay} · why\?`,[\s\S]{0,80}tooltip,/.test(wearablesSrc2));
+  assert('Daytime tooltip references v2 (not the v1 typo)',
+    /v2 API exposes overnight HRV only/.test(wearablesSrc2) && !/v1 API exposes overnight HRV only/.test(wearablesSrc2));
+  assert('Stats grid renders the optional title attribute',
+    /\$\{tooltip\s*\?\s*` title="\$\{escapeHTML\(tooltip\)\}"`/.test(wearablesSrc2));
+
+  // P1-3: BP carries spoken-aria override
+  assert('renderCard prefers canon.ariaLabel over derived label for spoken text',
+    /canon\.ariaLabel\s*\?\s*canon\.ariaLabel/.test(wearablesSrc2));
+
+  // P1-6: reorder-mode banner pill
+  assert('Reorder mode shows a banner pill in the header',
+    /wearable-strip-reorder-pill/.test(wearablesSrc2));
+
+  // P1-8: niche-card disclosure
+  assert('cardio_age + resilience_level are deferred to a "More" disclosure by default',
+    /STRIP_NICHE_METRICS\s*=\s*new Set\(\[\s*'cardio_age',\s*'resilience_level'/.test(wearablesSrc2));
+  assert('Disclosure renders only when at least one niche metric is deferred',
+    /nicheDeferred\.length\s*>\s*0/.test(wearablesSrc2));
 
   // ═══════════════════════════════════════
   // 17. Day/night HRV + RHR canonicals (v1.25.0)

@@ -5,6 +5,24 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.26.0', date: '2026-04-25', title: 'Wearables UX audit — source badges, honest deltas, calmer strip',
+    items: [
+      '<b>Every card shows its source.</b> When ≥2 wearables are connected, every populated card now carries a <i>via X</i> badge so you can see at a glance whether HRV came from Oura, sleep score from Fitbit, weight from Manual. Click any badge to switch source.',
+      '<b>Honest deltas.</b> Steps no longer shows a baseline-delta arrow against an in-progress count (132 vs 997 baseline at 9 AM read like a 87% drop). Stress / activity / any "lower-is-better" metric at zero against a non-zero baseline no longer flashes "↓ 100%". Zero-baseline metrics suppress the delta entirely instead of "→ —".',
+      '<b>Source picker reachable on every card.</b> A <i>via {Source} · swap</i> button now sits in the detail-modal header — previously the source switcher only appeared when ≥2 vendors declared the same metric.',
+      '<b>Subtle sub-labels.</b> "HRV overnight" / "Resting HR overnight" replaced with a 🌙 sun-glyph (overnight) and ☀️ (daytime). Resting HR drops the redundant sub entirely. Screen readers still hear "overnight" / "daytime" via spoken aria.',
+      '<b>Daytime empty-state row tightened.</b> Long per-vendor explanation moves to a hover/tap tooltip; the visible cell reads <i>Not from {Source} · why?</i>',
+      '<b>Niche cards collapsed.</b> Cardio age + Resilience level (Oura proprietary scores) move into a <i>+ 2 more</i> disclosure unless you reorder them up. Strip drops from 12 to 10 cards by default.',
+      '<b>Reorder mode visual cue.</b> An accent banner pill + dashed grid outline make it obvious you\'re in arrange-mode. Button label expanded from <code>⇄</code> to <code>⇄ Reorder</code>.',
+      '<b>Manual-row count populates immediately.</b> The "Counting readings…" placeholder in Settings → Integrations → Manual now resolves on first paint, not just when you toggle the row open.',
+      '<b>Apple Health export instructions are a numbered list</b> behind a <i>How to export from your iPhone</i> disclosure, not a 3-line run-on paragraph.',
+      '<b>"Re-sync last 90 days" looks secondary.</b> The button is softer than the primary <i>Sync</i> action with a "(may take a moment)" hint, since it can hit vendor rate limits and take 30s+.',
+      '<b>BP cards have proper aria.</b> Screen readers now hear <i>"Blood pressure systolic 135 mmHg"</i> instead of <i>"BP syst 135 mmHg"</i>.',
+      '<b>Resilience level "1 /5" gap closed</b> — value + unit now render as a single token, not separated.',
+      '<b>Mobile FAB no longer overlaps the strip</b> (added 80px bottom margin under 600px viewports). Source badge switches from all-caps to title-case at narrow widths so it doesn\'t shout.',
+    ]
+  },
+  {
     version: '1.25.3', date: '2026-04-25', title: 'HRV modal explains why daytime HRV is missing per source',
     items: [
       'When the active HRV source can\'t supply daytime data (Oura/WHOOP overnight-only, Polar workout-only with no recent workouts), the detail modal now shows a <i>Daytime HRV — —</i> row with a per-vendor explanation pointing at sources that would populate it (Apple Health, Fitbit <code>dailyRmssd</code>, Polar workouts). Previously the row was just absent and users assumed the feature was broken. The latest/7d/30d sub-stats appear identically to <i>Daytime HR</i> as soon as a daytime-capable HRV source is connected.',

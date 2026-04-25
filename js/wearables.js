@@ -140,10 +140,20 @@ function deltaClassFor(latest, baseline, worseWhen) {
   return worse ? 'delta-bad' : 'delta-good';
 }
 
-function formatDelta(latest, baseline) {
+function formatDelta(latest, baseline, metricId) {
   // Zero baseline happens when the metric is 0 across the window (e.g. activity
-  // score on a ring that wasn't worn); render a dash instead of NaN%.
-  if (!baseline || !isFinite(baseline)) return '→ —';
+  // score on a ring that wasn't worn) — suppress the delta entirely rather than
+  // rendering "→ —" which reads as "we measured something."
+  if (!baseline || !isFinite(baseline)) return '';
+  // Steps fluctuates wildly intraday (132 at 9 AM vs 8000 at 9 PM); a baseline
+  // delta against an in-progress count is dishonest. Hide the arrow on steps.
+  if (metricId === 'steps') return '';
+  // For "lower is better" metrics, a current value of 0 against a non-zero
+  // baseline produces a noisy "↓ 100%" that grabs attention without insight
+  // (e.g. zero stress minutes today reads alarming when it's actually good).
+  // Suppress when current is 0 and baseline is non-trivial.
+  if (latest === 0 && Math.abs(baseline) > 0.5) return '';
+  if (latest == null || !isFinite(latest)) return '';
   const pct = ((latest - baseline) / baseline) * 100;
   const arrow = pct > 0.5 ? '↑' : pct < -0.5 ? '↓' : '→';
   return `${arrow} ${Math.abs(pct).toFixed(0)}%`;
@@ -237,12 +247,17 @@ function renderEmptyManualCard(metricId, canon) {
 
 function renderCard(metricId, canon, metric, showSourceBadge) {
   const deltaCls = deltaClassFor(metric.latest, metric.baseline, canon.worseWhen);
-  const deltaText = formatDelta(metric.latest, metric.baseline);
+  const deltaText = formatDelta(metric.latest, metric.baseline, metricId);
   // Space-prefix the sub so screen readers hear "HRV RMSSD" not "HRVRMSSD".
   // Visual spacing is still margin-left via .wearable-metric-sub CSS.
   const subLabel = canon.sub ? ` <span class="wearable-metric-sub">${escapeHTML(canon.sub)}</span>` : '';
-  const unitLabel = canon.unit ? `<span class="wearable-unit">${escapeHTML(canon.unit)}</span>` : '';
-  const baselineUnit = canon.unit ? ' ' + escapeHTML(canon.unit) : '';
+  // Units starting with "/" (e.g. "/5" for resilience level) read tighter
+  // without a separator between value and unit — render "1/5", not "1 /5".
+  const unitTight = canon.unit?.startsWith('/');
+  const unitLabel = canon.unit ? `<span class="wearable-unit${unitTight ? ' wearable-unit-tight' : ''}">${escapeHTML(canon.unit)}</span>` : '';
+  const baselineUnit = canon.unit
+    ? (unitTight ? escapeHTML(canon.unit) : ' ' + escapeHTML(canon.unit))
+    : '';
   const trendCls = trendClassFor(metric.trend30d, canon.worseWhen);
   const adapter = adapterById(metric.primarySource);
   // Source badge is interactive when >1 wearable is connected — click it to
@@ -256,13 +271,23 @@ function renderCard(metricId, canon, metric, showSourceBadge) {
   // name so screen readers can read the card at a glance without entering it.
   const valueRead = formatValue(metric.latest, canon.unit);
   const trendRead = trendLabel(metric.trend30d);
-  const canonRead = canon.sub ? `${canon.label} ${canon.sub}` : canon.label;
-  const deltaRead = deltaText.replace('↑', 'up').replace('↓', 'down').replace('→', 'flat at');
-  const ariaLabel = `${canonRead} ${valueRead}${canon.unit ? ' ' + canon.unit : ''}, ${deltaRead} vs baseline, ${trendRead} — open detail`;
+  // Glyph subs (🌙/☀️) don't speak well; map to words for screen readers.
+  // English word subs (e.g. "SDNN") read fine as-is. Some metrics override
+  // the entire spoken label via canon.ariaLabel ("BP" → "Blood pressure …").
+  const subRead = canon.sub === '🌙' ? 'overnight'
+               : canon.sub === '☀️' ? 'daytime'
+               : canon.sub;
+  const canonRead = canon.ariaLabel
+    ? canon.ariaLabel
+    : (subRead ? `${canon.label} ${subRead}` : canon.label);
+  const deltaRead = deltaText
+    ? `${deltaText.replace('↑', 'up').replace('↓', 'down').replace('→', 'flat at')} vs baseline, `
+    : '';
+  const ariaLabel = `${canonRead} ${valueRead}${canon.unit ? ' ' + canon.unit : ''}, ${deltaRead}${trendRead} — open detail`;
   return `<div class="wearable-card" onclick="openWearableDetail('${escapeHTML(metricId)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openWearableDetail('${escapeHTML(metricId)}')}" role="button" tabindex="0" aria-label="${escapeHTML(ariaLabel)}">
     <div class="wearable-card-top">
       <span class="wearable-metric-name">${escapeHTML(canon.label)}${subLabel}</span>
-      <span class="wearable-delta ${deltaCls}">${deltaText}</span>
+      ${deltaText ? `<span class="wearable-delta ${deltaCls}">${deltaText}</span>` : ''}
     </div>
     <div class="wearable-value-row">
       <span class="wearable-value">${valueRead}</span>${unitLabel}
@@ -310,6 +335,10 @@ export function renderWearableStrip() {
   // Daytime companions live in the detail modal as sub-stats, not as their
   // own cards — keeps the strip calm at 6-8 cards instead of 10.
   const STRIP_HIDDEN_METRICS = new Set(['hrv_day', 'hr_day']);
+  // Niche signals (Oura's vendor-proprietary scores) are collapsed under a
+  // "More" disclosure unless the user has reordered them up. Most users won't
+  // know what 1/5 resilience or "37 years vascular age" means at a glance.
+  const STRIP_NICHE_METRICS = new Set(['cardio_age', 'resilience_level']);
   const displayOrder = [];
   const seenDisplay = new Set();
   for (const id of baseMetricOrder) {
@@ -368,6 +397,7 @@ export function renderWearableStrip() {
         <span class="wearable-strip-icon" aria-hidden="true">⌬</span>
         <span>Wearables: <span class="wearable-source-label">${escapeHTML(sourceLabel)}${coverageLabel}</span></span>
         ${isMock ? '<span class="wearable-strip-demo-pill">demo data</span>' : ''}
+        ${reorderMode ? '<span class="wearable-strip-reorder-pill">⇄ Reorder mode — use ◀ ▶ on each card</span>' : ''}
       </div>
       <div class="wearable-strip-meta">
         <span class="wearable-strip-lastsync">last synced ${formatAgo(lastSyncAt)}</span>
@@ -375,35 +405,47 @@ export function renderWearableStrip() {
           <svg class="wearable-strip-sync-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 4 21 12 13 12"/></svg>
           <span>Sync</span>
         </button>
-        <button type="button" class="wearable-strip-reorder${reorderMode ? ' active' : ''}" aria-label="${reorderMode ? 'Done reordering' : 'Reorder cards'}" onclick="event.stopPropagation();toggleWearableReorder()">
-          ${reorderMode ? 'Done' : '⇄'}
+        <button type="button" class="wearable-strip-reorder${reorderMode ? ' active' : ''}" aria-label="${reorderMode ? 'Done reordering' : 'Reorder cards'}" title="${reorderMode ? 'Done reordering' : 'Reorder cards'}" onclick="event.stopPropagation();toggleWearableReorder()">
+          ${reorderMode ? 'Done' : '⇄ Reorder'}
         </button>
         <span class="wearable-collapse-arrow${collapsed ? ' collapsed' : ''}" aria-hidden="true">▾</span>
       </div>
     </div>
-    <div class="wearable-card-grid${collapsed ? ' hidden' : ''}">`;
+    <div class="wearable-card-grid${collapsed ? ' hidden' : ''}${reorderMode ? ' wearable-card-grid-reorder' : ''}">`;
 
   // Unified render loop — both populated and empty cards flow in the
   // user-defined order (finalOrder). In reorder mode each card gains ◀ ▶
   // arrow handles and detail-modal clicks are suppressed.
+  // Niche metrics (Oura proprietary 1/5 scores, vascular age) are deferred
+  // to a "More" disclosure unless the user explicitly reordered them via
+  // savedOrder OR we're in reorder mode (so they're reachable to move).
+  const userPinnedNiche = new Set((savedOrder || []).filter(id => STRIP_NICHE_METRICS.has(id)));
+  const renderNicheInline = (metricId) => reorderMode || userPinnedNiche.has(metricId);
+  const nicheDeferred = [];
+
   for (let i = 0; i < finalOrder.length; i++) {
     const { id: metricId, empty } = finalOrder[i];
     const canon = canonicalMetric(metricId);
     if (!canon) continue;
+    if (STRIP_NICHE_METRICS.has(metricId) && !renderNicheInline(metricId)) {
+      nicheDeferred.push(finalOrder[i]);
+      continue;
+    }
     let cardHtml;
     if (empty) {
       cardHtml = renderEmptyManualCard(metricId, canon);
     } else {
       const metric = summary.metrics[metricId];
       if (!metric) continue;
-      const providersForMetric = headerSourceIds.filter(sid =>
-        adapterById(sid)?.metrics?.[metricId]
-      );
-      const showBadgeForThisMetric = providersForMetric.length > 1;
-      cardHtml = renderCard(metricId, canon, metric, showBadgeForThisMetric);
+      // Source badge appears on every populated card whenever ≥2 wearables
+      // are connected — users need to see at-a-glance which source backs each
+      // metric, not just the strip header. The badge stays clickable so they
+      // can swap source per metric (auto-picker fallback when only one source
+      // declares it). Single-source connections still hide the badge to avoid
+      // redundancy with the header.
+      cardHtml = renderCard(metricId, canon, metric, showSourceBadges);
     }
     if (reorderMode) {
-      // Wrap the card, disable its intrinsic click/drilldown, stamp arrows.
       const canLeft = i > 0;
       const canRight = i < finalOrder.length - 1;
       cardHtml = `<div class="wearable-card-reorder-wrap" data-reorder-metric="${escapeHTML(metricId)}">
@@ -415,6 +457,21 @@ export function renderWearableStrip() {
       </div>`;
     }
     html += cardHtml;
+  }
+
+  // Render the niche cards behind a disclosure so users can opt-in without
+  // them dominating the strip.
+  if (nicheDeferred.length > 0) {
+    html += `<details class="wearable-niche-disclosure"><summary class="wearable-niche-summary">+ ${nicheDeferred.length} more (${nicheDeferred.map(d => canonicalMetric(d.id)?.label || d.id).join(' · ')})</summary>`;
+    for (const { id: metricId, empty } of nicheDeferred) {
+      const canon = canonicalMetric(metricId);
+      if (!canon) continue;
+      if (empty) { html += renderEmptyManualCard(metricId, canon); continue; }
+      const metric = summary.metrics[metricId];
+      if (!metric) continue;
+      html += renderCard(metricId, canon, metric, showSourceBadges);
+    }
+    html += `</details>`;
   }
 
   html += `</div>`;
@@ -573,8 +630,13 @@ function buildWearableDetailHtml(canon, m, series, metricId, manualEntries = [])
                    : m.trend30d === 'improving' ? 'improving'
                    : 'flat';
 
-  const deltaPct = m.baseline && isFinite(m.baseline) ? ((m.latest - m.baseline) / m.baseline * 100) : null;
-  const deltaStr = deltaPct == null ? '—'
+  // Same delta-suppression rules as the strip card so the modal header doesn't
+  // flash "↓ 100%" on a stress-zero day or "↓ 87%" on an in-progress steps day.
+  const suppressDelta = !m.baseline || !isFinite(m.baseline)
+                     || metricId === 'steps'
+                     || (m.latest === 0 && Math.abs(m.baseline) > 0.5);
+  const deltaPct = suppressDelta ? null : ((m.latest - m.baseline) / m.baseline * 100);
+  const deltaStr = deltaPct == null ? null
                  : (deltaPct > 0.5 ? '↑' : deltaPct < -0.5 ? '↓' : '→') + ' ' + Math.abs(deltaPct).toFixed(0) + '%';
 
   // Daytime companion: when the user is looking at an overnight HRV or RHR
@@ -622,35 +684,31 @@ function buildWearableDetailHtml(canon, m, series, metricId, manualEntries = [])
       ]);
     }
   } else if (companionLabel) {
-    // No daytime data available — explain why per primary source so users
-    // don't think the feature is broken. Vendor-specific gaps:
-    //   Oura     v2 API exposes no daytime rMSSD samples (only sleep-window).
-    //   WHOOP    same — recovery score is overnight only.
-    //   Polar    workout-only (would populate hrv_day if exercises synced).
-    //   Withings no HRV at all.
-    //   Fitbit   dailyRmssd is the daytime aggregate; should populate.
-    //   Apple    sample-window split should populate; an empty state here
-    //            means the export had no day-window samples for this metric.
+    // No daytime data — explain why per primary source. Cell layout is sized
+    // for a number + 1-line sub, so the explanation moves to a `title`
+    // tooltip and the visible sub stays short ("Not from {Source} · why?").
     const primary = m.primarySource;
-    const hint = (() => {
+    const adapter2 = adapterById(primary);
+    const sourceDisplay = adapter2?.displayName || primary || 'this source';
+    const tooltip = (() => {
       if (metricId === 'hrv_rmssd') {
         if (primary === 'oura' || primary === 'whoop') {
-          return `${primary === 'oura' ? 'Oura' : 'WHOOP'} v1 API exposes overnight HRV only — connect Apple Health, Fitbit, or Polar (workouts) to surface daytime HRV.`;
+          return `${sourceDisplay} v2 API exposes overnight HRV only. To see daytime HRV, connect Apple Health, Fitbit, or Polar (workout-tracked HRV).`;
         }
-        if (primary === 'polar') return 'Polar surfaces daytime HRV from recorded workouts only — no exercise transactions in the last 90d.';
-        return 'No daytime HRV samples in the last 90d. Apple Health and Fitbit (dailyRmssd) typically populate this.';
+        if (primary === 'polar') return 'Polar surfaces daytime HRV from recorded workouts only — no exercise transactions in the last 90 days.';
+        return 'No daytime HRV samples in the last 90 days. Apple Health and Fitbit (dailyRmssd) typically populate this.';
       }
-      // hr_day fallback (rare — usually Oura's heartrate stream covers it)
-      return 'No daytime heart-rate samples in the last 90d. Re-sync the connected wearable.';
+      return 'No daytime heart-rate samples in the last 90 days. Re-sync the connected wearable.';
     })();
     baseStats.push([
-      `${companionLabel}`,
+      companionLabel,
       '—',
-      hint,
+      `Not from ${sourceDisplay} · why?`,
+      tooltip,
     ]);
   }
-  const statsCells = baseStats.map(([label, val, sub]) => `
-    <div class="wearable-detail-stat">
+  const statsCells = baseStats.map(([label, val, sub, tooltip]) => `
+    <div class="wearable-detail-stat"${tooltip ? ` title="${escapeHTML(tooltip)}"` : ''}>
       <div class="wearable-detail-stat-label">${escapeHTML(label)}</div>
       <div class="wearable-detail-stat-val">${val}</div>
       ${sub ? `<div class="wearable-detail-stat-sub">${escapeHTML(sub)}</div>` : ''}
@@ -662,10 +720,21 @@ function buildWearableDetailHtml(canon, m, series, metricId, manualEntries = [])
       ? `<div class="wearable-detail-empty">Every day shows 0 — Oura suppresses the Activity composite score while Rest Mode is on. Check the <b>Steps</b> card for raw movement data, or disable Rest Mode in the Oura app.</div>`
       : '';
 
+  // Show the source-swap button whenever ≥2 wearables are connected — the
+  // strip card's badge isn't always present, so the modal becomes the
+  // canonical place to switch source for any metric. Single-source profiles
+  // hide the button (nothing to swap to).
+  const connectedSources = state.importedData?.wearableSummary?.sources || {};
+  const showSwapButton = Object.keys(connectedSources).length > 1 && !!adapter;
+  const swapButton = showSwapButton
+    ? `<button type="button" class="wearable-source-badge wearable-source-badge-btn wearable-modal-source-swap" onclick="chooseWearableSource('${escapeHTML(metricId)}',event)" title="Switch source for this metric">via ${escapeHTML(adapter.displayName)} · swap</button>`
+    : '';
+
   return `<button class="modal-close" onclick="closeModal()">&times;</button>
     <h3>${escapeHTML(canon.label)}${subLabel}</h3>
     <div class="modal-unit">
-      ${escapeHTML(sourceName)} · ${deltaStr} vs baseline · ${escapeHTML(trendWord)} 30d
+      ${escapeHTML(sourceName)}${deltaStr ? ` · ${deltaStr} vs baseline` : ''} · ${escapeHTML(trendWord)} 30d
+      ${swapButton}
     </div>
     <div class="modal-chart" style="height:260px"><canvas id="chart-modal"></canvas></div>
     ${emptyHint}
@@ -1022,7 +1091,7 @@ function renderRowDetail(adapter, conn, { isPendingClient, isFileImport }) {
           <svg class="wearable-action-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 4 21 12 13 12"/></svg>
           <span>Sync</span>
         </button>
-        <button class="wearable-action" onclick="handleWearableBackfill('${escapeHTML(adapter.id)}')">Re-sync last 90 days</button>
+        <button class="wearable-action wearable-action-secondary" title="Refetches 90 days of history — may take 30s+ depending on the vendor's rate limits." onclick="handleWearableBackfill('${escapeHTML(adapter.id)}')">Re-sync last 90 days <span class="wearable-action-hint">(may take a moment)</span></button>
         <button class="wearable-action wearable-action-danger" onclick="handleWearableDisconnect('${escapeHTML(adapter.id)}')">Disconnect</button>
       </div>`;
   }
@@ -1040,7 +1109,17 @@ function renderRowDetail(adapter, conn, { isPendingClient, isFileImport }) {
   }
   // Apple Health disconnected — full how-to-export + dropzone
   if (isFileImport) {
-    return `<p class="wearable-adapter-hint" style="font-size:12px">iPhone → Health app → tap your profile photo (top right) → <b>Export All Health Data</b> → AirDrop / email the <code>export.zip</code> to your computer → drop it below (or the <code>export.xml</code> inside). Parsing runs entirely in your browser.</p>
+    return `<details class="wearable-adapter-hint apple-health-howto" style="font-size:12px">
+        <summary>How to export from your iPhone</summary>
+        <ol>
+          <li>Open the <b>Health</b> app on your iPhone.</li>
+          <li>Tap your profile photo (top-right corner).</li>
+          <li>Scroll down → tap <b>Export All Health Data</b>.</li>
+          <li>AirDrop or email the resulting <code>export.zip</code> to your computer.</li>
+          <li>Drop it below (or unzip and drop the <code>export.xml</code> inside).</li>
+        </ol>
+        <p class="apple-health-privacy">Parsing runs entirely in your browser — the file never leaves this device.</p>
+      </details>
       <div class="apple-health-dropzone"
            ondragover="event.preventDefault();this.classList.add('drag-over')"
            ondragleave="this.classList.remove('drag-over')"
@@ -1339,6 +1418,13 @@ document.addEventListener('toggle', (e) => {
     _updateManualCounts();
   }
 }, true);
+// Also fire on initial paint so the row populates whether or not the user
+// toggles it. The Settings section re-renders on every open so a microtask
+// kick is enough — no observer needed.
+document.addEventListener('settings:wearables-rendered', () => {
+  // Slightly defer so the [data-role="manual-counts"] element is in the DOM.
+  queueMicrotask(_updateManualCounts);
+});
 
 function handleWearableConnect(adapterId) {
   try {
