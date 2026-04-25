@@ -18,7 +18,7 @@ const CHANGELOG = [
     version: '1.30.0', date: '2026-04-25', title: 'Wearables — connect your devices, share with AI agents',
     items: [
       '<b>Seven wearables.</b> Connect Oura, WHOOP, Fitbit, Withings, Ultrahuman, Polar, or Apple Health (file import). Or log weight / BP / resting HR by hand. HRV, sleep, recovery, and biometrics show up in a single dashboard strip alongside your blood work.',
-      '<b>Tap any card for detail.</b> 90-day chart, baselines, rolling averages, every individual reading. Multiple devices? Tap the <i>via {vendor}</i> badge to switch which one drives the card. Reorder via the ⇄ button.',
+      '<b>Tap any card for detail.</b> 90-day chart, baselines, rolling averages, every individual reading. Multiple devices? Tap the <i>via Oura</i> / <i>via Fitbit</i> source badge to switch which one drives the card. Reorder via the ⇄ button.',
       '<b>Overnight and daytime, separately.</b> HRV and heart rate split into recovery (overnight) and reactivity (daytime) — the AI can reason about both.',
       '<b>AI chat sees a compact summary</b> by default. External agents (Hermes, OpenClaw, Claude Code, anything MCP) can connect via the new Agent Access tab — token, push controls, optional 7/30/90-day series for time-series reasoning.',
       '<b>Privacy.</b> Raw daily samples never leave your device. Sync carries only the compact summary, encrypted end-to-end. OAuth tokens never sync — re-connect each device independently. Wearable storage is wrapped in AES-GCM when encryption-at-rest is enabled.',

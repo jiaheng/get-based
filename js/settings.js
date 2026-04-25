@@ -23,6 +23,9 @@ export function openSettingsModal(tab) {
   const modal = document.getElementById('settings-modal');
   const currentTheme = getTheme();
   const provider = getAIProvider();
+  // Legacy v1.27 tab id 'integrations' — same redirect as switchSettingsTab.
+  // Older deep-links / tour steps / external links may still pass it.
+  if (tab === 'integrations') tab = 'wearables';
   if (tab) _activeSettingsTab = tab;
 
   modal.innerHTML = `

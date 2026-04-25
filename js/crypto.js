@@ -804,7 +804,7 @@ export function renderEncryptionSection() {
       <div class="encryption-status-icon">&#128274;</div>
       <div class="encryption-status-body">
         <div class="encryption-status-title">Encryption is ON</div>
-        <div class="encryption-status-detail">Your medical data, chat history, and API keys are encrypted with AES-256-GCM. Display preferences remain unencrypted.</div>
+        <div class="encryption-status-detail">Your medical data, chat history, wearable history, and API keys are encrypted with AES-256-GCM. Display preferences remain unencrypted.</div>
       </div>
     </div>
     <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">

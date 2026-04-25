@@ -585,12 +585,15 @@ async function openWearableDetail(metricId) {
 }
 
 let _modalTrapHandler = null;
-function _installWearableModalFocusTrap(modal) {
-  // Remove any prior listener (e.g. previous modal open) so we don't stack.
+export function _uninstallWearableModalFocusTrap() {
   if (_modalTrapHandler) {
     document.removeEventListener('keydown', _modalTrapHandler, true);
     _modalTrapHandler = null;
   }
+}
+function _installWearableModalFocusTrap(modal) {
+  // Remove any prior listener (e.g. previous modal open) so we don't stack.
+  _uninstallWearableModalFocusTrap();
   _modalTrapHandler = (e) => {
     if (e.key !== 'Tab') return;
     // Modal is gone (closed) — uninstall.
@@ -1010,7 +1013,7 @@ export function renderWearablesSettingsSection() {
   // BETA badge moves out of every row to a single section-level note. Every
   // wearable adapter is currently beta — the per-row chip was redundant.
   return `<div class="settings-section-header" style="display:block">
-    <div class="settings-section-title" style="display:block;margin-bottom:4px">Wearable Integrations</div>
+    <div class="settings-section-title" style="display:block;margin-bottom:4px">Connected devices</div>
     <div class="settings-section-hint" style="display:block">Data stays on this device; a compact summary + anomaly events sync to your other devices. All integrations are <em>beta</em> — please report issues.</div>
   </div>
   <div class="wearables-adapter-list">${rows}</div>`;
@@ -1192,7 +1195,7 @@ function renderRowDetail(adapter, conn, { isPendingClient, isFileImport }) {
   }
   // Pending OAuth client — explanation
   if (isPendingClient) {
-    return `<p class="wearable-adapter-hint">${escapeHTML(adapter.displayName)} support is in progress — we're waiting on partner credentials. Check back soon or watch the changelog.</p>`;
+    return `<p class="wearable-adapter-hint">${escapeHTML(adapter.displayName)} support is in progress — still waiting on partner credentials. Check back soon or watch the changelog.</p>`;
   }
   // Manual source — entry counts + entry points + disconnect. Unlike OAuth,
   // manual has no credential to reconnect; "disconnect" means wipe all rows.
@@ -1714,6 +1717,7 @@ Object.assign(window, {
   renderWearableStrip,
   toggleWearableStrip,
   openWearableDetail,
+  _uninstallWearableModalFocusTrap,
   syncWearableNow,
   chooseWearableSource,
   openManualLogForm,

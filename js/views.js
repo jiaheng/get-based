@@ -1719,6 +1719,9 @@ export function closeModal() {
   if (state.chartInstances["modal"]) { state.chartInstances["modal"].destroy(); delete state.chartInstances["modal"]; }
   document.removeEventListener('click', closeSuggestionsOnClickOutside);
   if (window.closeEMFInterpretation) window.closeEMFInterpretation();
+  // Detail-modal Tab focus trap (wearables) — uninstall explicitly so the
+  // global keydown handler doesn't outlive the modal it scoped to.
+  if (window._uninstallWearableModalFocusTrap) window._uninstallWearableModalFocusTrap();
   restoreModalTrigger();
 }
 
