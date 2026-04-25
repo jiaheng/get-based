@@ -60,6 +60,19 @@ export const CANONICAL_METRICS = {
   spo2_avg:         { id: 'spo2_avg',         label: 'SpO₂',        sub: '',      unit: '%',     worseWhen: 'down'   },
   body_temp_delta:  { id: 'body_temp_delta',  label: 'Body temp',   sub: 'Δ',     unit: '°C',    worseWhen: 'either' },
   glucose_avg:      { id: 'glucose_avg',      label: 'Glucose',     sub: 'avg',   unit: 'mg/dL', worseWhen: 'either' },
+  // Withings Body Scan / BPM extras (#5 follow-up). All of these are the raw
+  // measurements; AI context collapses the body-comp cluster into a single
+  // roll-up line to keep the token budget honest. Only populates for users
+  // with a device that produces the underlying measType, so the strip
+  // auto-hides them for everyone else.
+  pwv:                { id: 'pwv',                label: 'PWV',          sub: '',      unit: 'm/s',   worseWhen: 'up'     }, // pulse wave velocity — vascular stiffness; preferred over Withings' computed Vascular Age
+  body_fat_pct:       { id: 'body_fat_pct',       label: 'Body fat',     sub: '',      unit: '%',     worseWhen: 'up'     },
+  muscle_mass_kg:     { id: 'muscle_mass_kg',     label: 'Muscle',       sub: 'mass',  unit: 'kg',    worseWhen: 'down'   },
+  lean_mass_kg:       { id: 'lean_mass_kg',       label: 'Lean',         sub: 'mass',  unit: 'kg',    worseWhen: 'down'   }, // fat-free mass — distinct from muscle (Withings reports both)
+  bone_mass_kg:       { id: 'bone_mass_kg',       label: 'Bone',         sub: 'mass',  unit: 'kg',    worseWhen: 'down'   },
+  water_mass_kg:      { id: 'water_mass_kg',      label: 'Water',        sub: 'mass',  unit: 'kg',    worseWhen: 'either' }, // hydration — too high or too low both bad
+  visceral_fat:       { id: 'visceral_fat',       label: 'Visceral fat', sub: 'index', unit: '',      worseWhen: 'up'     }, // Withings 1-30 score
+  nerve_health_score: { id: 'nerve_health_score', label: 'Nerve health', sub: 'score', unit: '',      worseWhen: 'down'   }, // Body Scan peripheral-nerve activity
 };
 
 // Default display order for the dashboard strip. A canonical metric not listed
@@ -73,6 +86,13 @@ export const DEFAULT_METRIC_ORDER = [
   'activity_score', 'steps',
   'weight', 'bp_systolic', 'bp_diastolic',
   'stress_high_min', 'resilience_level', 'cardio_age',
+  // Withings Body Scan extras — placed after the headline cards so users
+  // without a Body Scan don't notice (auto-hidden when summary lacks the
+  // metric). PWV first because vascular stiffness is the headline number;
+  // body composition cluster after; nerve health last (most niche).
+  'pwv',
+  'body_fat_pct', 'muscle_mass_kg', 'lean_mass_kg', 'bone_mass_kg', 'water_mass_kg', 'visceral_fat',
+  'nerve_health_score',
   // Daytime companions are summarised so the AI / detail modal can read them,
   // but intentionally placed AFTER the overnight cards — the strip stays calm.
   'hrv_day', 'hr_day',
@@ -260,12 +280,23 @@ export const ADAPTERS = [
     },
     apiHost: 'wbsapi.withings.net',
     metrics: {
-      weight:       { endpoint: 'measure',  measType: 1  },
-      bp_diastolic: { endpoint: 'measure',  measType: 9  },
-      bp_systolic:  { endpoint: 'measure',  measType: 10 },
-      hr_day:       { endpoint: 'measure',  measType: 11 }, // scale pulse — daytime spot reading
-      rhr:          { endpoint: 'v2/sleep', field: 'hr_min' }, // sleep min HR is the true overnight RHR
-      sleep_score:  { endpoint: 'v2/sleep', field: 'sleep_score' },
+      weight:             { endpoint: 'measure',  measType: 1   },
+      bp_diastolic:       { endpoint: 'measure',  measType: 9   },
+      bp_systolic:        { endpoint: 'measure',  measType: 10  },
+      hr_day:             { endpoint: 'measure',  measType: 11  }, // scale pulse — daytime spot reading
+      rhr:                { endpoint: 'v2/sleep', field: 'hr_min' }, // sleep min HR is the true overnight RHR
+      sleep_score:        { endpoint: 'v2/sleep', field: 'sleep_score' },
+      // Body Scan + BPM-class extras — issue #143 / #5 follow-up. The
+      // measure-endpoint loop in wearables-withings.js auto-handles every
+      // measType in this map; new ones land just by adding a row here.
+      body_fat_pct:       { endpoint: 'measure',  measType: 6   },
+      lean_mass_kg:       { endpoint: 'measure',  measType: 5   }, // fat-free mass
+      muscle_mass_kg:     { endpoint: 'measure',  measType: 76  },
+      water_mass_kg:      { endpoint: 'measure',  measType: 77  }, // hydration
+      bone_mass_kg:       { endpoint: 'measure',  measType: 88  },
+      pwv:                { endpoint: 'measure',  measType: 91  }, // pulse wave velocity (m/s) — preferred over Withings' Vascular Age (130)
+      visceral_fat:       { endpoint: 'measure',  measType: 167 },
+      nerve_health_score: { endpoint: 'measure',  measType: 168 },
     },
     accountInfo: { endpoint: 'v2/user', identityField: 'email' },
   },

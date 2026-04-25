@@ -804,7 +804,15 @@ export function buildWearableContext(importedData) {
   const maxCov = Math.max(0, ...sourceNames.map(s => summary.sources[s].coverageDays || 0));
   const lines = [`## Wearables (${sourceNames.join(' + ')}, ${maxCov}d coverage)`];
 
+  // Body composition cluster (#143). Eight Withings Body Scan metrics —
+  // emitting them as one roll-up line saves ~150 tokens vs eight per-metric
+  // lines, and AI tools reason about body comp holistically anyway. The
+  // detail modal still drills each metric individually.
+  const BODY_COMP_KEYS = ['body_fat_pct', 'muscle_mass_kg', 'lean_mass_kg', 'bone_mass_kg', 'water_mass_kg', 'visceral_fat', 'nerve_health_score'];
+  const bodyCompPresent = BODY_COMP_KEYS.filter(k => summary.metrics[k]);
+
   for (const [mid, m] of Object.entries(summary.metrics)) {
+    if (BODY_COMP_KEYS.includes(mid)) continue; // rolled up below
     const label = metricLabel(mid);
     const unit = metricUnit(mid);
     const deltaPct = m.baseline ? ((m.latest - m.baseline) / m.baseline * 100) : 0;
@@ -812,6 +820,25 @@ export function buildWearableContext(importedData) {
     const deltaLabel = `${arrow}${Math.abs(deltaPct).toFixed(0)}%`;
     const unitStr = unit ? ' ' + unit : '';
     lines.push(`${label}: ${m.latest}${unitStr} latest · baseline ${m.baseline} · ${deltaLabel} · ${m.trend30d} 30d`);
+  }
+
+  if (bodyCompPresent.length) {
+    const parts = bodyCompPresent.map(k => {
+      const m = summary.metrics[k];
+      const unit = metricUnit(k);
+      const v = unit === '%' ? `${m.latest}%`
+              : unit === 'kg' ? `${m.latest}kg`
+              : `${m.latest}`;
+      const shortLabel = k === 'body_fat_pct' ? 'fat'
+                       : k === 'muscle_mass_kg' ? 'muscle'
+                       : k === 'lean_mass_kg' ? 'lean'
+                       : k === 'bone_mass_kg' ? 'bone'
+                       : k === 'water_mass_kg' ? 'water'
+                       : k === 'visceral_fat' ? 'visceral'
+                       : k === 'nerve_health_score' ? 'nerve' : k;
+      return `${shortLabel} ${v}`;
+    });
+    lines.push(`Body comp: ${parts.join(' / ')}`);
   }
 
   // Compact weekly series for every default-order metric that has data — lets

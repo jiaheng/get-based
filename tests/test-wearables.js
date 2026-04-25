@@ -281,7 +281,10 @@ return (async function() {
     assert(`CANONICAL_METRICS has ${mid}`, !!reg.CANONICAL_METRICS[mid]);
     assert(`Oura adapter maps ${mid}`, reg.adapterSupportsMetric('oura', mid));
   }
-  assert('DEFAULT_METRIC_ORDER is 14 metrics (4 core + 5 extended + 3 biometric + 2 daytime companions)', reg.DEFAULT_METRIC_ORDER.length === 14);
+  // 14 (pre-#143) + 8 Withings Body Scan extras = 22 today. Each new
+  // canonical metric should bump this assertion intentionally so the
+  // count drift shows up in code review.
+  assert('DEFAULT_METRIC_ORDER is 22 metrics (4 core + 5 extended + 3 biometric + 8 Body Scan + 2 daytime)', reg.DEFAULT_METRIC_ORDER.length === 22);
   // Biometric metrics must be in the default order so the summary pipeline
   // iterates them for manual / Withings / Fitbit rows.
   assert('DEFAULT_METRIC_ORDER includes weight', reg.DEFAULT_METRIC_ORDER.includes('weight'));
@@ -618,6 +621,40 @@ return (async function() {
     withingsReg.metrics.hr_day?.measType === 11 && !withingsReg.metrics.rhr?.measType);
   assert('Withings rhr is sourced from sleep summary hr_min',
     withingsReg.metrics.rhr?.endpoint === 'v2/sleep' && withingsReg.metrics.rhr?.field === 'hr_min');
+
+  // Body Scan extras (#143) — wired through the same /measure endpoint.
+  // The fetcher's MEAS_TYPES table is the source of truth; this just
+  // double-asserts the registry side so a missing wire-up is caught here
+  // before it costs anyone a real device test.
+  assert('Withings body_fat_pct → measType 6', withingsReg.metrics.body_fat_pct?.measType === 6);
+  assert('Withings lean_mass_kg → measType 5 (fat-free mass)', withingsReg.metrics.lean_mass_kg?.measType === 5);
+  assert('Withings muscle_mass_kg → measType 76', withingsReg.metrics.muscle_mass_kg?.measType === 76);
+  assert('Withings bone_mass_kg → measType 88', withingsReg.metrics.bone_mass_kg?.measType === 88);
+  assert('Withings water_mass_kg → measType 77', withingsReg.metrics.water_mass_kg?.measType === 77);
+  assert('Withings pwv → measType 91 (m/s)', withingsReg.metrics.pwv?.measType === 91);
+  assert('Withings visceral_fat → measType 167', withingsReg.metrics.visceral_fat?.measType === 167);
+  assert('Withings nerve_health_score → measType 168', withingsReg.metrics.nerve_health_score?.measType === 168);
+  // Withings vascular_age (measType 130) is intentionally NOT mapped — we
+  // expose underlying PWV instead. If we later add vascular_age, it should
+  // be a separate canonical so both Oura and Withings can flag stiffness.
+  assert('Withings does NOT also expose vascular_age (PWV preferred per #143)',
+    !withingsReg.metrics.vascular_age);
+
+  // Body comp roll-up in AI context — eight metrics × ~20 tokens each =
+  // ~160 tokens if emitted per-line. The single roll-up keeps it under
+  // ~50. Worth a regression guard.
+  const labCtxSrc = await fetch('/js/lab-context.js').then(r => r.text());
+  assert('Body comp cluster collapses into a "Body comp:" roll-up line',
+    /BODY_COMP_KEYS\s*=\s*\[[\s\S]*?'body_fat_pct'[\s\S]*?'visceral_fat'[\s\S]*?\]/.test(labCtxSrc) &&
+    /Body comp:.*\$\{parts\.join/.test(labCtxSrc));
+  assert('Body-comp metrics are skipped in the per-metric loop',
+    /BODY_COMP_KEYS\.includes\(mid\)\)\s*continue/.test(labCtxSrc));
+
+  // CANONICAL_METRICS registers each new id so renderer + summary picker
+  // have labels/units. Cheap registry sanity check.
+  for (const id of ['pwv', 'body_fat_pct', 'muscle_mass_kg', 'lean_mass_kg', 'bone_mass_kg', 'water_mass_kg', 'visceral_fat', 'nerve_health_score']) {
+    assert(`CANONICAL_METRICS includes '${id}'`, !!reg.canonicalMetric(id));
+  }
 
   const withingsFetcher = await import('../js/wearables-withings.js');
   assert('fetchWithingsDailyRange exists', typeof withingsFetcher.fetchWithingsDailyRange === 'function');

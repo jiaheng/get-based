@@ -7,7 +7,7 @@ const CHANGELOG = [
   {
     version: '1.30.0', date: '2026-04-25', title: 'Wearables — connect your devices, share with AI agents',
     items: [
-      '<b>Five wearables.</b> Connect Oura, Fitbit, Withings, Polar, or Apple Health (file import). Or log weight / BP / resting HR by hand. HRV, sleep, recovery, and biometrics show up in a single dashboard strip alongside your blood work. (WHOOP and Ultrahuman support is built but private-beta only while we validate partner credentials.)',
+      '<b>Five wearables.</b> Connect Oura, Fitbit, Withings, Polar, or Apple Health (file import). Or log weight / BP / resting HR by hand. HRV, sleep, recovery, biometrics — including Withings Body Scan body composition (fat / muscle / lean / bone / water / visceral fat), PWV (vascular stiffness), and nerve health score — show up in a single dashboard strip alongside your blood work. (WHOOP and Ultrahuman support is built but private-beta only while we validate partner credentials.)',
       '<b>Tap any card for detail.</b> 90-day chart, baselines, rolling averages, every individual reading. Multiple devices? Tap the <i>via Oura</i> / <i>via Fitbit</i> source badge to switch which one drives the card. Reorder via the ⇄ button.',
       '<b>Overnight and daytime, separately.</b> HRV and heart rate split into recovery (overnight) and reactivity (daytime) — the AI can reason about both.',
       '<b>AI chat sees a compact summary</b> by default. External agents (Hermes, OpenClaw, Claude Code, anything MCP) can connect via the new Agent Access tab — token, push controls, optional 7/30/90-day series for time-series reasoning.',

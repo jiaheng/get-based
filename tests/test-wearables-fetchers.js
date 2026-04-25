@@ -211,6 +211,15 @@ return (async function() {
               { type: 10, value: 122, unit: 0 },   // BP sys 122
               { type: 9, value: 78, unit: 0 },     // BP dia 78
               { type: 11, value: 71, unit: 0 },    // pulse 71 → hr_day
+              // Body Scan extras (#143)
+              { type: 6, value: 184, unit: -1 },   // 18.4% body fat
+              { type: 5, value: 590, unit: -1 },   // 59.0 kg lean (fat-free) mass
+              { type: 76, value: 320, unit: -1 },  // 32.0 kg muscle mass
+              { type: 88, value: 26, unit: -1 },   // 2.6 kg bone mass
+              { type: 77, value: 410, unit: -1 },  // 41.0 kg water mass
+              { type: 91, value: 73, unit: -1 },   // 7.3 m/s PWV
+              { type: 167, value: 8, unit: 0 },    // visceral fat index 8
+              { type: 168, value: 71, unit: 0 },   // nerve health score 71
             ],
           }],
         },
@@ -231,6 +240,16 @@ return (async function() {
     assert('Withings hr_day from scale pulse (measType 11) — NOT rhr', r?.hr_day === 71);
     assert('Withings rhr from sleep summary hr_min (true overnight RHR)', r?.rhr === 55);
     assert('Withings sleep_score from sleep summary', r?.sleep_score === 76);
+    // Body Scan extras (#143). Each measType maps to the new canonical
+    // field; unit-shift decoding shared with weight/BP path.
+    assert('Withings body_fat_pct decoded (184 × 10^-1 = 18.4)', r?.body_fat_pct === 18.4);
+    assert('Withings lean_mass_kg from measType 5', r?.lean_mass_kg === 59);
+    assert('Withings muscle_mass_kg from measType 76', r?.muscle_mass_kg === 32);
+    assert('Withings bone_mass_kg from measType 88 (decoded with unit-shift)', r?.bone_mass_kg === 2.6);
+    assert('Withings water_mass_kg from measType 77', r?.water_mass_kg === 41);
+    assert('Withings PWV from measType 91 (m/s, decoded)', r?.pwv === 7.3);
+    assert('Withings visceral_fat from measType 167 (no unit-shift)', r?.visceral_fat === 8);
+    assert('Withings nerve_health_score from measType 168', r?.nerve_health_score === 71);
   } finally { restoreFetch(); }
 
   // Withings status-code error surfacing

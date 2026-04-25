@@ -24,11 +24,24 @@ const PROXY_URL    = '/api/proxy';
 // a daytime spot reading at the moment of standing — emphatically NOT a
 // resting heart rate. Route it to hr_day; the true rhr slot is filled by
 // sleep summary's hr_min below.
+//
+// Body Scan extras (#143): body composition + PWV + nerve health. Vascular
+// Age (130) is intentionally NOT mapped — overlaps semantically with Oura's
+// `cardio_age`; we expose the underlying PWV (91) and let AI reason from
+// that, per Marian's request.
 const MEAS_TYPES = {
-  1:  'weight',       // kg
-  9:  'bp_diastolic', // mmHg
-  10: 'bp_systolic',  // mmHg
-  11: 'hr_day',       // bpm (scale pulse — taken while standing on the scale)
+  1:   'weight',             // kg
+  9:   'bp_diastolic',       // mmHg
+  10:  'bp_systolic',        // mmHg
+  11:  'hr_day',             // bpm (scale pulse — taken while standing on the scale)
+  6:   'body_fat_pct',       // %
+  5:   'lean_mass_kg',       // kg (fat-free mass)
+  76:  'muscle_mass_kg',     // kg
+  77:  'water_mass_kg',      // kg (hydration)
+  88:  'bone_mass_kg',       // kg
+  91:  'pwv',                // m/s (pulse wave velocity)
+  167: 'visceral_fat',       // 1-30 score (no unit)
+  168: 'nerve_health_score', // score (no unit)
 };
 
 // Withings status codes → friendly messages. Source: Withings Developer
@@ -192,6 +205,10 @@ export async function fetchWithingsDailyRange(accessToken, startDate, endDate) {
         stress_high_min: null, resilience_level: null, cardio_age: null,
         weight: null, bp_systolic: null, bp_diastolic: null,
         spo2_avg: null, body_temp_delta: null, glucose_avg: null,
+        // Body Scan extras (#143)
+        body_fat_pct: null, muscle_mass_kg: null, lean_mass_kg: null,
+        bone_mass_kg: null, water_mass_kg: null,
+        pwv: null, visceral_fat: null, nerve_health_score: null,
       });
     }
     return byDate.get(day);

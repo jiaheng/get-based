@@ -14,7 +14,7 @@ If you have more than one source for a metric, tap the small *via {vendor}* badg
 |---|---|---|
 | **Oura** | OAuth 2.0 | One-click. Need an Oura account + ring. |
 | **Fitbit** | OAuth 2.0 (PKCE) | One-click. Need a Fitbit account + device. Sleep score is approximated from `efficiency` (Fitbit's API doesn't expose the in-app Sleep Score). |
-| **Withings** | OAuth 2.0 | One-click. Need a Withings account + scale / BPM / Scanwatch. |
+| **Withings** | OAuth 2.0 | One-click. Need a Withings account + scale / BPM / Scanwatch / Body Scan. Body Scan owners also get PWV (vascular stiffness), body composition (fat / muscle / lean / bone / water / visceral fat), and nerve health score — cards stay hidden if your device doesn't measure them. |
 | **Polar** | OAuth 2.0 | One-click. Need a Polar account and **at least one device sync to Polar Flow first** — Polar AccessLink uses a transactions model that returns nothing until the device has uploaded data. HRV is workout-only (recorded with a chest strap), not overnight. |
 | **Apple Health** | File import (no OAuth) | Export from your iPhone Health app and drop the `.zip` here. |
 | **WHOOP** | *Hidden until creds validated* | Code is shipped; the connect row is hidden from Settings until WHOOP partner credentials are validated. |
