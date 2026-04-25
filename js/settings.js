@@ -902,6 +902,18 @@ function renderMessengerSection() {
         <div style="font-size:11px;color:var(--text-muted);margin-top:6px;line-height:1.5">Use <a href="https://github.com/elkimek/getbased-agents/tree/main/packages/mcp" target="_blank" rel="noopener" style="color:var(--accent)">getbased-mcp</a> to connect <a href="https://github.com/hermes-agent/hermes-agent" target="_blank" rel="noopener" style="color:var(--accent)">Hermes Agent</a>, <a href="https://openclaw.ai" target="_blank" rel="noopener" style="color:var(--accent)">OpenClaw</a>, or any MCP-compatible agent. Paste this token into your agent's config.</div>
       </div>
       <button class="import-btn import-btn-secondary" style="font-size:12px;padding:5px 14px;width:100%" onclick="regenerateMessengerToken()">Regenerate token</button>
+      <div style="margin-top:18px;padding-top:14px;border-top:1px dashed var(--border)">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div style="flex:1;margin-right:14px">
+            <div style="font-size:13px;color:var(--text-secondary)">Push 30-day wearable series</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Adds a daily-values matrix (HRV, RHR, sleep…) so agents can spot trends. ~1500 extra tokens per agent prompt; cached cleanly so the marginal cost is small. Off by default — turn on if you want time-series reasoning.</div>
+          </div>
+          <label class="chat-websearch-toggle-label" style="display:flex" aria-label="Push wearable series to agent">
+            <input type="checkbox" id="agent-wearable-series-toggle" ${window.isAgentWearableSeriesEnabled?.() ? 'checked' : ''} onchange="window.setAgentWearableSeriesEnabled(this.checked); window.pushContextToGateway && window.pushContextToGateway()" style="display:none">
+            <span class="chat-toggle-slider"></span>
+          </label>
+        </div>
+      </div>
     ` : `
       <div style="font-size:12px;color:var(--text-muted);line-height:1.5">
         Let AI agents query your labs — coding agents, messenger bots, or any <a href="https://github.com/elkimek/getbased-agents/tree/main/packages/mcp" target="_blank" rel="noopener" style="color:var(--accent)">MCP-compatible tool</a>. Only a read-only summary is shared — your data stays encrypted.

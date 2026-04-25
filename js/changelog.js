@@ -5,6 +5,16 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.27.0', date: '2026-04-25', title: 'Agents can read your 30-day wearable daily series',
+    items: [
+      '<b>Agent Access (Settings → Integrations → Agent Access) gains a "Push 30-day wearable series" toggle.</b> When on, the browser builds a pivoted matrix of daily values (HRV, RHR, sleep, readiness, steps…) from your local L1 IndexedDB and pushes it to the gateway as <code>[section:wearables-series-30d]</code>. Any MCP-connected agent (Hermes, OpenClaw, Claude Code, etc.) can pull it via <code>getbased_section(\'wearables-series-30d\')</code>.',
+      '<b>Off by default — opt in if you want time-series reasoning.</b> Adds ~400 tokens per agent prompt (real measurement on 30 days × 13 metrics; cached cleanly by the prompt cache so the marginal cost per turn is small). The always-on ~200-token L2 summary keeps working unchanged.',
+      '<b>Privacy unchanged.</b> Raw daily samples still never sync via Evolu — they read from the browser\'s local IDB only. The gateway sees the rendered string. OAuth tokens stay local (still stripped by <code>stripWearableCredentials</code>).',
+      '<b>Format.</b> One line per metric, chronological values separated by <code>→</code>, no-reading days as <code>—</code>. Each line includes the primary source so the agent knows whether HRV came from Oura, Apple Health, or Polar workouts. 1dp rounding to keep tokens tight without losing meaningful precision.',
+      '<b>Toggle re-pushes immediately</b> so the agent sees the new section the next time it queries (no 5-second debounce wait).',
+    ]
+  },
+  {
     version: '1.26.0', date: '2026-04-25', title: 'Wearables UX audit — source badges, honest deltas, calmer strip',
     items: [
       '<b>Every card shows its source.</b> When ≥2 wearables are connected, every populated card now carries a <i>via X</i> badge so you can see at a glance whether HRV came from Oura, sleep score from Fitbit, weight from Manual. Click any badge to switch source.',

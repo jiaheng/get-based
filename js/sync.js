@@ -906,8 +906,16 @@ export function pushContextToGateway() {
   clearTimeout(_contextPushTimer);
   _contextPushTimer = setTimeout(async () => {
     try {
-      const { buildLabContext } = await import('./lab-context.js');
-      const context = buildLabContext({ skipGroupFilter: true });
+      const { buildLabContext, buildWearableSeriesSection } = await import('./lab-context.js');
+      const baseContext = buildLabContext({ skipGroupFilter: true });
+      // Optional 30-day wearable daily series — gated on a separate Settings
+      // toggle (Agent Access → Push 30-day wearable series). Off by default
+      // because it adds ~1500 tokens vs the always-on ~200-token summary.
+      // Reads L1 IDB on the browser; the gateway only ever sees the rendered
+      // string. Append AFTER the rest so the section parser treats it as a
+      // sibling block.
+      const seriesBlock = await buildWearableSeriesSection(30).catch(() => '');
+      const context = seriesBlock ? `${baseContext}\n${seriesBlock}\n` : baseContext;
       const profileId = state.currentProfile || 'default';
       const profiles = getProfiles().map(p => ({ id: p.id, name: p.name }));
       const relay = getSyncRelay().replace(/^wss:\/\//, 'https://').replace(/^ws:\/\//, 'http://');
@@ -920,7 +928,7 @@ export function pushContextToGateway() {
         },
         body: JSON.stringify({ context, profileId, profiles }),
       });
-      dbg(`Context pushed to gateway (profile: ${profileId})`);
+      dbg(`Context pushed to gateway (profile: ${profileId}, series: ${seriesBlock ? 'yes' : 'no'})`);
     } catch (e) {
       console.warn('[sync] Context push failed:', e);
     }
@@ -1013,6 +1021,7 @@ Object.assign(window, {
   getMessengerToken,
   generateMessengerToken,
   revokeMessengerToken,
+  pushContextToGateway,
   _syncDiag,
   _forcePull,
   renderSyncIndicator,

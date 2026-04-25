@@ -1000,5 +1000,68 @@ return (async function() {
   assert('Detail modal pairs rhr with hr_day companion',
     /DAY_COMPANION\s*=\s*\{[\s\S]*?rhr:\s*'hr_day'/.test(wearablesSrc));
 
+  // ═══════════════════════════════════════
+  // 18. Agent series — daily-values matrix for MCP tools (v1.27.0)
+  // ═══════════════════════════════════════
+  console.log('%c 18. Agent Series ', 'font-weight:bold;color:#f59e0b');
+
+  // labCtx already imported earlier in this file; re-use the binding.
+  const labCtxAgent = await import('../js/lab-context.js');
+  assert('buildWearableSeriesSection exported',
+    typeof labCtxAgent.buildWearableSeriesSection === 'function');
+  assert('isAgentWearableSeriesEnabled exported',
+    typeof labCtxAgent.isAgentWearableSeriesEnabled === 'function');
+  assert('setAgentWearableSeriesEnabled exported',
+    typeof labCtxAgent.setAgentWearableSeriesEnabled === 'function');
+  assert('Agent series toggle is per-profile (key includes active-profile id)',
+    labCtxAgent.buildWearableSeriesSection.toString().includes('isAgentWearableSeriesEnabled') ||
+    /labcharts-.*-agent-wearable-series/.test(await fetch('/js/lab-context.js').then(r => r.text())));
+
+  // Behaviour: returns '' when toggle is off (default).
+  labCtxAgent.setAgentWearableSeriesEnabled(false);
+  const offResult = await labCtxAgent.buildWearableSeriesSection(30);
+  assert('Series builder returns empty string when toggle is off',
+    offResult === '');
+
+  // Behaviour: returns '' when toggle is on but no wearable summary exists.
+  labCtxAgent.setAgentWearableSeriesEnabled(true);
+  const origImported = window._labState.importedData;
+  window._labState.importedData = { wearableSummary: null };
+  const noSummaryResult = await labCtxAgent.buildWearableSeriesSection(30);
+  assert('Series builder returns empty string when no wearableSummary',
+    noSummaryResult === '');
+  window._labState.importedData = origImported;
+  labCtxAgent.setAgentWearableSeriesEnabled(false);  // restore default
+
+  // Source-grep guards: pushContextToGateway must concat the series block.
+  const syncSrc = await fetch('/js/sync.js').then(r => r.text());
+  assert('pushContextToGateway awaits buildWearableSeriesSection',
+    /buildWearableSeriesSection\(30\)/.test(syncSrc));
+  assert('pushContextToGateway swallows series errors (.catch → empty string)',
+    /buildWearableSeriesSection\(30\)\.catch\(\(\)\s*=>\s*''\)/.test(syncSrc));
+  assert('Series block is appended AFTER baseContext, not replacing it',
+    /seriesBlock\s*\?\s*`\$\{baseContext\}\\n\$\{seriesBlock\}/.test(syncSrc));
+
+  // Section tag format: must include the day-count so the agent can parse it.
+  const labSrc = await fetch('/js/lab-context.js').then(r => r.text());
+  assert('Series section tag is wearables-series-{N}d (not just "wearables")',
+    /tag\s*=\s*`wearables-series-\$\{days\}d`/.test(labSrc) &&
+    /\[section:\$\{tag\}\]/.test(labSrc));
+  assert('Series rendering rounds values to 1dp to keep token cost down',
+    /Math\.round\(v\s*\*\s*10\)\s*\/\s*10/.test(labSrc));
+  assert('Series uses → as the value separator (matches existing weekly-trend format)',
+    /series\.join\('→'\)/.test(labSrc));
+  assert('Series elides metrics with zero non-null daily values in the window',
+    /nonNullCount\s*===\s*0\)\s*continue/.test(labSrc) ||
+    /nonNullCount\s*===\s*0\)\s*\{\s*continue/.test(labSrc));
+
+  // Window exports for the toggle handler in Settings → Agent Access.
+  assert('window.isAgentWearableSeriesEnabled exists',
+    typeof window.isAgentWearableSeriesEnabled === 'function');
+  assert('window.setAgentWearableSeriesEnabled exists',
+    typeof window.setAgentWearableSeriesEnabled === 'function');
+  assert('window.pushContextToGateway is exposed (toggle re-pushes immediately)',
+    typeof window.pushContextToGateway === 'function');
+
   console.log(`\nResults: ${pass} passed, ${fail} failed, ${pass + fail} total`);
 })();

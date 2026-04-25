@@ -841,6 +841,110 @@ export function buildWearableContext(importedData) {
   return lines.join('\n');
 }
 
+// ═════════════════════════════════════════════════════════════════════════
+// AGENT-FACING WEARABLE DAILY-SERIES SECTION
+// ═════════════════════════════════════════════════════════════════════════
+// The L2 summary is great for the in-app chat (~200 tokens, every prompt) but
+// agents doing time-series reasoning need the actual daily values. This async
+// builder reads L1 IDB rows and emits a pivoted matrix:
+//
+//   [section:wearables-series-30d]
+//   ## Wearables — 30-day series (newest last; — = no reading)
+//   HRV ms (oura): 33→35→32→...→39  (30 values)
+//   Resting HR bpm (manual): —→—→103→...→103
+//   ...
+//   [/section:wearables-series-30d]
+//
+// Lives in browser only — L1 IDB never syncs. The browser pushes the rendered
+// section to the gateway via pushContextToGateway whenever the agent series
+// preference is on.
+//
+// Per-profile preference; default off (it adds ~1500 tokens to every agent
+// prompt vs the always-on ~200-token summary).
+
+const AGENT_SERIES_DEFAULT_DAYS = 30;
+function _agentSeriesKey() {
+  const pid = localStorage.getItem('labcharts-active-profile') || 'default';
+  return `labcharts-${pid}-agent-wearable-series`;
+}
+export function isAgentWearableSeriesEnabled() {
+  return localStorage.getItem(_agentSeriesKey()) === 'on';
+}
+export function setAgentWearableSeriesEnabled(on) {
+  localStorage.setItem(_agentSeriesKey(), on ? 'on' : 'off');
+}
+
+export async function buildWearableSeriesSection(days = AGENT_SERIES_DEFAULT_DAYS) {
+  if (!isWearableContextEnabled()) return '';
+  if (!isAgentWearableSeriesEnabled()) return '';
+  const summary = state.importedData?.wearableSummary;
+  if (!summary?.metrics || Object.keys(summary.metrics).length === 0) return '';
+
+  let getDailyRange, getActiveProfileId;
+  try {
+    ({ getDailyRange } = await import('./wearables-store.js'));
+    ({ getActiveProfileId } = await import('./profile.js'));
+  } catch { return ''; }
+  const profileId = getActiveProfileId();
+  if (!profileId) return '';
+
+  const today = new Date().toISOString().slice(0, 10);
+  const startD = new Date();
+  startD.setUTCDate(startD.getUTCDate() - (days - 1));
+  const startStr = startD.toISOString().slice(0, 10);
+
+  // Build the date axis once (chronological, oldest → newest).
+  const dates = [];
+  const cursor = new Date(startStr + 'T00:00:00Z');
+  const endDate = new Date(today + 'T00:00:00Z');
+  while (cursor <= endDate) {
+    dates.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+
+  // Each metric reads from its primary source (per the L2 picker / override).
+  // Group sources so we don't pull the same IDB cursor twice.
+  const sourcesNeeded = new Set();
+  for (const m of Object.values(summary.metrics)) {
+    if (m.primarySource) sourcesNeeded.add(m.primarySource);
+  }
+  const rowsBySource = {};
+  for (const sid of sourcesNeeded) {
+    try { rowsBySource[sid] = await getDailyRange(profileId, sid, startStr, today); }
+    catch { rowsBySource[sid] = []; }
+  }
+
+  // Pivot: one line per metric, chronological values separated by → (no-data = —).
+  // Values rounded to 1dp to keep tokens tight without losing meaningful precision
+  // for HRV (often 30-50 ms range, ~30 % is noise) or RHR.
+  const lines = [];
+  for (const mid of DEFAULT_METRIC_ORDER) {
+    const m = summary.metrics[mid];
+    if (!m) continue;
+    const rows = rowsBySource[m.primarySource] || [];
+    if (rows.length === 0) continue;
+    const byDate = new Map(rows.map(r => [r.date, r[mid]]));
+    let nonNullCount = 0;
+    const series = dates.map(d => {
+      const v = byDate.get(d);
+      if (typeof v !== 'number' || !isFinite(v)) return '—';
+      nonNullCount++;
+      const r = Math.round(v * 10) / 10;
+      return Number.isInteger(r) ? String(r) : r.toFixed(1);
+    });
+    if (nonNullCount === 0) continue; // metric has no daily data in window
+    const label = metricLabel(mid);
+    const unit = metricUnit(mid);
+    const labelStr = `${label}${unit ? ' ' + unit : ''} (${m.primarySource})`;
+    lines.push(`${labelStr}: ${series.join('→')}`);
+  }
+
+  if (lines.length === 0) return '';
+
+  const tag = `wearables-series-${days}d`;
+  return `[section:${tag}]\n## Wearables — ${days}-day daily series (oldest→newest, "—" = no reading)\n${lines.join('\n')}\n[/section:${tag}]`;
+}
+
 Object.assign(window, {
   buildLabContext,
   invalidateLabContextCache,
@@ -849,6 +953,9 @@ Object.assign(window, {
   setGroupInAIContext,
   isWearableContextEnabled,
   setWearableContextEnabled,
+  isAgentWearableSeriesEnabled,
+  setAgentWearableSeriesEnabled,
   buildWearableContext,
+  buildWearableSeriesSection,
   injectLensChunks,
 });
