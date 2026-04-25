@@ -418,10 +418,28 @@ export function renderWearableStrip() {
   // Unified render loop — both populated and empty cards flow in the
   // user-defined order (finalOrder). In reorder mode each card gains ◀ ▶
   // arrow handles and detail-modal clicks are suppressed.
-  // Niche metrics (Oura proprietary 1/5 scores, vascular age) are deferred
-  // to a "More" disclosure unless the user explicitly reordered them via
-  // savedOrder OR we're in reorder mode (so they're reachable to move).
-  const userPinnedNiche = new Set((savedOrder || []).filter(id => STRIP_NICHE_METRICS.has(id)));
+  // Niche metrics (Oura proprietary 1/5 scores) are deferred to a "More"
+  // disclosure unless the user explicitly placed them inline. We can't
+  // just check `savedOrder.includes(id)` because moveWearableCard saves
+  // the full display list (including niche cards visible in reorder mode)
+  // — so the first reorder of any non-niche card would auto-pin every
+  // niche metric. Instead we treat a niche metric as pinned only when its
+  // index in savedOrder is BEFORE the last non-niche entry, which is
+  // possible only if the user actively dragged it up past a real card.
+  const userPinnedNiche = (() => {
+    if (!Array.isArray(savedOrder) || !savedOrder.length) return new Set();
+    let lastNonNicheIdx = -1;
+    for (let i = savedOrder.length - 1; i >= 0; i--) {
+      if (!STRIP_NICHE_METRICS.has(savedOrder[i])) { lastNonNicheIdx = i; break; }
+    }
+    if (lastNonNicheIdx <= 0) return new Set();
+    const pinned = new Set();
+    for (let i = 0; i < lastNonNicheIdx; i++) {
+      const id = savedOrder[i];
+      if (STRIP_NICHE_METRICS.has(id)) pinned.add(id);
+    }
+    return pinned;
+  })();
   const renderNicheInline = (metricId) => reorderMode || userPinnedNiche.has(metricId);
   const nicheDeferred = [];
 

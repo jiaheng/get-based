@@ -1590,6 +1590,16 @@ return (async function() {
   const stylesSrc = await fetch('/styles.css').then(r => r.text());
   assert('.wearable-niche-grid uses the same auto-fit track as the main strip grid',
     /\.wearable-niche-grid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(220px,\s*1fr\)\)/.test(stylesSrc));
+  // v1.30.1 niche auto-pin regression: a niche metric is "pinned inline"
+  // only when its index in savedOrder sits BEFORE the last non-niche entry.
+  // moveWearableCard saves the full visible list (including niche cards
+  // shown in reorder mode) — without the BEFORE-last-non-niche check, the
+  // first reorder of any non-niche card would auto-pin every niche metric.
+  assert('userPinnedNiche check requires niche index < lastNonNicheIdx',
+    /lastNonNicheIdx/.test(wearablesSrc2) &&
+    /STRIP_NICHE_METRICS\.has\(savedOrder\[i\]\)/.test(wearablesSrc2));
+  assert('renderNicheInline still falls open under reorderMode',
+    /renderNicheInline\s*=\s*\([^)]+\)\s*=>\s*reorderMode\s*\|\|/.test(wearablesSrc2));
 
   // ═══════════════════════════════════════
   // 17. Day/night HRV + RHR canonicals (v1.25.0)
