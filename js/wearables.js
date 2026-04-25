@@ -380,13 +380,13 @@ export function renderWearableStrip() {
     /* mock flag: summary === MOCK_SUMMARY — avoid import cycle by comparing a sentinel */
     summary === MOCK_SUMMARY;
 
-  // Footer caveat is source-aware: only show the Oura HRV note if Oura is
-  // actually the primary source driving the HRV card. Otherwise it looks like
-  // a generic disclaimer that doesn't apply to the user's current wearable.
-  const hrvPrimary = summary.metrics?.hrv_rmssd?.primarySource;
-  const hrvNote = hrvPrimary === 'oura'
-    ? 'Deep HRV (SDNN · pNN50 · HF/LF) needs an ECG chest strap — Oura provides RMSSD only.'
-    : '';
+  // Originally a footer caveat listed SDNN / pNN50 / HF/LF as "deep HRV"
+  // metrics that need a chest strap. Real users found that confusing —
+  // they don't know what those acronyms mean and the note made the strip
+  // feel like it was apologising for itself. Removed in v1.28.2; the
+  // detail-modal HRV stats and AI context label HRV as "overnight" /
+  // "daytime" without jargon, which is clearer.
+  const hrvNote = '';
   const waitingNote = waitingLabel
     ? `${waitingLabel} connected — waiting on first device sync.`
     : '';

@@ -5,6 +5,12 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.28.2', date: '2026-04-25', title: 'Drop the jargon footer note',
+    items: [
+      'Removed the strip footer caveat reading "Deep HRV (SDNN · pNN50 · HF/LF) needs an ECG chest strap — Oura provides RMSSD only." Real users don\'t know what those acronyms mean and the note made the strip feel like it was apologising for itself. The detail-modal HRV stats and the AI context already label HRV as <i>overnight</i> / <i>daytime</i> without jargon.',
+    ]
+  },
+  {
     version: '1.28.1', date: '2026-04-25', title: 'Test isolation fix — tests no longer write into the user\'s real profile',
     items: [
       '<b>Critical test-isolation bug.</b> The v1.27.5 sync-flow + UI-flow tests swapped the localStorage <code>labcharts-active-profile</code> key but didn\'t also assign <code>state.currentProfile</code>. Because <code>saveImportedData()</code> keys off the in-memory <code>state.currentProfile</code> (not localStorage), any save inside the test wrote the test\'s fake state into the USER\'S real profile storage. On a wearables worktree this overwrote real Oura access tokens with <code>test-rfr</code> placeholders and wiped <code>wearableConnections.manual</code>. Tests now snapshot + restore both, plus drop their own storage keys on cleanup. New regression guard in <code>test-wearables.js</code> that pins the correct pattern in both test files so a future contributor can\'t reintroduce the half-swap.',
