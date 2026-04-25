@@ -883,6 +883,31 @@ return (async function() {
   assert('WebCrypto+base64url yields RFC 7636 challenge', b64url === RFC_CHALLENGE, `got ${b64url}`);
 
   // ═══════════════════════════════════════
+  // 17t. Settings tab split — Wearables + Agent Access (v1.30.0)
+  // ═══════════════════════════════════════
+  console.log('%c 17t. Settings Tab Split ', 'font-weight:bold;color:#f59e0b');
+
+  const settingsV30 = await fetch('/js/settings.js').then(r => r.text());
+  // Tab buttons
+  assert('Settings has a Wearables tab button',
+    /data-tab="wearables"[\s\S]{0,400}Wearables/.test(settingsV30));
+  assert('Settings has an Agent Access tab button',
+    /data-tab="agent"[\s\S]{0,400}Agent Access/.test(settingsV30));
+  assert('Old Integrations tab button is gone',
+    !/data-tab="integrations"/.test(settingsV30));
+  // Tab panels
+  assert('Wearables panel renders the wearables-section (adapter rows)',
+    /data-tab-panel="wearables"[\s\S]{0,400}id="wearables-section"/.test(settingsV30));
+  assert('Agent Access panel renders the messenger-section (token mgmt + series toggle)',
+    /data-tab-panel="agent"[\s\S]{0,400}id="messenger-section"/.test(settingsV30));
+  // Backward-compat redirect for legacy 'integrations' tab id
+  assert('switchSettingsTab redirects legacy "integrations" → "wearables"',
+    /if\s*\(tabId\s*===\s*'integrations'\)\s*tabId\s*=\s*'wearables'/.test(settingsV30));
+  // Wearables-rendered event fires on the renamed tab
+  assert('settings:wearables-rendered event fires when tabId === "wearables" (renamed from integrations)',
+    /tabId\s*===\s*'wearables'[\s\S]{0,200}settings:wearables-rendered/.test(settingsV30));
+
+  // ═══════════════════════════════════════
   // 17u. Tri-state agent series + IDB encryption (v1.29.0)
   // ═══════════════════════════════════════
   console.log('%c 17u. Tri-state Series + IDB Crypto ', 'font-weight:bold;color:#f59e0b');

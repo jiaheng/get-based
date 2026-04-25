@@ -5,6 +5,13 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.30.0', date: '2026-04-25', title: 'Settings split — Wearables and Agent Access are now separate tabs',
+    items: [
+      'The old <i>Integrations</i> tab mixed two different concepts — incoming wearable data sources and outgoing read permission for AI agents. Split into <b>Wearables</b> (Oura, WHOOP, Fitbit, Withings, Ultrahuman, Polar, Apple Health, Manual entries) and <b>Agent Access</b> (token management + the wearable-series push window). Five tabs total: Display · AI · Data · Wearables · Agent Access.',
+      'Old deep-links pointing at <code>integrations</code> redirect to <code>wearables</code> automatically — no broken links.',
+    ]
+  },
+  {
     version: '1.29.0', date: '2026-04-25', title: 'Configurable agent series window + wearable IDB encrypted at rest',
     items: [
       '<b>Settings → Integrations → Agent Access "Push wearable daily series" is now a tri-state.</b> Off / 7 days / 30 days / 90 days. The browser pushes only the chosen window to the gateway. Costs (real-measured): ~100 / ~400 / ~1200 tokens for 7 / 30 / 90 days. Pick the cheapest window that covers your reasoning needs.',

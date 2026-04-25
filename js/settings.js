@@ -42,9 +42,13 @@ export function openSettingsModal(tab) {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
         Data
       </button>
-      <button class="settings-tab-btn${_activeSettingsTab === 'integrations' ? ' active' : ''}" data-tab="integrations" onclick="switchSettingsTab('integrations')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-        Integrations
+      <button class="settings-tab-btn${_activeSettingsTab === 'wearables' ? ' active' : ''}" data-tab="wearables" onclick="switchSettingsTab('wearables')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="6"/><path d="M12 9v3l2 2"/><path d="M9 2h6M9 22h6"/></svg>
+        Wearables
+      </button>
+      <button class="settings-tab-btn${_activeSettingsTab === 'agent' ? ' active' : ''}" data-tab="agent" onclick="switchSettingsTab('agent')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="14" r="4"/><path d="m10.5 11 7.5-7.5M17 6l3 3M14 9l3 3"/></svg>
+        Agent Access
       </button>
     </div>
 
@@ -190,16 +194,15 @@ export function openSettingsModal(tab) {
       </div>
     </div>
 
-    <!-- Integrations Tab -->
-    <div class="settings-tab-panel${_activeSettingsTab === 'integrations' ? ' active' : ''}" data-tab-panel="integrations">
-      <div class="settings-group-title">Wearables &amp; Biometric Devices</div>
-
+    <!-- Wearables Tab — incoming biometric data (Oura, WHOOP, Fitbit, etc.) -->
+    <div class="settings-tab-panel${_activeSettingsTab === 'wearables' ? ' active' : ''}" data-tab-panel="wearables">
       <div class="settings-section" id="wearables-section">
         ${renderWearablesSettingsSection()}
       </div>
+    </div>
 
-      <div class="settings-group-title">Agent Access</div>
-
+    <!-- Agent Access Tab — outgoing read permission for AI agents (MCP / Hermes / OpenClaw) -->
+    <div class="settings-tab-panel${_activeSettingsTab === 'agent' ? ' active' : ''}" data-tab-panel="agent">
       <div class="settings-section" id="messenger-section">
         ${renderMessengerSection()}
       </div>
@@ -238,6 +241,10 @@ function loadSettingsCommitHash() {
 }
 
 export function switchSettingsTab(tabId) {
+  // Legacy v1.27 tab id 'integrations' covered both wearables + agent access.
+  // v1.30.0 split them. Land on Wearables for the back-compat redirect — most
+  // pre-existing deep-links pointed at the wearable adapter rows.
+  if (tabId === 'integrations') tabId = 'wearables';
   _activeSettingsTab = tabId;
   const modal = document.getElementById('settings-modal');
   if (!modal) return;
@@ -256,7 +263,7 @@ export function switchSettingsTab(tabId) {
     refreshDataEntriesSection();
     loadBackupSnapshots();
   }
-  if (tabId === 'integrations') {
+  if (tabId === 'wearables') {
     // Notify the wearables module so it can populate the Manual-row reading
     // counts on first paint, not just on details-toggle.
     document.dispatchEvent(new CustomEvent('settings:wearables-rendered'));
