@@ -621,6 +621,33 @@ function buildWearableDetailHtml(canon, m, series, metricId, manualEntries = [])
         'daytime · 30-day avg',
       ]);
     }
+  } else if (companionLabel) {
+    // No daytime data available — explain why per primary source so users
+    // don't think the feature is broken. Vendor-specific gaps:
+    //   Oura     v2 API exposes no daytime rMSSD samples (only sleep-window).
+    //   WHOOP    same — recovery score is overnight only.
+    //   Polar    workout-only (would populate hrv_day if exercises synced).
+    //   Withings no HRV at all.
+    //   Fitbit   dailyRmssd is the daytime aggregate; should populate.
+    //   Apple    sample-window split should populate; an empty state here
+    //            means the export had no day-window samples for this metric.
+    const primary = m.primarySource;
+    const hint = (() => {
+      if (metricId === 'hrv_rmssd') {
+        if (primary === 'oura' || primary === 'whoop') {
+          return `${primary === 'oura' ? 'Oura' : 'WHOOP'} v1 API exposes overnight HRV only — connect Apple Health, Fitbit, or Polar (workouts) to surface daytime HRV.`;
+        }
+        if (primary === 'polar') return 'Polar surfaces daytime HRV from recorded workouts only — no exercise transactions in the last 90d.';
+        return 'No daytime HRV samples in the last 90d. Apple Health and Fitbit (dailyRmssd) typically populate this.';
+      }
+      // hr_day fallback (rare — usually Oura's heartrate stream covers it)
+      return 'No daytime heart-rate samples in the last 90d. Re-sync the connected wearable.';
+    })();
+    baseStats.push([
+      `${companionLabel}`,
+      '—',
+      hint,
+    ]);
   }
   const statsCells = baseStats.map(([label, val, sub]) => `
     <div class="wearable-detail-stat">

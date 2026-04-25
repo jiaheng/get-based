@@ -5,6 +5,12 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.25.3', date: '2026-04-25', title: 'HRV modal explains why daytime HRV is missing per source',
+    items: [
+      'When the active HRV source can\'t supply daytime data (Oura/WHOOP overnight-only, Polar workout-only with no recent workouts), the detail modal now shows a <i>Daytime HRV — —</i> row with a per-vendor explanation pointing at sources that would populate it (Apple Health, Fitbit <code>dailyRmssd</code>, Polar workouts). Previously the row was just absent and users assumed the feature was broken. The latest/7d/30d sub-stats appear identically to <i>Daytime HR</i> as soon as a daytime-capable HRV source is connected.',
+    ]
+  },
+  {
     version: '1.25.2', date: '2026-04-25', title: 'Daytime HRV / HR show 7-day + 30-day averages, not just today',
     items: [
       'A single quiet or active day can swing daytime HR by 20+ bpm, so showing only the latest value made the companion stat noisy. The HRV / RHR detail modal now adds <i>Daytime (7d)</i> and <i>Daytime (30d)</i> averages alongside <i>Daytime (latest)</i>, the same shape as the overnight stats. The 30-day cell is suppressed until there\'s at least 2 weeks of data so it doesn\'t lie about a one-week trend.',
