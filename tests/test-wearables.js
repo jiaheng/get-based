@@ -560,8 +560,14 @@ return (async function() {
 
   // Records we explicitly don't map must NOT end up in canonical rows —
   // HeartRate (real-time) and BodyMass aren't in our Apple Health mapping yet.
-  assert('Unmapped HeartRate record does not leak into canonical rows',
+  assert('rMSSD is not derivable from Apple Health (we use SDNN type only) — hrv_rmssd stays null',
     day1.hrv_rmssd === null && day2.hrv_rmssd === null);
+  // Day 1 has one HKQuantityTypeIdentifierHeartRate sample at 10:00 (day window) value=72.
+  // Day 2 has none. Verify hr_day surfaces 72 on day 1, null on day 2.
+  assert('hr_day populated from raw HeartRate stream (day-window mean)',
+    day1.hr_day === 72);
+  assert('hr_day null when no day-window HR samples exist on that day',
+    day2.hr_day === null);
   assert('Body temp delta correctly dropped (no baseline yet, absolute temp unusable)',
     day1.body_temp_delta === null);
 
@@ -999,6 +1005,50 @@ return (async function() {
     /DAY_COMPANION\s*=\s*\{\s*hrv_rmssd:\s*'hrv_day'/.test(wearablesSrc));
   assert('Detail modal pairs rhr with hr_day companion',
     /DAY_COMPANION\s*=\s*\{[\s\S]*?rhr:\s*'hr_day'/.test(wearablesSrc));
+
+  // ═══════════════════════════════════════
+  // 17b. Apple Health hr_day from raw HeartRate stream (v1.27.1)
+  // ═══════════════════════════════════════
+  console.log('%c 17b. Apple HR Stream → hr_day ', 'font-weight:bold;color:#f59e0b');
+
+  // hr_day comes from HKQuantityTypeIdentifierHeartRate (NOT RestingHeartRate),
+  // filtered to the day window (06:00–22:00 local). Synthesize a fixture
+  // with multiple HR samples in both windows + verify the day-window mean.
+  const hrXml = `<?xml version="1.0"?><HealthData>
+    <Record type="HKQuantityTypeIdentifierHeartRate" startDate="2026-05-01 09:00:00 +0200" value="65"/>
+    <Record type="HKQuantityTypeIdentifierHeartRate" startDate="2026-05-01 14:00:00 +0200" value="85"/>
+    <Record type="HKQuantityTypeIdentifierHeartRate" startDate="2026-05-01 23:00:00 +0200" value="55"/>
+  </HealthData>`;
+  const hrRows = ah.parseAppleHealthXml(hrXml);
+  const hrDay1 = hrRows.find(r => r.date === '2026-05-01');
+  assert('hr_day is mean of day-window samples only ((65+85)/2 = 75, ignores 23:00 night sample)',
+    hrDay1?.hr_day === 75);
+  assert('hr_day source declaration uses HKQuantityTypeIdentifierHeartRate (NOT RestingHeartRate)',
+    reg.adapterById('apple_health').metrics.hr_day?.hkType === 'HKQuantityTypeIdentifierHeartRate');
+  assert('hr_day declaration carries window:day flag so it routes through the day-window aggregator',
+    reg.adapterById('apple_health').metrics.hr_day?.window === 'day');
+
+  // ═══════════════════════════════════════
+  // 17c. JSON export carries wearable layer (v1.27.1)
+  // ═══════════════════════════════════════
+  console.log('%c 17c. JSON Export — Wearables ', 'font-weight:bold;color:#f59e0b');
+
+  const exportSrc = await fetch('/js/export.js').then(r => r.text());
+  assert('exportClientJSON includes wearableSummary',
+    /wearableSummary:\s*data\.wearableSummary\s*\|\|\s*null/.test(exportSrc));
+  assert('exportClientJSON includes wearableCardOrder (user reorder pref)',
+    /wearableCardOrder:\s*data\.wearableCardOrder\s*\|\|\s*null/.test(exportSrc));
+  assert('exportClientJSON includes wearablePrimaryOverride (per-metric source override)',
+    /wearablePrimaryOverride:\s*data\.wearablePrimaryOverride\s*\|\|\s*null/.test(exportSrc));
+  // Tokens MUST NOT appear in the export — wearableConnections wholesale excluded.
+  assert('exportClientJSON does NOT include wearableConnections (tokens stay device-local)',
+    !/wearableConnections:\s*data\.wearableConnections/.test(exportSrc));
+  // Importer round-trip
+  assert('importDataJSON restores wearableSummary',
+    /json\.wearableSummary[\s\S]{0,80}state\.importedData\.wearableSummary\s*=\s*json\.wearableSummary/.test(exportSrc));
+  assert('importDataJSON restores wearableCardOrder + wearablePrimaryOverride',
+    /state\.importedData\.wearableCardOrder\s*=\s*json\.wearableCardOrder/.test(exportSrc) &&
+    /state\.importedData\.wearablePrimaryOverride\s*=\s*json\.wearablePrimaryOverride/.test(exportSrc));
 
   // ═══════════════════════════════════════
   // 18. Agent series — daily-values matrix for MCP tools (v1.27.0)

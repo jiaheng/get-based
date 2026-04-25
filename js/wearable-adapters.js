@@ -334,12 +334,14 @@ export const ADAPTERS = [
       // Apple Health XML `type` attribute → canonical metric mapping. Populated
       // by the parser at import time, not fetched per-request.
       // hrv_day is derived in the parser by splitting SDNN samples into a
-      // night (22:00–06:00 local) and day (06:00–22:00) window — same HK type.
-      // hr_day is not yet ingested — would require parsing the raw HeartRate
-      // stream (HKQuantityTypeIdentifierHeartRate), which we currently skip.
+      // night (22:00–06:00 local) and day (06:00–22:00) window.
+      // hr_day uses the raw HeartRate stream filtered to the day window —
+      // RestingHeartRate is sleep-derived (Apple writes one per day at wake)
+      // so it stays in the rhr slot via min-aggregation.
       hrv_sdnn:        { hkType: 'HKQuantityTypeIdentifierHeartRateVariabilitySDNN' },
       hrv_day:         { hkType: 'HKQuantityTypeIdentifierHeartRateVariabilitySDNN', window: 'day' },
       rhr:             { hkType: 'HKQuantityTypeIdentifierRestingHeartRate' },
+      hr_day:          { hkType: 'HKQuantityTypeIdentifierHeartRate', window: 'day' },
       steps:           { hkType: 'HKQuantityTypeIdentifierStepCount' },
       spo2_avg:        { hkType: 'HKQuantityTypeIdentifierOxygenSaturation' },
       body_temp_delta: { hkType: 'HKQuantityTypeIdentifierBodyTemperature' },

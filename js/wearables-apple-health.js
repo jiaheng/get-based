@@ -118,9 +118,14 @@ export function parseAppleHealthXml(xmlText) {
   // (e.g. hrv_day uses the same hkType as hrv_sdnn but is derived later via
   // the day-window aggregator) — otherwise the second declaration would
   // overwrite the first and leave the overnight bucket empty.
+  // Exception: hr_day's HKQuantityTypeIdentifierHeartRate hkType is unique
+  // (no overlap with rhr's RestingHeartRate), so it routes directly into a
+  // bucket from which the day-window aggregator will read.
   const typeToCanonical = {};
   for (const [canonId, m] of Object.entries(adapter?.metrics || {})) {
-    if (m?.hkType && !m.window) typeToCanonical[m.hkType] = canonId;
+    if (!m?.hkType) continue;
+    if (m.window && typeToCanonical[m.hkType]) continue; // hrv_day shadows hrv_sdnn — skip
+    typeToCanonical[m.hkType] = canonId;
   }
 
   // Extract <Record …/> elements line-by-line using a regex scan rather than
@@ -234,6 +239,18 @@ export function parseAppleHealthXml(xmlText) {
       row.rhr = Math.round(Math.min(...all) * 100) / 100;
     }
 
+    // hr_day — raw HeartRate samples filtered to the day window (06:00–22:00
+    // local). Apple Watch records HR every few minutes; mean across the
+    // awake window approximates a daytime average. Samples without an hour
+    // (legacy fixtures) are ignored so we never silently mix night + day
+    // values into the day slot.
+    if (Array.isArray(bucket.hr_day) && bucket.hr_day.length) {
+      const dayW = bucket.hr_day.filter(s => isDay(s.h)).map(s => s.v);
+      if (dayW.length > 0) {
+        row.hr_day = Math.round(mean(dayW) * 100) / 100;
+      }
+    }
+
     if (Array.isArray(bucket.steps) && bucket.steps.length) {
       row.steps = Math.round(sum(bucket.steps.map(s => s.v)) * 100) / 100;
     }
@@ -260,6 +277,7 @@ function normaliseUnit(metricId, value, unit) {
       // Apple ships SDNN in ms already.
       return (!unit || unit === 'ms') ? value : null;
     case 'rhr':
+    case 'hr_day':
       // Apple: "count/min". Canonical: "bpm". Same number, different string.
       return (!unit || unit === 'count/min' || unit === 'bpm') ? value : null;
     case 'steps':

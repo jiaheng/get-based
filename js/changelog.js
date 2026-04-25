@@ -5,6 +5,14 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.27.1', date: '2026-04-25', title: 'Apple Health daytime HR + wearables in JSON export + agent docs',
+    items: [
+      '<b>Apple Health users now get a daytime HR card.</b> Previously the importer skipped <code>HKQuantityTypeIdentifierHeartRate</code> samples; v1.27.1 routes them into <i>hr_day</i>, filtered to the 06:00–22:00 local window and averaged. RestingHeartRate stays in the <i>rhr</i> slot via min-aggregation.',
+      '<b>JSON export carries the wearable layer.</b> <i>Settings → Data → Export Client</i> now includes <code>wearableSummary</code>, <code>wearableCardOrder</code>, and <code>wearablePrimaryOverride</code> so you can move profiles between devices or hand the JSON to an agent. OAuth tokens (<code>wearableConnections</code>) are still excluded — same shape as Evolu sync.',
+      '<b>Agent Access docs updated</b> with the wearable-series toggle walkthrough at <a href="https://getbased.health/docs/guide/agent-access" target="_blank">docs/guide/agent-access</a>: section format, example output, token cost, privacy guarantees, and the <code>getbased_section(\'wearables-series-30d\')</code> MCP call.',
+    ]
+  },
+  {
     version: '1.27.0', date: '2026-04-25', title: 'Agents can read your 30-day wearable daily series',
     items: [
       '<b>Agent Access (Settings → Integrations → Agent Access) gains a "Push 30-day wearable series" toggle.</b> When on, the browser builds a pivoted matrix of daily values (HRV, RHR, sleep, readiness, steps…) from your local L1 IndexedDB and pushes it to the gateway as <code>[section:wearables-series-30d]</code>. Any MCP-connected agent (Hermes, OpenClaw, Claude Code, etc.) can pull it via <code>getbased_section(\'wearables-series-30d\')</code>.',

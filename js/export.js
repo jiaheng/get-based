@@ -422,7 +422,14 @@ export async function exportClientJSON(profileId, includeChat = false) {
     markerNotes: data.markerNotes || {},
     manualValues: data.manualValues || {},
     changeHistory: data.changeHistory || [],
-    chatSummaries: data.chatSummaries || []
+    chatSummaries: data.chatSummaries || [],
+    // Wearable layer (added v1.27.1). Only the synced surfaces — L2 summary
+    // + user preferences. Raw L1 IDB rows are deliberately excluded; they
+    // stay per-device. OAuth tokens are stripped via the same path the
+    // Evolu sync uses (wearableConnections wholesale exclude).
+    wearableSummary: data.wearableSummary || null,
+    wearableCardOrder: data.wearableCardOrder || null,
+    wearablePrimaryOverride: data.wearablePrimaryOverride || null
   };
   if (includeChat) {
     const chat = await _exportChatData(profileId);
@@ -699,6 +706,20 @@ export function importDataJSON(file) {
         }
         state.importedData.changeHistory.sort((a, b) => a.date.localeCompare(b.date));
         while (state.importedData.changeHistory.length > 200) state.importedData.changeHistory.shift();
+      }
+      // Import wearable layer (added v1.27.1). The summary, card order, and
+      // per-metric override flow in; raw L1 IDB rows do not (they're never
+      // exported). On the destination device the strip will render with the
+      // imported summary numbers, but the detail-modal chart will be empty
+      // until the user re-OAuths each vendor — same shape as Evolu sync.
+      if (json.wearableSummary && typeof json.wearableSummary === 'object') {
+        state.importedData.wearableSummary = json.wearableSummary;
+      }
+      if (Array.isArray(json.wearableCardOrder)) {
+        state.importedData.wearableCardOrder = json.wearableCardOrder;
+      }
+      if (json.wearablePrimaryOverride && typeof json.wearablePrimaryOverride === 'object') {
+        state.importedData.wearablePrimaryOverride = json.wearablePrimaryOverride;
       }
       // Import chat summaries (merge by threadId)
       if (Array.isArray(json.chatSummaries)) {
