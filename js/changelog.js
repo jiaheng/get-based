@@ -5,6 +5,12 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.27.5', date: '2026-04-25', title: 'Wearables test integrity — replaces fragile source-greps with behavioral assertions',
+    items: [
+      '<b>No user-visible change.</b> Test-only commit closing the audit\'s test-integrity findings: behavioral coverage of the v1.26 source-badge gate fix (renders strip with 2 sources, asserts ≥2 source-badge buttons in HTML), the v1.26 daytime-empty tooltip (opens HRV modal, asserts "Not from Oura · why?" text + title attr carries the long explanation), the v1.27.0 series-append-not-replace ordering (builds both blocks, asserts series block follows base context). Direct token-leak prevention test for <code>buildLabContext</code> against sentinel access/refresh tokens. Source-grep coverage for the <code>wearableConnections</code> preserve-on-pull merge (Evolu pull is hard to drive without a fully-mocked engine — kept as grep with documentation).',
+    ]
+  },
+  {
     version: '1.27.4', date: '2026-04-25', title: 'Wearables P1 cleanup — sync hygiene, picker honesty, touch targets, doc drift',
     items: [
       '<b>Disconnect-then-reconnect was missing data.</b> The <code>last-sync</code> meta entry survived disconnect, so the next reconnect\'s incremental sync started from the old end-date instead of refetching the cleared range. Now cleared on disconnect.',
