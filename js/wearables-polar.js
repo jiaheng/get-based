@@ -122,6 +122,7 @@ export async function fetchPolarDailyRange(accessToken, startDate, endDate, conn
       byDate.set(day, {
         source: 'polar', date: day,
         hrv_rmssd: null, hrv_sdnn: null, rhr: null,
+        hrv_day: null, hr_day: null,
         sleep_score: null, readiness_score: null,
         activity_score: null, steps: null,
         strain: null,
@@ -165,7 +166,9 @@ export async function fetchPolarDailyRange(accessToken, startDate, endDate, conn
           if (!day || !inRange(day)) continue;
           const row = ensureRow(day);
           if (row.steps == null && typeof item['active-steps'] === 'number') row.steps = item['active-steps'];
-          if (row.rhr == null && typeof item?.['heart-rate']?.average === 'number') row.rhr = item['heart-rate'].average;
+          // Daytime activity-window HR average — NOT a resting reading. The
+          // overnight `rhr` slot is populated separately from sleep min above.
+          if (row.hr_day == null && typeof item?.['heart-rate']?.average === 'number') row.hr_day = item['heart-rate'].average;
         } catch (e) { logDebug('activity-item', e); }
       }
     }
@@ -185,10 +188,14 @@ export async function fetchPolarDailyRange(accessToken, startDate, endDate, conn
           const day = (ex?.['start-time'] || '').slice(0, 10);
           if (!day || !inRange(day)) continue;
           const row = ensureRow(day);
-          if (typeof ex?.['heart-rate-variability-avg'] === 'number' && row.hrv_rmssd == null) {
-            row.hrv_rmssd = ex['heart-rate-variability-avg'];
+          // Workout-gated HRV: this is a daytime/active measurement during
+          // exercise — semantically distinct from overnight rMSSD. Route to
+          // hrv_day so the strip's hrv_rmssd card stays a recovery signal.
+          if (typeof ex?.['heart-rate-variability-avg'] === 'number' && row.hrv_day == null) {
+            row.hrv_day = ex['heart-rate-variability-avg'];
           }
-          if (row.rhr == null && typeof ex?.['heart-rate']?.average === 'number') row.rhr = ex['heart-rate'].average;
+          // Workout HR average — daytime, route accordingly.
+          if (row.hr_day == null && typeof ex?.['heart-rate']?.average === 'number') row.hr_day = ex['heart-rate'].average;
         } catch (e) { logDebug('exercise-item', e); }
       }
     }

@@ -5,6 +5,17 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.25.0', date: '2026-04-25', title: 'Daytime HRV + heart rate, alongside overnight',
+    items: [
+      '<b>Wearable adapters now distinguish overnight from daytime HRV / RHR.</b> Until today, every adapter dumped whatever signal the vendor calls "daily HRV" into one slot — but Oura/WHOOP/Fitbit measure overnight rMSSD during sleep, while Polar measures workout HRV during exercise, and Withings reports a daytime spot pulse from the scale. Same slot, three different numbers. v1.25.0 splits them.',
+      '<b>Per-vendor mapping</b> — Oura adds a <code>heartrate</code> stream pull and aggregates awake-tagged samples into <i>daytime HR</i>. WHOOP\'s 24h cycle-average HR routes to <i>daytime HR</i>. Fitbit splits <code>deepRmssd</code> (overnight) from <code>dailyRmssd</code> (broader day aggregate). Ultrahuman\'s 24h <code>.avg</code> fields move to the daytime slots; the overnight slots fill from <code>.sleep</code> sub-fields. Withings scale pulse moves from <i>resting HR</i> (it never was) to <i>daytime HR</i>; the overnight slot now sources from sleep summary <code>hr_min</code>. Polar workout HR + HRV move to the daytime slots; overnight RHR sources from sleep nights. Apple Health splits HRV SDNN samples by hour-of-day window (22:00–06:00 = overnight, 06:00–22:00 = daytime).',
+      '<b>Strip stays calm.</b> Daytime values do NOT get their own cards — they\'d clutter the dashboard with two HRV cards and two HR cards. Instead, when you open the detail modal for HRV or RHR, the matching daytime aggregate appears as an extra stat row underneath the overnight number.',
+      '<b>AI context labels both windows explicitly.</b> The chat prompt now sees <i>HRV (overnight)</i> AND <i>HRV (daytime)</i>, <i>Resting HR (overnight)</i> AND <i>Heart rate (daytime)</i> — distinct enough that the model can reason about stress reactivity vs recovery instead of conflating them.',
+      '<b>Honesty fixes.</b> Withings users will see their <i>Resting HR</i> card go empty if they only have a scale connected (no sleep summary) — that\'s correct, the scale never measured RHR. Polar users similarly: workout HR isn\'t resting. The fix is to either log a sleep night or connect another wearable that measures overnight HR.',
+      '<b>Re-sync your wearables once</b> to populate the new daytime slots — existing 90-day backfills don\'t auto-reprocess. Settings → Integrations → expand any vendor → <i>Re-sync last 90 days</i>.',
+    ]
+  },
+  {
     version: '1.24.1', date: '2026-04-25', title: 'Fix: deleting manual readings actually deletes them',
     items: [
       'The × on each manual reading inside a wearable detail modal threw silently and the row stayed in storage. Confirming the dialog now removes the entry, refreshes the L2 summary, and repaints the strip card. Same fix for the <i>Delete all manual entries</i> action under Settings → Integrations → Manual.',

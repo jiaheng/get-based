@@ -69,6 +69,7 @@ export async function fetchFitbitDailyRange(accessToken, startDate, endDate) {
       byDate.set(day, {
         source: 'fitbit', date: day,
         hrv_rmssd: null, hrv_sdnn: null, rhr: null,
+        hrv_day: null, hr_day: null,
         sleep_score: null, readiness_score: null,
         activity_score: null, steps: null,
         strain: null,
@@ -81,16 +82,26 @@ export async function fetchFitbitDailyRange(accessToken, startDate, endDate) {
   }
 
   // HRV: `hrv` is an array of { dateTime, value: { dailyRmssd, deepRmssd? } }.
+  // - deepRmssd is the deep-sleep window measurement → cleanest overnight rMSSD.
+  // - dailyRmssd is averaged across all sleep stages (deep + light + REM) and
+  //   includes some dawn-period samples → routes to hrv_day as the broader
+  //   "across-the-day" aggregate. It's the closest Fitbit gets to a daytime
+  //   HRV without intraday-scope upgrades.
   for (const entry of (hrv?.hrv || [])) {
     if (!entry?.dateTime) continue;
-    const v = (typeof entry.value?.dailyRmssd === 'number') ? entry.value.dailyRmssd
-            : (typeof entry.value?.rmssdMilliseconds === 'number') ? entry.value.rmssdMilliseconds
-            : null;
-    if (v != null) ensureRow(entry.dateTime).hrv_rmssd = v;
+    const row = ensureRow(entry.dateTime);
+    if (typeof entry.value?.deepRmssd === 'number') row.hrv_rmssd = entry.value.deepRmssd;
+    else if (typeof entry.value?.dailyRmssd === 'number') row.hrv_rmssd = entry.value.dailyRmssd;
+    else if (typeof entry.value?.rmssdMilliseconds === 'number') row.hrv_rmssd = entry.value.rmssdMilliseconds;
+    if (typeof entry.value?.dailyRmssd === 'number') row.hrv_day = entry.value.dailyRmssd;
   }
 
   // Resting heart rate: `activities-heart` is an array of { dateTime,
-  // value: { restingHeartRate, heartRateZones, ... } }.
+  // value: { restingHeartRate, heartRateZones, ... } }. Fitbit's
+  // restingHeartRate is sleep-window derived → routes to rhr (overnight).
+  // Daytime average HR would require the activities-heart-intraday endpoint
+  // (1-min resolution), which needs a Personal-app scope upgrade we don't
+  // currently request. hr_day stays null for Fitbit until that scope lands.
   for (const entry of (hr?.['activities-heart'] || [])) {
     if (!entry?.dateTime) continue;
     const rhrVal = entry.value?.restingHeartRate;

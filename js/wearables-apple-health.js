@@ -114,9 +114,13 @@ async function extractExportXml(zipFile, onProgress) {
 // we'd need a chunked reader; defer until a tester reports the bound.
 export function parseAppleHealthXml(xmlText) {
   const adapter = adapterById('apple_health');
+  // Build hkType → canonical map. Skip entries with a `window` discriminator
+  // (e.g. hrv_day uses the same hkType as hrv_sdnn but is derived later via
+  // the day-window aggregator) — otherwise the second declaration would
+  // overwrite the first and leave the overnight bucket empty.
   const typeToCanonical = {};
   for (const [canonId, m] of Object.entries(adapter?.metrics || {})) {
-    if (m?.hkType) typeToCanonical[m.hkType] = canonId;
+    if (m?.hkType && !m.window) typeToCanonical[m.hkType] = canonId;
   }
 
   // Extract <Record …/> elements line-by-line using a regex scan rather than
@@ -157,32 +161,45 @@ export function parseAppleHealthXml(xmlText) {
     const normalised = normaliseUnit(metricId, valueNum, attrs.unit);
     if (normalised == null) continue;
 
+    // Pull the local hour out of "YYYY-MM-DD HH:mm:ss ±zzzz" — used downstream
+    // to split rhr/hrv_sdnn samples into night (22:00–06:00) vs day windows.
+    const hourMatch = startDate.match(/^\d{4}-\d{2}-\d{2}[ T](\d{2}):/);
+    const hour = hourMatch ? Number(hourMatch[1]) : null;
+
     if (!byDayByMetric.has(day)) byDayByMetric.set(day, {});
     const bucket = byDayByMetric.get(day);
     if (!bucket[metricId]) bucket[metricId] = [];
-    bucket[metricId].push(normalised);
+    bucket[metricId].push({ v: normalised, h: hour });
   }
 
-  // Aggregate per day → canonical L1 row. Aggregation rule per canonical:
-  //   hrv_sdnn    mean   (many sleep-night readings)
-  //   rhr         min    (Apple usually publishes one resting HR per day; min
-  //                       protects against accidental spikes from third-party apps)
-  //   steps       sum    (multiple samples per day across workouts/standing)
-  //   spo2_avg    mean   (Apple Watch blood-oxygen sporadic readings)
-  //   body_temp   mean   (wrist temp delta when available)
-  const AGGREGATORS = {
-    hrv_sdnn:        vals => vals.reduce((a, b) => a + b, 0) / vals.length,
-    rhr:             vals => Math.min(...vals),
-    steps:           vals => vals.reduce((a, b) => a + b, 0),
-    spo2_avg:        vals => vals.reduce((a, b) => a + b, 0) / vals.length,
-    body_temp_delta: vals => vals.reduce((a, b) => a + b, 0) / vals.length,
-  };
+  // Aggregate per day → canonical L1 row.
+  //   hrv_sdnn   mean of night-window (22:00–06:00 local) samples — deep
+  //              sleep on the wrist; the gold-standard recovery signal.
+  //   hrv_day    mean of day-window (06:00–22:00) samples — stress reactivity
+  //              snapshot, distinct from overnight recovery. If we can't
+  //              classify any samples by hour, the all-day mean falls into
+  //              hrv_sdnn (legacy behaviour) so old fixtures keep working.
+  //   rhr        min across ALL samples — Apple writes RestingHR as a
+  //              sleep-derived value timestamped at morning wake, so a
+  //              naïve hour-of-day split would mis-classify it. Min is
+  //              still the cleanest aggregator (protects against 3rd-party
+  //              app spikes).
+  //   hr_day     null — would require parsing HKQuantityTypeIdentifierHeartRate
+  //              (the raw intraday stream), which we don't ingest yet.
+  //   steps      sum
+  //   spo2_avg   mean
+  //   body_temp  mean
+  const isNight = (h) => (typeof h === 'number') && (h < 6 || h >= 22);
+  const isDay   = (h) => (typeof h === 'number') && (h >= 6 && h < 22);
+  const mean = (arr) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
+  const sum  = (arr) => arr.reduce((a, b) => a + b, 0);
 
   const rows = [];
   for (const [day, bucket] of byDayByMetric) {
     const row = {
       source: 'apple_health', date: day,
       hrv_rmssd: null, hrv_sdnn: null, rhr: null,
+      hrv_day: null, hr_day: null,
       sleep_score: null, readiness_score: null,
       activity_score: null, steps: null,
       strain: null,
@@ -190,12 +207,43 @@ export function parseAppleHealthXml(xmlText) {
       weight: null, bp_systolic: null, bp_diastolic: null,
       spo2_avg: null, body_temp_delta: null, glucose_avg: null,
     };
-    for (const [metricId, values] of Object.entries(bucket)) {
-      const agg = AGGREGATORS[metricId];
-      if (!agg || values.length === 0) continue;
-      const v = agg(values);
-      row[metricId] = Math.round(v * 100) / 100;
+
+    // HRV SDNN — hour-window split. Day samples → hrv_day, night samples →
+    // hrv_sdnn. If no samples carry hour metadata, fall back to all-day mean
+    // into hrv_sdnn so legacy fixtures (no time-of-day) still aggregate.
+    if (Array.isArray(bucket.hrv_sdnn) && bucket.hrv_sdnn.length) {
+      const samples = bucket.hrv_sdnn;
+      const night = samples.filter(s => isNight(s.h)).map(s => s.v);
+      const dayW  = samples.filter(s => isDay(s.h)).map(s => s.v);
+      const all   = samples.map(s => s.v);
+      const nightMean = mean(night);
+      const dayMean   = mean(dayW);
+      if (night.length === 0 && dayW.length === 0) {
+        // No hour info — keep legacy "mean of all samples → hrv_sdnn" behaviour.
+        row.hrv_sdnn = Math.round(mean(all) * 100) / 100;
+      } else {
+        row.hrv_sdnn = nightMean != null ? Math.round(nightMean * 100) / 100 : null;
+        row.hrv_day  = dayMean   != null ? Math.round(dayMean   * 100) / 100 : null;
+      }
     }
+
+    // RHR — Apple writes one sleep-derived value per day, timestamped at wake.
+    // Min across all samples protects against third-party-app outliers.
+    if (Array.isArray(bucket.rhr) && bucket.rhr.length) {
+      const all = bucket.rhr.map(s => s.v);
+      row.rhr = Math.round(Math.min(...all) * 100) / 100;
+    }
+
+    if (Array.isArray(bucket.steps) && bucket.steps.length) {
+      row.steps = Math.round(sum(bucket.steps.map(s => s.v)) * 100) / 100;
+    }
+    if (Array.isArray(bucket.spo2_avg) && bucket.spo2_avg.length) {
+      row.spo2_avg = Math.round(mean(bucket.spo2_avg.map(s => s.v)) * 100) / 100;
+    }
+    if (Array.isArray(bucket.body_temp_delta) && bucket.body_temp_delta.length) {
+      row.body_temp_delta = Math.round(mean(bucket.body_temp_delta.map(s => s.v)) * 100) / 100;
+    }
+
     rows.push(row);
   }
   rows.sort((a, b) => a.date.localeCompare(b.date));

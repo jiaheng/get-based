@@ -28,9 +28,19 @@
 //   worseWhen       'up' | 'down' | 'either'  — semantic colour for delta badges
 
 export const CANONICAL_METRICS = {
-  hrv_rmssd:        { id: 'hrv_rmssd',        label: 'HRV',         sub: 'RMSSD', unit: 'ms',    worseWhen: 'down'   },
-  hrv_sdnn:         { id: 'hrv_sdnn',         label: 'HRV',         sub: 'SDNN',  unit: 'ms',    worseWhen: 'down'   }, // Apple Health (deep HRV)
-  rhr:              { id: 'rhr',              label: 'Resting HR',  sub: '',      unit: 'bpm',   worseWhen: 'up'     },
+  // Sleep-window: rMSSD computed during the main sleep period (gold-standard
+  // recovery signal — what Oura/WHOOP/Fitbit "daily HRV" actually is).
+  hrv_rmssd:        { id: 'hrv_rmssd',        label: 'HRV',         sub: 'overnight', unit: 'ms', worseWhen: 'down'   },
+  hrv_sdnn:         { id: 'hrv_sdnn',         label: 'HRV',         sub: 'SDNN',      unit: 'ms', worseWhen: 'down'   }, // Apple Health (deep HRV)
+  // Waking-window: HRV measured during the day. Tracks acute stress / load
+  // reactivity, distinct from overnight recovery. Most vendors expose this
+  // separately (Oura daily_stress, WHOOP recovery, Apple awake-window samples).
+  hrv_day:          { id: 'hrv_day',          label: 'HRV',         sub: 'daytime',   unit: 'ms', worseWhen: 'down'   },
+  rhr:              { id: 'rhr',              label: 'Resting HR',  sub: 'overnight', unit: 'bpm', worseWhen: 'up'     },
+  // Daytime average HR (NOT resting). Captures activity / stress load. Polar
+  // and Withings naturally expose this; Oura/WHOOP/Fitbit derive it from
+  // intraday or activity streams.
+  hr_day:           { id: 'hr_day',           label: 'Heart rate',  sub: 'daytime',   unit: 'bpm', worseWhen: 'either' },
   sleep_score:      { id: 'sleep_score',      label: 'Sleep',       sub: 'score', unit: '',      worseWhen: 'down'   },
   readiness_score:  { id: 'readiness_score',  label: 'Readiness',   sub: 'score', unit: '',      worseWhen: 'down'   },
   activity_score:   { id: 'activity_score',   label: 'Activity',    sub: 'score', unit: '',      worseWhen: 'down'   },
@@ -61,6 +71,9 @@ export const DEFAULT_METRIC_ORDER = [
   'activity_score', 'steps',
   'weight', 'bp_systolic', 'bp_diastolic',
   'stress_high_min', 'resilience_level', 'cardio_age',
+  // Daytime companions are summarised so the AI / detail modal can read them,
+  // but intentionally placed AFTER the overnight cards — the strip stays calm.
+  'hrv_day', 'hr_day',
 ];
 
 export const ADAPTERS = [
@@ -87,6 +100,7 @@ export const ADAPTERS = [
     metrics: {
       hrv_rmssd:        { endpoint: 'v2/usercollection/sleep',                   field: 'average_hrv' },
       rhr:              { endpoint: 'v2/usercollection/sleep',                   field: 'average_heart_rate' },
+      hr_day:           { endpoint: 'v2/usercollection/heartrate',               field: 'mean(awake-tagged samples)' },
       sleep_score:      { endpoint: 'v2/usercollection/daily_sleep',             field: 'score' },
       readiness_score:  { endpoint: 'v2/usercollection/daily_readiness',         field: 'score' },
       activity_score:   { endpoint: 'v2/usercollection/daily_activity',          field: 'score' },           // 0 when user has Rest Mode on — see steps as fallback
@@ -127,8 +141,10 @@ export const ADAPTERS = [
     },
     apiHost: 'partner.ultrahuman.com',
     metrics: {
-      hrv_rmssd:       { endpoint: 'api/partners/v1/user_data/metrics', field: 'hrv' },
-      rhr:             { endpoint: 'api/partners/v1/user_data/metrics', field: 'resting_heart_rate' },
+      hrv_rmssd:       { endpoint: 'api/partners/v1/user_data/metrics', field: 'hrv.sleep' },
+      rhr:             { endpoint: 'api/partners/v1/user_data/metrics', field: 'resting_heart_rate.sleep' },
+      hrv_day:         { endpoint: 'api/partners/v1/user_data/metrics', field: 'hrv.avg' },
+      hr_day:          { endpoint: 'api/partners/v1/user_data/metrics', field: 'resting_heart_rate.avg' },
       sleep_score:     { endpoint: 'api/partners/v1/user_data/metrics', field: 'sleep_index' },
       readiness_score: { endpoint: 'api/partners/v1/user_data/metrics', field: 'recovery_index' },
       steps:           { endpoint: 'api/partners/v1/user_data/metrics', field: 'steps' },
@@ -166,6 +182,7 @@ export const ADAPTERS = [
     metrics: {
       hrv_rmssd:       { endpoint: 'developer/v1/recovery', field: 'score.hrv_rmssd_milli' },
       rhr:             { endpoint: 'developer/v1/recovery', field: 'score.resting_heart_rate' },
+      hr_day:          { endpoint: 'developer/v1/cycle',                    field: 'score.average_heart_rate' },
       sleep_score:     { endpoint: 'developer/v1/activity/sleep',           field: 'score.sleep_performance_percentage' },
       readiness_score: { endpoint: 'developer/v1/recovery',                 field: 'score.recovery_score' },
       strain:          { endpoint: 'developer/v1/cycle',                    field: 'score.strain' },
@@ -197,7 +214,8 @@ export const ADAPTERS = [
     },
     apiHost: 'api.fitbit.com',
     metrics: {
-      hrv_rmssd:       { endpoint: '1/user/-/hrv/date/',                         field: 'hrv[0].value.dailyRmssd' },
+      hrv_rmssd:       { endpoint: '1/user/-/hrv/date/',                         field: 'hrv[0].value.deepRmssd' },
+      hrv_day:         { endpoint: '1/user/-/hrv/date/',                         field: 'hrv[0].value.dailyRmssd' },
       rhr:             { endpoint: '1/user/-/activities/heart/date/',            field: 'activities-heart[0].value.restingHeartRate' },
       steps:           { endpoint: '1/user/-/activities/steps/date/',            field: 'activities-steps[0].value' },
       sleep_score:     { endpoint: '1.2/user/-/sleep/date/',                     field: 'sleep[0].efficiency' }, // efficiency as a 0-100 proxy — Fitbit doesn't expose Sleep Score via API
@@ -234,7 +252,8 @@ export const ADAPTERS = [
       weight:       { endpoint: 'measure',  measType: 1  },
       bp_diastolic: { endpoint: 'measure',  measType: 9  },
       bp_systolic:  { endpoint: 'measure',  measType: 10 },
-      rhr:          { endpoint: 'measure',  measType: 11 },
+      hr_day:       { endpoint: 'measure',  measType: 11 }, // scale pulse — daytime spot reading
+      rhr:          { endpoint: 'v2/sleep', field: 'hr_min' }, // sleep min HR is the true overnight RHR
       sleep_score:  { endpoint: 'v2/sleep', field: 'sleep_score' },
     },
     accountInfo: { endpoint: 'v2/user', identityField: 'email' },
@@ -269,10 +288,11 @@ export const ADAPTERS = [
       // AccessLink's data model is transactional — you POST to open, GET to
       // read listed URLs, PUT to commit. Endpoints here are the "list" steps;
       // wearables-polar.js walks per-item URLs. Fields map post-parse.
-      rhr:         { endpoint: 'v3/users/{uid}/activity-transactions', field: 'heart-rate.average' },
+      rhr:         { endpoint: 'v3/users/{uid}/sleep',                 field: 'heart-rate-samples.min' }, // sleep-window minimum is the true overnight RHR
+      hr_day:      { endpoint: 'v3/users/{uid}/activity-transactions', field: 'heart-rate.average' },     // daytime activity-window average — NOT resting
+      hrv_day:     { endpoint: 'v3/users/{uid}/exercise-transactions', field: 'heart-rate-variability-avg' }, // workout-gated; daytime measurement, not overnight rMSSD
       steps:       { endpoint: 'v3/users/{uid}/activity-transactions', field: 'active-steps' },
       sleep_score: { endpoint: 'v3/users/{uid}/sleep',                 field: 'sleep-score' },
-      hrv_rmssd:   { endpoint: 'v3/users/{uid}/exercise-transactions', field: 'heart-rate-variability-avg' }, // workout-gated, may be sparse
     },
     accountInfo: { endpoint: 'v3/users/{uid}', identityField: 'polar-user-id' },
   },
@@ -311,7 +331,12 @@ export const ADAPTERS = [
     metrics: {
       // Apple Health XML `type` attribute → canonical metric mapping. Populated
       // by the parser at import time, not fetched per-request.
+      // hrv_day is derived in the parser by splitting SDNN samples into a
+      // night (22:00–06:00 local) and day (06:00–22:00) window — same HK type.
+      // hr_day is not yet ingested — would require parsing the raw HeartRate
+      // stream (HKQuantityTypeIdentifierHeartRate), which we currently skip.
       hrv_sdnn:        { hkType: 'HKQuantityTypeIdentifierHeartRateVariabilitySDNN' },
+      hrv_day:         { hkType: 'HKQuantityTypeIdentifierHeartRateVariabilitySDNN', window: 'day' },
       rhr:             { hkType: 'HKQuantityTypeIdentifierRestingHeartRate' },
       steps:           { hkType: 'HKQuantityTypeIdentifierStepCount' },
       spo2_avg:        { hkType: 'HKQuantityTypeIdentifierOxygenSaturation' },

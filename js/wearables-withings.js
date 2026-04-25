@@ -20,12 +20,15 @@ import { isDebugMode } from './utils.js';
 const WITHINGS_API = 'https://wbsapi.withings.net';
 const PROXY_URL    = '/api/proxy';
 
-// Withings measure-type codes → canonical fields
+// Withings measure-type codes → canonical fields. Scale pulse (type 11) is
+// a daytime spot reading at the moment of standing — emphatically NOT a
+// resting heart rate. Route it to hr_day; the true rhr slot is filled by
+// sleep summary's hr_min below.
 const MEAS_TYPES = {
   1:  'weight',       // kg
   9:  'bp_diastolic', // mmHg
   10: 'bp_systolic',  // mmHg
-  11: 'rhr',          // bpm (pulse — Withings uses this for resting HR on scale)
+  11: 'hr_day',       // bpm (scale pulse — taken while standing on the scale)
 };
 
 // Withings status codes → friendly messages. Source: Withings Developer
@@ -182,6 +185,7 @@ export async function fetchWithingsDailyRange(accessToken, startDate, endDate) {
       byDate.set(day, {
         source: 'withings', date: day,
         hrv_rmssd: null, hrv_sdnn: null, rhr: null,
+        hrv_day: null, hr_day: null,
         sleep_score: null, readiness_score: null,
         activity_score: null, steps: null,
         strain: null,

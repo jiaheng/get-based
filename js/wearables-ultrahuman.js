@@ -79,6 +79,7 @@ function canonicalizeDay(day, payload) {
   const row = {
     source: 'ultrahuman', date: day,
     hrv_rmssd: null, hrv_sdnn: null, rhr: null,
+    hrv_day: null, hr_day: null,
     sleep_score: null, readiness_score: null,
     activity_score: null, steps: null,
     strain: null,
@@ -89,8 +90,13 @@ function canonicalizeDay(day, payload) {
   const pick = (path) => path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), data);
   const numOrNull = (v) => (typeof v === 'number' && isFinite(v)) ? v : null;
 
-  row.hrv_rmssd       = numOrNull(pick('hrv.avg'))                 ?? numOrNull(pick('hrv'));
-  row.rhr             = numOrNull(pick('resting_heart_rate.avg'))  ?? numOrNull(pick('resting_heart_rate'));
+  // Ultrahuman exposes sleep-window aggregates (`hrv.sleep`, `resting_heart_rate.sleep`)
+  // when the ring captured the night, plus the 24h-average fields under .avg.
+  // Split honestly: sleep-window → overnight slots; .avg → daytime slots.
+  row.hrv_rmssd       = numOrNull(pick('hrv.sleep'));
+  row.rhr             = numOrNull(pick('resting_heart_rate.sleep'));
+  row.hrv_day         = numOrNull(pick('hrv.avg'))                 ?? numOrNull(pick('hrv'));
+  row.hr_day          = numOrNull(pick('resting_heart_rate.avg'))  ?? numOrNull(pick('resting_heart_rate'));
   row.sleep_score     = numOrNull(pick('sleep_index.score'))       ?? numOrNull(pick('sleep_index'));
   row.readiness_score = numOrNull(pick('recovery_index.score'))    ?? numOrNull(pick('recovery_index'));
   row.steps           = numOrNull(pick('steps.total'))             ?? numOrNull(pick('steps'));

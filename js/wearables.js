@@ -307,9 +307,13 @@ export function renderWearableStrip() {
   // can reorder across all of them, not just per-category. Empty cards for
   // weight/bp_systolic/rhr fill in wherever they're not already present.
   const MANUAL_EMPTY_METRICS = ['weight', 'bp_systolic', 'rhr'];
+  // Daytime companions live in the detail modal as sub-stats, not as their
+  // own cards — keeps the strip calm at 6-8 cards instead of 10.
+  const STRIP_HIDDEN_METRICS = new Set(['hrv_day', 'hr_day']);
   const displayOrder = [];
   const seenDisplay = new Set();
   for (const id of baseMetricOrder) {
+    if (STRIP_HIDDEN_METRICS.has(id)) continue;
     if (summary.metrics?.[id]) { displayOrder.push({ id, empty: false }); seenDisplay.add(id); }
   }
   for (const id of MANUAL_EMPTY_METRICS) {
@@ -573,14 +577,34 @@ function buildWearableDetailHtml(canon, m, series, metricId, manualEntries = [])
   const deltaStr = deltaPct == null ? '—'
                  : (deltaPct > 0.5 ? '↑' : deltaPct < -0.5 ? '↓' : '→') + ' ' + Math.abs(deltaPct).toFixed(0) + '%';
 
-  const statsCells = [
+  // Daytime companion: when the user is looking at an overnight HRV or RHR
+  // card, surface the matching daytime aggregate as an extra stat so they can
+  // see stress reactivity vs recovery side-by-side. The strip stays calm —
+  // hrv_day / hr_day are explicitly excluded from the strip's card list.
+  const DAY_COMPANION = { hrv_rmssd: 'hrv_day', rhr: 'hr_day' };
+  const companionId = DAY_COMPANION[metricId];
+  const companion = companionId ? state.importedData?.wearableSummary?.metrics?.[companionId] : null;
+  const companionLabel = metricId === 'hrv_rmssd' ? 'Daytime HRV'
+                       : metricId === 'rhr'       ? 'Daytime HR'
+                       : null;
+  const companionUnitSpaced = companion ? unitSpaced : '';
+
+  const baseStats = [
     ['Latest',   `${formatV(m.latest)}${unitSpaced}`, m.latestDate || ''],
     ['Baseline (90d)', `${formatV(m.baseline)}${unitSpaced}`, 'median'],
     ['7-day avg', `${formatV(m.rolling?.d7)}${unitSpaced}`, ''],
     ['30-day avg', `${formatV(m.rolling?.d30)}${unitSpaced}`, ''],
     ['P25 – P75', `${formatV(m.baselineP25)} – ${formatV(m.baselineP75)}${unitSpaced}`, 'interquartile'],
     ['Coverage', `${series.length}d`, `of last 90 days`],
-  ].map(([label, val, sub]) => `
+  ];
+  if (companion && companionLabel && typeof companion.latest === 'number') {
+    baseStats.push([
+      companionLabel,
+      `${formatV(companion.latest)}${companionUnitSpaced}`,
+      companion.latestDate ? `daytime · ${companion.latestDate}` : 'daytime',
+    ]);
+  }
+  const statsCells = baseStats.map(([label, val, sub]) => `
     <div class="wearable-detail-stat">
       <div class="wearable-detail-stat-label">${escapeHTML(label)}</div>
       <div class="wearable-detail-stat-val">${val}</div>

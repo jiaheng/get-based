@@ -119,9 +119,16 @@ export async function fetchOuraDailyRange(accessToken, startDate, endDate) {
   // Fetch collections in parallel — independent endpoints. New (daily_activity,
   // daily_stress, daily_resilience, daily_cardiovascular_age) are covered by
   // the `daily` scope we already request, so no reconnect needed for them.
+  // heartrate samples are large (5-min granularity = 288/day). Use a
+  // start_datetime/end_datetime ISO range so Oura returns awake-tagged
+  // samples we can use to derive `hr_day`.
+  const startDt = `${startDate}T00:00:00Z`;
+  const endDt   = `${endDate}T23:59:59Z`;
+
   const [
     sleepSessions, dailySleep, dailyReadiness, dailySpo2,
     dailyActivity, dailyStress, dailyResilience, dailyCardioAge,
+    heartrateSamples,
   ] = await Promise.all([
     ouraCollect('v2/usercollection/sleep',                    accessToken, params).catch(e => { logDebug('sleep', e); return []; }),
     ouraCollect('v2/usercollection/daily_sleep',              accessToken, params).catch(e => { logDebug('daily_sleep', e); return []; }),
@@ -131,6 +138,8 @@ export async function fetchOuraDailyRange(accessToken, startDate, endDate) {
     ouraCollect('v2/usercollection/daily_stress',             accessToken, params).catch(e => { logDebug('daily_stress', e); return []; }),
     ouraCollect('v2/usercollection/daily_resilience',         accessToken, params).catch(e => { logDebug('daily_resilience', e); return []; }),
     ouraCollect('v2/usercollection/daily_cardiovascular_age', accessToken, params).catch(e => { logDebug('daily_cardiovascular_age', e); return []; }),
+    ouraCollect('v2/usercollection/heartrate', accessToken, { start_datetime: startDt, end_datetime: endDt })
+      .catch(e => { logDebug('heartrate', e); return []; }),
   ]);
 
   const sleepByDay = bestSessionPerDay(sleepSessions);
@@ -141,6 +150,7 @@ export async function fetchOuraDailyRange(accessToken, startDate, endDate) {
       byDate.set(day, {
         source: 'oura', date: day,
         hrv_rmssd: null, rhr: null,
+        hrv_day: null, hr_day: null,
         sleep_score: null, readiness_score: null,
         activity_score: null, steps: null,
         stress_high_min: null, resilience_level: null, cardio_age: null,
@@ -189,6 +199,26 @@ export async function fetchOuraDailyRange(accessToken, startDate, endDate) {
   for (const d of dailyCardioAge) {
     if (!d?.day) continue;
     if (typeof d.vascular_age === 'number') ensureRow(d.day).cardio_age = d.vascular_age;
+  }
+
+  // Daytime HR aggregate from the heartrate stream — Oura tags each sample as
+  // 'awake' / 'rest' / 'sleep' / 'workout' / 'live'. 'awake' is the waking-but-
+  // sedentary window we want; mean across awake samples per day = hr_day.
+  // Oura v2 does not expose daytime rMSSD samples in this stream, so hrv_day
+  // stays null for now (gap documented in CLAUDE.md / wearables architecture).
+  const hrDayBuckets = new Map(); // day → number[]
+  for (const sample of (heartrateSamples || [])) {
+    if (sample?.source !== 'awake') continue;
+    if (typeof sample?.bpm !== 'number' || !isFinite(sample.bpm)) continue;
+    const day = String(sample?.timestamp || '').slice(0, 10);
+    if (!day) continue;
+    if (!hrDayBuckets.has(day)) hrDayBuckets.set(day, []);
+    hrDayBuckets.get(day).push(sample.bpm);
+  }
+  for (const [day, bpms] of hrDayBuckets) {
+    if (bpms.length === 0) continue;
+    const avg = bpms.reduce((a, b) => a + b, 0) / bpms.length;
+    ensureRow(day).hr_day = Math.round(avg * 10) / 10;
   }
 
   // Return sorted ascending by date so consumers get chronological order.

@@ -281,12 +281,20 @@ return (async function() {
     assert(`CANONICAL_METRICS has ${mid}`, !!reg.CANONICAL_METRICS[mid]);
     assert(`Oura adapter maps ${mid}`, reg.adapterSupportsMetric('oura', mid));
   }
-  assert('DEFAULT_METRIC_ORDER is 12 metrics (4 core + 5 extended + 3 biometric)', reg.DEFAULT_METRIC_ORDER.length === 12);
+  assert('DEFAULT_METRIC_ORDER is 14 metrics (4 core + 5 extended + 3 biometric + 2 daytime companions)', reg.DEFAULT_METRIC_ORDER.length === 14);
   // Biometric metrics must be in the default order so the summary pipeline
   // iterates them for manual / Withings / Fitbit rows.
   assert('DEFAULT_METRIC_ORDER includes weight', reg.DEFAULT_METRIC_ORDER.includes('weight'));
   assert('DEFAULT_METRIC_ORDER includes bp_systolic', reg.DEFAULT_METRIC_ORDER.includes('bp_systolic'));
   assert('DEFAULT_METRIC_ORDER includes bp_diastolic', reg.DEFAULT_METRIC_ORDER.includes('bp_diastolic'));
+  // Daytime companions must be summarised so the AI context + detail modal
+  // can read them, even though they're hidden from the strip cards themselves.
+  assert('DEFAULT_METRIC_ORDER includes hrv_day', reg.DEFAULT_METRIC_ORDER.includes('hrv_day'));
+  assert('DEFAULT_METRIC_ORDER includes hr_day', reg.DEFAULT_METRIC_ORDER.includes('hr_day'));
+  assert('CANONICAL_METRICS has hrv_day with daytime sub-label', reg.CANONICAL_METRICS.hrv_day?.sub === 'daytime');
+  assert('CANONICAL_METRICS has hr_day with daytime sub-label', reg.CANONICAL_METRICS.hr_day?.sub === 'daytime');
+  assert('CANONICAL_METRICS hrv_rmssd sub-label is overnight', reg.CANONICAL_METRICS.hrv_rmssd?.sub === 'overnight');
+  assert('CANONICAL_METRICS rhr sub-label is overnight', reg.CANONICAL_METRICS.rhr?.sub === 'overnight');
   assert('Steps is mapped to the same endpoint as activity_score (both from daily_activity)',
     reg.adapterById('oura').metrics.steps.endpoint === reg.adapterById('oura').metrics.activity_score.endpoint);
 
@@ -517,21 +525,28 @@ return (async function() {
   const day1 = ahRows.find(r => r.date === '2026-04-20');
   const day2 = ahRows.find(r => r.date === '2026-04-21');
 
-  // RHR aggregator is MIN (protects against a 3rd-party app injecting 85 bpm)
+  // RHR aggregator is MIN across all samples — Apple writes RestingHR as a
+  // sleep-derived value timestamped at wake, so hour-of-day splitting would
+  // mis-classify it. Min still protects against 3rd-party-app spikes.
   assert('RHR uses min-per-day aggregator (ignores 85bpm 3rd-party outlier, keeps 58)',
     day1.rhr === 58);
-  // HRV SDNN is mean of 42.5 + 48.5 = 45.5
-  assert('HRV SDNN aggregates as mean-per-day (42.5 & 48.5 → 45.5)',
+  // HRV SDNN: both fixture samples are at 02:15 and 03:20 — night-window
+  // (22:00–06:00) → mean(42.5, 48.5) = 45.5 routes to hrv_sdnn (overnight).
+  assert('HRV SDNN aggregates night-window samples (42.5 & 48.5 → 45.5)',
     day1.hrv_sdnn === 45.5);
+  // No day-window HRV samples in fixture → hrv_day should be null on day 1.
+  assert('hrv_day is null when no day-window samples exist',
+    day1.hrv_day === null);
   // Steps is sum-per-day (320 + 2100 + 5430 = 7850)
   assert('Steps sum multiple sources per day (320+2100+5430=7850)',
     day1.steps === 7850);
   // SpO2 mean of 97 + 95 = 96
   assert('SpO2 mean-per-day aggregator (97+95 → 96)',
     day1.spo2_avg === 96);
-  // Day 2 has single readings
+  // Day 2 has single readings — single 02:10 SDNN sample is night-window → 51
   assert('Day 2 RHR populated (single reading → 56)', day2.rhr === 56);
-  assert('Day 2 HRV SDNN populated (single → 51)', day2.hrv_sdnn === 51);
+  assert('Day 2 HRV SDNN populated (single night-window sample → 51)', day2.hrv_sdnn === 51);
+  assert('Day 2 hrv_day null (no day-window samples)', day2.hrv_day === null);
 
   // Records we explicitly don't map must NOT end up in canonical rows —
   // HeartRate (real-time) and BodyMass aren't in our Apple Health mapping yet.
@@ -581,7 +596,12 @@ return (async function() {
   assert('Withings weight maps to measType 1',      withingsReg.metrics.weight?.measType === 1);
   assert('Withings BP diastolic maps to measType 9', withingsReg.metrics.bp_diastolic?.measType === 9);
   assert('Withings BP systolic maps to measType 10', withingsReg.metrics.bp_systolic?.measType === 10);
-  assert('Withings pulse/RHR maps to measType 11',  withingsReg.metrics.rhr?.measType === 11);
+  // Scale pulse (type 11) is a daytime spot reading, NOT resting HR. It now
+  // routes to hr_day; the rhr slot is filled from sleep summary's hr_min.
+  assert('Withings scale pulse (type 11) maps to hr_day, not rhr',
+    withingsReg.metrics.hr_day?.measType === 11 && !withingsReg.metrics.rhr?.measType);
+  assert('Withings rhr is sourced from sleep summary hr_min',
+    withingsReg.metrics.rhr?.endpoint === 'v2/sleep' && withingsReg.metrics.rhr?.field === 'hr_min');
 
   const withingsFetcher = await import('../js/wearables-withings.js');
   assert('fetchWithingsDailyRange exists', typeof withingsFetcher.fetchWithingsDailyRange === 'function');
@@ -845,6 +865,60 @@ return (async function() {
   const b64 = btoa(String.fromCharCode(...new Uint8Array(hash)));
   const b64url = b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   assert('WebCrypto+base64url yields RFC 7636 challenge', b64url === RFC_CHALLENGE, `got ${b64url}`);
+
+  // ═══════════════════════════════════════
+  // 17. Day/night HRV + RHR canonicals (v1.25.0)
+  // ═══════════════════════════════════════
+  console.log('%c 17. Day/Night HRV+RHR ', 'font-weight:bold;color:#f59e0b');
+
+  // Per-vendor adapter declarations: every adapter that has a day-window
+  // signal we know how to harvest must declare it. Conversely, vendors with
+  // no day signal yet (Fitbit hr_day, Apple Health hr_day) must NOT declare
+  // one — leaving the slot null is more honest than fabricating.
+  assert('Oura declares hr_day from heartrate endpoint',
+    reg.adapterSupportsMetric('oura', 'hr_day'));
+  assert('Oura does NOT declare hrv_day (gap until v2 exposes daytime rMSSD)',
+    !reg.adapterSupportsMetric('oura', 'hrv_day'));
+  assert('WHOOP declares hr_day from cycle endpoint',
+    reg.adapterSupportsMetric('whoop', 'hr_day'));
+  assert('Fitbit declares hrv_day from dailyRmssd (sleep+wake aggregate)',
+    reg.adapterSupportsMetric('fitbit', 'hrv_day'));
+  assert('Fitbit hrv_rmssd routes to deepRmssd (deep sleep only)',
+    reg.adapterById('fitbit').metrics.hrv_rmssd?.field?.includes('deepRmssd'));
+  assert('Fitbit hrv_day routes to dailyRmssd (broader-window aggregate)',
+    reg.adapterById('fitbit').metrics.hrv_day?.field?.includes('dailyRmssd'));
+  assert('Ultrahuman declares both hrv_day and hr_day (.avg fields are 24h)',
+    reg.adapterSupportsMetric('ultrahuman', 'hrv_day') &&
+    reg.adapterSupportsMetric('ultrahuman', 'hr_day'));
+  assert('Ultrahuman hrv_rmssd routes to hrv.sleep (overnight)',
+    reg.adapterById('ultrahuman').metrics.hrv_rmssd?.field === 'hrv.sleep');
+  assert('Ultrahuman rhr routes to resting_heart_rate.sleep (overnight)',
+    reg.adapterById('ultrahuman').metrics.rhr?.field === 'resting_heart_rate.sleep');
+  assert('Polar hr_day routes to activity-transactions average',
+    reg.adapterById('polar').metrics.hr_day?.endpoint?.includes('activity-transactions'));
+  assert('Polar hrv_day routes to exercise-transactions (workout HRV is daytime)',
+    reg.adapterById('polar').metrics.hrv_day?.endpoint?.includes('exercise-transactions'));
+  assert('Polar rhr routes to sleep nights (true overnight RHR)',
+    reg.adapterById('polar').metrics.rhr?.endpoint?.includes('/sleep'));
+  assert('Apple Health declares hrv_day with window:day flag',
+    reg.adapterById('apple_health').metrics.hrv_day?.window === 'day');
+
+  // Strip integration: hrv_day/hr_day are summarised but hidden from the
+  // strip cards — they live in the detail modal as sub-stats and in the
+  // AI context. Regression guard so a future refactor doesn't accidentally
+  // surface them as their own cards (visual clutter).
+  const wearablesSrc = await fetch('/js/wearables.js').then(r => r.text());
+  assert('Strip rendering hides hrv_day from card list',
+    /STRIP_HIDDEN_METRICS\s*=\s*new Set\(\[[^\]]*'hrv_day'/.test(wearablesSrc));
+  assert('Strip rendering hides hr_day from card list',
+    /STRIP_HIDDEN_METRICS\s*=\s*new Set\(\[[^\]]*'hr_day'/.test(wearablesSrc));
+
+  // Detail modal companion: when viewing the overnight HRV/RHR card, the
+  // matching daytime aggregate appears as an extra stat row.
+  assert('Detail modal pairs hrv_rmssd with hrv_day companion',
+    /DAY_COMPANION\s*=\s*\{\s*hrv_rmssd:\s*'hrv_day'/.test(wearablesSrc));
+  assert('Detail modal pairs rhr with hr_day companion',
+    /DAY_COMPANION\s*=\s*\{[\s\S]*?rhr:\s*'hr_day'/.test(wearablesSrc));
 
   console.log(`\nResults: ${pass} passed, ${fail} failed, ${pass + fail} total`);
 })();

@@ -82,6 +82,7 @@ export async function fetchWhoopDailyRange(accessToken, startDate, endDate) {
       byDate.set(day, {
         source: 'whoop', date: day,
         hrv_rmssd: null, rhr: null,
+        hrv_day: null, hr_day: null,
         sleep_score: null, readiness_score: null,
         activity_score: null, steps: null,
         strain: null,
@@ -107,6 +108,9 @@ export async function fetchWhoopDailyRange(accessToken, startDate, endDate) {
     const s = c?.score || {};
     const row = ensureRow(day);
     if (typeof s.strain === 'number') row.strain = s.strain;
+    // 24h cycle average HR — closer to a daytime HR than recovery's resting HR.
+    // WHOOP doesn't surface daytime rMSSD via v1, so hrv_day stays null.
+    if (typeof s.average_heart_rate === 'number') row.hr_day = s.average_heart_rate;
   }
   for (const sl of sleeps) {
     const day = dayFromIso(sl?.start);
