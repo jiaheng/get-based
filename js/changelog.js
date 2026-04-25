@@ -5,6 +5,12 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.27.2', date: '2026-04-25', title: 'Wearables test coverage — 349 → 532 assertions (no user-visible change)',
+    items: [
+      'Three new test files cover the layers that were previously source-grep-only: <code>test-wearables-fetchers.js</code> drives every adapter (Oura / WHOOP / Fitbit / Withings / Ultrahuman / Polar) against mocked HTTP responses and asserts canonical-row shape per metric, including 30-day chunking for Oura\'s heartrate cap and 401/429/500 error handling. <code>test-wearables-sync-flow.js</code> orchestrates real <code>backfillWearable</code> + <code>incrementalSyncWearable</code> + <code>syncWearableSummary</code> + <code>disconnectWearable</code> end-to-end with a fake connection, checking IDB writes, last-sync meta, and L2 gate triggers (initial, min-cadence). <code>test-wearables-ui-flows.js</code> drives real DOM clicks: detail-modal entry × → confirm dialog (the v1.24.1 regression site), source-swap button → picker, reorder ◀ ▶ → savedOrder persists, niche-card disclosure renders.',
+    ]
+  },
+  {
     version: '1.27.1', date: '2026-04-25', title: 'Apple Health daytime HR + wearables in JSON export + agent docs',
     items: [
       '<b>Apple Health users now get a daytime HR card.</b> Previously the importer skipped <code>HKQuantityTypeIdentifierHeartRate</code> samples; v1.27.1 routes them into <i>hr_day</i>, filtered to the 06:00–22:00 local window and averaged. RestingHeartRate stays in the <i>rhr</i> slot via min-aggregation.',
