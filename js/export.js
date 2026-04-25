@@ -62,20 +62,30 @@ export function exportPDFReport() {
   }
   const pBio = state.importedData.biometrics;
   const pHeight = window.getProfileHeight ? window.getProfileHeight(state.currentProfile) : { height: null };
-  if (pBio || pHeight?.height) {
+  // Fallback to the wearable summary when legacy biometrics arrays are empty —
+  // wearable-only users (manual via Edit Client retired in Phase 4 + OAuth
+  // sources) carry weight/BP/pulse only inside wearableSummary.metrics.
+  const wm = state.importedData?.wearableSummary?.metrics;
+  if (pBio || pHeight?.height || wm) {
     let bioText = '';
     if (pHeight?.height) bioText += `Height: ${pHeight.height} cm\n`;
     if (pBio?.weight?.length) {
       const latest = [...pBio.weight].sort((a, b) => b.date.localeCompare(a.date))[0];
       bioText += `Latest weight: ${latest.value} ${latest.unit} (${latest.date})\n`;
+    } else if (typeof wm?.weight?.latest === 'number') {
+      bioText += `Latest weight: ${wm.weight.latest} kg (${wm.weight.latestDate || '—'})\n`;
     }
     if (pBio?.bp?.length) {
       const latest = [...pBio.bp].sort((a, b) => b.date.localeCompare(a.date))[0];
       bioText += `Latest BP: ${latest.sys}/${latest.dia} mmHg (${latest.date})\n`;
+    } else if (typeof wm?.bp_systolic?.latest === 'number' && typeof wm?.bp_diastolic?.latest === 'number') {
+      bioText += `Latest BP: ${wm.bp_systolic.latest}/${wm.bp_diastolic.latest} mmHg (${wm.bp_systolic.latestDate || '—'})\n`;
     }
     if (pBio?.pulse?.length) {
       const latest = [...pBio.pulse].sort((a, b) => b.date.localeCompare(a.date))[0];
       bioText += `Latest pulse: ${latest.value} bpm (${latest.date})\n`;
+    } else if (typeof wm?.rhr?.latest === 'number') {
+      bioText += `Latest resting HR: ${wm.rhr.latest} bpm (${wm.rhr.latestDate || '—'})\n`;
     }
     if (bioText) contextSections.push({ title: 'Biometrics', text: bioText.trim() });
   }

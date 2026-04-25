@@ -883,6 +883,45 @@ return (async function() {
   assert('WebCrypto+base64url yields RFC 7636 challenge', b64url === RFC_CHALLENGE, `got ${b64url}`);
 
   // ═══════════════════════════════════════
+  // 17z. P0 data-integrity (v1.27.3) — branch audit fallout
+  // ═══════════════════════════════════════
+  console.log('%c 17z. P0 Data-Integrity ', 'font-weight:bold;color:#f59e0b');
+
+  // P0-A: deleting a profile must drop its wearable IDB. The delete is
+  // dispatched as a fire-and-forget dynamic import — guard the call site.
+  const profileSrc = await fetch('/js/profile.js').then(r => r.text());
+  assert('deleteProfile dispatches deleteWearablesDB(profileId) for the deleted profile',
+    /export function deleteProfile[\s\S]*?deleteWearablesDB\(profileId\)/.test(profileSrc));
+
+  // P0-B: auto-backup carries wearable L1 rows. buildFullBackupSnapshot
+  // exists, populates `wearableIDB`, and is called from auto-backup +
+  // folder-backup + manual export paths.
+  const backupSrc = await fetch('/js/backup.js').then(r => r.text());
+  assert('buildFullBackupSnapshot exported as the canonical async snapshot',
+    /export\s+async\s+function\s+buildFullBackupSnapshot/.test(backupSrc));
+  assert('buildFullBackupSnapshot populates snap.wearableIDB',
+    /snap\.wearableIDB\s*=\s*await\s+collectWearableIDB/.test(backupSrc));
+  assert('performAutoBackup uses the full snapshot (with IDB rows)',
+    /performAutoBackup[\s\S]{0,300}buildFullBackupSnapshot/.test(backupSrc));
+  assert('Folder-backup writeLatest uses the full snapshot',
+    /buildFullBackupSnapshot[\s\S]*latestFile/.test(backupSrc));
+  assert('exportEncryptedBackup is async and uses the full snapshot',
+    /export\s+async\s+function\s+exportEncryptedBackup/.test(backupSrc));
+  assert('restoreAutoBackup hydrates wearable IDB rows back via restoreWearableIDB',
+    /export\s+async\s+function\s+restoreAutoBackup[\s\S]*?restoreWearableIDB\(backup\.wearableIDB\)/.test(backupSrc));
+  assert('restoreWearableIDB iterates per-source and upsertDailyBatch',
+    /restoreWearableIDB[\s\S]{0,400}upsertDailyBatch/.test(backupSrc));
+
+  // P0-C: PDF report falls back to wearableSummary.metrics for biometrics.
+  const exportSrc2 = await fetch('/js/export.js').then(r => r.text());
+  assert('PDF report Biometrics section reads wearableSummary.metrics.weight.latest as fallback',
+    /wm\?\.weight\?\.latest/.test(exportSrc2));
+  assert('PDF report Biometrics section reads wearableSummary.metrics.bp_systolic + bp_diastolic',
+    /wm\?\.bp_systolic\?\.latest/.test(exportSrc2) && /wm\?\.bp_diastolic\?\.latest/.test(exportSrc2));
+  assert('PDF report Biometrics section reads wearableSummary.metrics.rhr.latest as pulse fallback',
+    /wm\?\.rhr\?\.latest/.test(exportSrc2));
+
+  // ═══════════════════════════════════════
   // 17a. UX audit follow-ups (v1.26.0)
   // ═══════════════════════════════════════
   console.log('%c 17a. UX Audit Fixes ', 'font-weight:bold;color:#f59e0b');

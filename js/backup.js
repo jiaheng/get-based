@@ -29,6 +29,48 @@ const PER_PROFILE_PREF_SUFFIXES = [
   'chatPersonality', 'chatPersonalityCustom', 'chatRailOpen'
 ];
 
+// Wearable L1 IndexedDB lives outside localStorage (per-profile DB
+// `labcharts-wearables-${profileId}`) — read raw daily rows for every
+// connected source so backups can round-trip the full 90 days of HRV/sleep/
+// RHR + manual entries. Returns { profileId: { source: rows[] } }.
+async function collectWearableIDB(profileIds) {
+  const out = {};
+  let store;
+  try { store = await import('./wearables-store.js'); } catch { return out; }
+  for (const pid of profileIds) {
+    try {
+      // Pull a generous range so we capture the full retention window. The
+      // store is range-by-source; we'd need to enumerate sources first.
+      // Cheapest path: read each source we know exists per the import bundle.
+      const rows = await store.getDailyRange(pid, '%', '2000-01-01', '2099-12-31').catch(() => null);
+      // The '%' source filter doesn't exist; fall back to enumerating known
+      // adapter ids. Empty for sources the user never connected — safe.
+      const KNOWN_SOURCES = ['oura', 'whoop', 'fitbit', 'withings', 'ultrahuman', 'polar', 'apple_health', 'manual'];
+      const perProfile = {};
+      for (const src of KNOWN_SOURCES) {
+        try {
+          const srcRows = await store.getDailyRange(pid, src, '2000-01-01', '2099-12-31');
+          if (Array.isArray(srcRows) && srcRows.length > 0) perProfile[src] = srcRows;
+        } catch { /* db-not-yet-created → skip */ }
+      }
+      if (Object.keys(perProfile).length > 0) out[pid] = perProfile;
+    } catch { /* per-profile failure shouldn't break the whole backup */ }
+  }
+  return out;
+}
+
+async function restoreWearableIDB(payload) {
+  if (!payload || typeof payload !== 'object') return;
+  let store;
+  try { store = await import('./wearables-store.js'); } catch { return; }
+  for (const [pid, sources] of Object.entries(payload)) {
+    for (const [, rows] of Object.entries(sources)) {
+      if (!Array.isArray(rows) || rows.length === 0) continue;
+      try { await store.upsertDailyBatch(pid, rows); } catch { /* per-source failure shouldn't break the whole restore */ }
+    }
+  }
+}
+
 export function buildBackupSnapshot() {
   const profiles = localStorage.getItem('labcharts-profiles');
   if (!profiles) return null;
@@ -113,12 +155,25 @@ export function buildBackupSnapshot() {
     encryptionSalt: localStorage.getItem('labcharts-encryption-salt') || null,
     settings,
     profileList: profiles,
-    profiles: backupProfiles
+    profiles: backupProfiles,
+    wearableIDB: null, // populated async by augmentBackupWithWearables
   };
 }
 
-export function exportEncryptedBackup() {
-  const backup = buildBackupSnapshot();
+// Build a snapshot AND populate the wearable L1 rows in the same call.
+// Most callers (auto-backup, folder-backup, manual export) want the full
+// payload; the legacy synchronous `buildBackupSnapshot` stays for tests
+// that don't need IDB rows.
+export async function buildFullBackupSnapshot() {
+  const snap = buildBackupSnapshot();
+  if (!snap) return null;
+  const profileIds = (snap.profiles || []).map(p => p.profileId);
+  snap.wearableIDB = await collectWearableIDB(profileIds);
+  return snap;
+}
+
+export async function exportEncryptedBackup() {
+  const backup = await buildFullBackupSnapshot();
   if (!backup) {
     showNotification('No data to back up', 'error');
     return;
@@ -177,8 +232,10 @@ export function importEncryptedBackup(file) {
             }
           }
 
-          showNotification('Backup restored \u2014 reloading...', 'success');
-          setTimeout(() => location.reload(), 1000);
+          restoreWearableIDB(backup.wearableIDB).finally(() => {
+            showNotification('Backup restored \u2014 reloading...', 'success');
+            setTimeout(() => location.reload(), 1000);
+          });
         }
       );
     } catch (err) {
@@ -225,7 +282,7 @@ export function openBackupDB() {
 
 async function performAutoBackup() {
   try {
-    const snapshot = buildBackupSnapshot();
+    const snapshot = await buildFullBackupSnapshot();
     if (!snapshot) return;
     const db = await openBackupDB();
     const tx = db.transaction(BACKUP_STORE, 'readwrite');
@@ -318,8 +375,13 @@ export async function restoreAutoBackup(id) {
           }
         }
       }
-      showNotification('Backup restored \u2014 reloading...', 'success');
-      setTimeout(() => location.reload(), 1000);
+      // Wearable L1 IDB rows live outside localStorage \u2014 restore them
+      // separately so the strip's detail-modal chart history is preserved
+      // along with everything else.
+      restoreWearableIDB(backup.wearableIDB).finally(() => {
+        showNotification('Backup restored \u2014 reloading...', 'success');
+        setTimeout(() => location.reload(), 1000);
+      });
     }
   );
 }
@@ -389,7 +451,7 @@ export async function pickFolderForBackup() {
   try {
     const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
     const testFile = await handle.getFileHandle('getbased-backup-latest.json', { create: true });
-    const snapshot = buildBackupSnapshot();
+    const snapshot = await buildFullBackupSnapshot();
     if (snapshot) {
       const writable = await testFile.createWritable();
       await writable.write(JSON.stringify(snapshot, null, 2));
@@ -453,7 +515,7 @@ async function writeFolderBackup() {
       refreshFolderBackupUI();
       return;
     }
-    const snapshot = buildBackupSnapshot();
+    const snapshot = await buildFullBackupSnapshot();
     if (!snapshot) return;
     const json = JSON.stringify(snapshot, null, 2);
     const latestFile = await _folderHandle.getFileHandle('getbased-backup-latest.json', { create: true });

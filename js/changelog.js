@@ -5,6 +5,14 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.27.3', date: '2026-04-25', title: 'Fix: backups + profile delete + PDF report all carry wearable data now',
+    items: [
+      '<b>Auto-backup + folder-backup + manual export now include 90 days of wearable raw rows.</b> Previously only the L2 summary survived a backup restore — every daily HRV / sleep / RHR / manual entry was silently lost. New <code>buildFullBackupSnapshot</code> + restore path round-trips the whole wearable IndexedDB.',
+      '<b>Deleting a profile now drops its wearable IndexedDB.</b> Previously only its localStorage keys were cleared — the per-profile wearable database lingered indefinitely with up to 90 days of HRV/sleep/RHR + manual entries.',
+      '<b>PDF report Biometrics section reads the wearable summary as fallback.</b> Wearable-only users (no legacy <code>biometrics</code> array) had blank weight / BP / pulse rows in the printed report; now those pull from <code>wearableSummary.metrics.{weight, bp_systolic, bp_diastolic, rhr}</code>.',
+    ]
+  },
+  {
     version: '1.27.2', date: '2026-04-25', title: 'Wearables test coverage — 349 → 532 assertions (no user-visible change)',
     items: [
       'Three new test files cover the layers that were previously source-grep-only: <code>test-wearables-fetchers.js</code> drives every adapter (Oura / WHOOP / Fitbit / Withings / Ultrahuman / Polar) against mocked HTTP responses and asserts canonical-row shape per metric, including 30-day chunking for Oura\'s heartrate cap and 401/429/500 error handling. <code>test-wearables-sync-flow.js</code> orchestrates real <code>backfillWearable</code> + <code>incrementalSyncWearable</code> + <code>syncWearableSummary</code> + <code>disconnectWearable</code> end-to-end with a fake connection, checking IDB writes, last-sync meta, and L2 gate triggers (initial, min-cadence). <code>test-wearables-ui-flows.js</code> drives real DOM clicks: detail-modal entry × → confirm dialog (the v1.24.1 regression site), source-swap button → picker, reorder ◀ ▶ → savedOrder persists, niche-card disclosure renders.',

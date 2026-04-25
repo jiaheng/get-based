@@ -396,6 +396,10 @@ export function deleteProfile(profileId, onComplete) {
     localStorage.removeItem(`labcharts-${profileId}-tour`);
     localStorage.removeItem(`labcharts-${profileId}-cycleTour`);
     localStorage.removeItem(`labcharts-${profileId}-phaseOverlay`);
+    // Wearable per-profile IDB (`labcharts-wearables-${profileId}`) lives
+    // outside localStorage. Drop it too so deleted profiles don't leak 90d
+    // of HRV/sleep/RHR + manual entries onto disk indefinitely.
+    import('./wearables-store.js').then(m => m.deleteWearablesDB(profileId)).catch(() => {});
     if (state.currentProfile === profileId) {
       loadProfile(updated[0].id);
     } else {
