@@ -39,17 +39,15 @@ async function collectWearableIDB(profileIds) {
   try { store = await import('./wearables-store.js'); } catch { return out; }
   for (const pid of profileIds) {
     try {
-      // Pull a generous range so we capture the full retention window. The
-      // store is range-by-source; we'd need to enumerate sources first.
-      // Cheapest path: read each source we know exists per the import bundle.
-      const rows = await store.getDailyRange(pid, '%', '2000-01-01', '2099-12-31').catch(() => null);
-      // The '%' source filter doesn't exist; fall back to enumerating known
-      // adapter ids. Empty for sources the user never connected — safe.
+      // CRITICAL: read RAW (no decrypt). When encryption-at-rest is on, the
+      // rows on disk are AES-GCM-wrapped envelopes. getDailyRange would
+      // decrypt them into plaintext for the snapshot — silently downgrading
+      // the at-rest guarantee. getDailyRangeRaw returns rows as-stored.
       const KNOWN_SOURCES = ['oura', 'whoop', 'fitbit', 'withings', 'ultrahuman', 'polar', 'apple_health', 'manual'];
       const perProfile = {};
       for (const src of KNOWN_SOURCES) {
         try {
-          const srcRows = await store.getDailyRange(pid, src, '2000-01-01', '2099-12-31');
+          const srcRows = await store.getDailyRangeRaw(pid, src, '2000-01-01', '2099-12-31');
           if (Array.isArray(srcRows) && srcRows.length > 0) perProfile[src] = srcRows;
         } catch { /* db-not-yet-created → skip */ }
       }
@@ -66,7 +64,13 @@ async function restoreWearableIDB(payload) {
   for (const [pid, sources] of Object.entries(payload)) {
     for (const [, rows] of Object.entries(sources)) {
       if (!Array.isArray(rows) || rows.length === 0) continue;
-      try { await store.upsertDailyBatch(pid, rows); } catch { /* per-source failure shouldn't break the whole restore */ }
+      // RAW write — preserve wrappers from an encrypted backup. If the
+      // destination has encryption disabled, the wrappers stay unreadable
+      // until the user enables encryption with the matching passphrase, OR
+      // they get rewritten in plaintext on next mutation (write-on-touch
+      // via the normal upsertDaily path). NOT decrypting at restore time
+      // keeps the encryption guarantee end-to-end.
+      try { await store.upsertDailyBatchRaw(pid, rows); } catch { /* per-source failure shouldn't break the whole restore */ }
     }
   }
 }

@@ -351,6 +351,15 @@ export async function syncWearableSummary(profileId, connectedSources) {
     catch (e) { if (isDebugMode?.()) console.warn(`[wearable-summary] L1 read failed for ${sid}:`, e.message); rowsBySource[sid] = []; }
   }
 
+  // Profile-swap guard: cross-profile contamination guard. If the user
+  // switched profiles during the IDB reads, the live `state.importedData`
+  // now belongs to a DIFFERENT profile. Persisting the freshly-computed
+  // summary into it would write A's metrics under B's localStorage key.
+  if (state.currentProfile !== profileId) {
+    if (isDebugMode?.()) console.log(`[wearable-summary] aborting — profile changed mid-read (${profileId} → ${state.currentProfile})`);
+    return { wrote: false, reason: 'profile-changed' };
+  }
+
   const primaryOverride = state.importedData?.wearablePrimaryOverride || {};
   const newSummary = computeWearableSummary(rowsBySource, connectedSources, primaryOverride);
   const old = state.importedData?.wearableSummary || null;

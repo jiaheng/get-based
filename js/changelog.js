@@ -5,6 +5,16 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.31.0', date: '2026-04-25', title: 'Encryption hardening — disable + passphrase change now walk wearable storage',
+    items: [
+      '<b>Disabling encryption rewrites every wearable row in plaintext first.</b> Was leaving wrapped rows in storage that could never be decrypted again — strip silently went blank.',
+      '<b>Changing your passphrase rewrites every wearable row under the new key.</b> Same fix.',
+      '<b>Backups + restores keep encryption envelopes intact.</b> Backups serialize wrapped rows AS-IS instead of decrypting them into the snapshot — the at-rest encryption guarantee is preserved end-to-end through backup/restore. Restoring an encrypted backup into a fresh install requires the matching passphrase.',
+      '<b>Wearable sync refuses to write cleartext when encryption is on but the session is locked.</b> Was silently writing plaintext rows to an "encrypted at rest" IDB. Now throws — user gets a clear "unlock with your passphrase" toast.',
+      '<b>Profile-switch race fix.</b> Switching profiles A→B during a cold-cache sync no longer lets A\'s metrics overwrite B\'s wearable summary. The sync orchestrator now bails out when state.currentProfile changes mid-flight.',
+    ]
+  },
+  {
     version: '1.30.0', date: '2026-04-25', title: 'Wearables — connect your devices, share with AI agents',
     items: [
       '<b>Seven wearables.</b> Connect Oura, WHOOP, Fitbit, Withings, Ultrahuman, Polar, or Apple Health (file import). Or log weight / BP / resting HR by hand. HRV, sleep, recovery, and biometrics show up in a single dashboard strip alongside your blood work.',

@@ -594,9 +594,58 @@ async function decryptAllSensitiveKeys() {
   }
 }
 
+// Walk every profile's wearable IndexedDB, decrypt rows with the CURRENT
+// session key, and rewrite them in the chosen mode:
+//   mode='plain'      → write back plaintext (used by disableEncryption)
+//   mode='re-encrypt' → re-encrypt with whatever the current _sessionKey is
+//                       (used by changePassphrase AFTER swapping the key)
+// Best-effort per-profile / per-row — failures don't abort the whole walk;
+// any unmigrated wrappers will surface on next read as `_payload`-shaped
+// rows the strip can't render, which is preferable to silently writing
+// over the user's intent.
+async function _walkWearableIDB(mode) {
+  let storeMod, profileMod;
+  try {
+    storeMod = await import('./wearables-store.js');
+    profileMod = await import('./profile.js');
+  } catch { return { walked: 0, errors: 1 }; }
+  const profiles = profileMod.getProfiles?.() || [];
+  let walked = 0, errors = 0;
+  for (const p of profiles) {
+    const KNOWN_SOURCES = ['oura', 'whoop', 'fitbit', 'withings', 'ultrahuman', 'polar', 'apple_health', 'manual'];
+    for (const src of KNOWN_SOURCES) {
+      try {
+        // Read raw (wrappers preserved). Decrypt each. Write back via the
+        // normal upsertDaily path which encrypts iff encryption is enabled
+        // post-this-call (mode='plain' wants encryption already DISABLED;
+        // mode='re-encrypt' wants the new key already SET).
+        const rows = await storeMod.getDailyRangeRaw(p.id, src, '2000-01-01', '2099-12-31');
+        if (rows.length === 0) continue;
+        for (const row of rows) {
+          if (!isEncryptedObject(row._payload)) continue; // plaintext — already in target shape for 'plain'; skip in re-encrypt too
+          try {
+            const decrypted = await decryptObject(row._payload);
+            if (!decrypted) { errors++; continue; }
+            // Rebuild plaintext shape: hoist decrypted fields back to top-level.
+            const plainRow = { source: row.source, date: row.date, ...decrypted };
+            await storeMod.upsertDaily(p.id, plainRow);
+            walked++;
+          } catch { errors++; }
+        }
+      } catch { /* db not yet created or other store-level error — skip */ }
+    }
+  }
+  return { walked, errors };
+}
+
 export async function disableEncryption() {
   showConfirmDialog('Disable encryption? Your data will be stored in plaintext.', async () => {
     try {
+      // CRITICAL ORDER: walk wearable IDB BEFORE clearing _sessionKey, so
+      // rows can decrypt under the current key. Then localStorage walk,
+      // then drop the key. Without this the wearable IDB stays wrapped
+      // forever — the strip silently goes blank for any encrypted rows.
+      await _walkWearableIDB('plain');
       await decryptAllSensitiveKeys();
       localStorage.removeItem('labcharts-encryption-enabled');
       localStorage.removeItem('labcharts-encryption-salt');
@@ -672,17 +721,26 @@ export async function changePassphrase() {
         if (parsed) await decrypt(oldKey, parsed.iv, parsed.ciphertext);
       }
 
-      // Decrypt all with old key
+      // Decrypt all with old key. Wearable IDB first — must run while
+      // _sessionKey still holds the OLD key so wrappers decrypt. The walk
+      // hoists every decrypted row back to plaintext via upsertDaily; the
+      // re-encrypt below puts them back under the NEW key.
       _sessionKey = oldKey;
+      await _walkWearableIDB('plain');
       await decryptAllSensitiveKeys();
 
-      // Re-encrypt with new key
+      // Re-encrypt with new key (localStorage AND IDB).
       const newSalt = crypto.getRandomValues(new Uint8Array(16));
       localStorage.setItem('labcharts-encryption-salt', toBase64(newSalt));
       const newKey = await deriveKey(newP, newSalt);
       _sessionKey = newKey;
       await migrateSensitiveKeys();
       await decryptKeyCache();
+      // Wearable IDB rows are currently plaintext (post-walk above). The
+      // upsertDaily path now encrypts under the new key for any future
+      // writes. Existing plaintext rows migrate write-on-touch on next
+      // mutation, same as the OFF→ON migration path documented in the
+      // encryption guide.
 
       overlay.style.display = 'none';
       overlay.innerHTML = '';

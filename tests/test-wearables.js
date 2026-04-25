@@ -883,6 +883,45 @@ return (async function() {
   assert('WebCrypto+base64url yields RFC 7636 challenge', b64url === RFC_CHALLENGE, `got ${b64url}`);
 
   // ═══════════════════════════════════════
+  // 17s. Encryption hardening (v1.31.0)
+  // ═══════════════════════════════════════
+  console.log('%c 17s. Encryption Hardening ', 'font-weight:bold;color:#f59e0b');
+
+  // P0-1: profile-switch race in loadProfile refresh
+  const profileSrc31 = await fetch('/js/profile.js').then(r => r.text());
+  assert('loadProfile refresh aborts when state.currentProfile changes mid-await',
+    /state\.currentProfile\s*!==\s*profileId\)\s*return/.test(profileSrc31));
+
+  // P0-1 (the orchestrator side): syncWearableSummary bails on profile swap.
+  const summarySrc31 = await fetch('/js/wearables-summary.js').then(r => r.text());
+  assert('syncWearableSummary bails when state.currentProfile changed during IDB read',
+    /state\.currentProfile\s*!==\s*profileId[\s\S]{0,200}reason:\s*'profile-changed'/.test(summarySrc31));
+
+  // P0-2: backup uses raw read (preserves wrappers, doesn't decrypt into snapshot)
+  const backupSrc31 = await fetch('/js/backup.js').then(r => r.text());
+  assert('Backup snapshot reads via getDailyRangeRaw (no decrypt downgrade of at-rest guarantee)',
+    /getDailyRangeRaw/.test(backupSrc31) && !/store\.getDailyRange\(pid,\s*src/.test(backupSrc31));
+  assert('Wearable-store exports getDailyRangeRaw + upsertDailyBatchRaw',
+    /export\s+async\s+function\s+getDailyRangeRaw/.test(await fetch('/js/wearables-store.js').then(r => r.text())) &&
+    /export\s+async\s+function\s+upsertDailyBatchRaw/.test(await fetch('/js/wearables-store.js').then(r => r.text())));
+
+  // P0-3 + P0-4: disable + change-passphrase walk wearable IDB before/after
+  // key swap. _walkWearableIDB exists and runs from both paths.
+  const cryptoSrc31 = await fetch('/js/crypto.js').then(r => r.text());
+  assert('crypto.js defines _walkWearableIDB helper for re-encrypt / decrypt-to-plain',
+    /async function _walkWearableIDB\(mode\)/.test(cryptoSrc31));
+  assert('disableEncryption walks wearable IDB BEFORE clearing the session key',
+    /disableEncryption[\s\S]*?_walkWearableIDB\([^)]*\)[\s\S]*?_sessionKey\s*=\s*null/.test(cryptoSrc31));
+  assert('changePassphrase walks wearable IDB under the OLD key before key swap',
+    /_sessionKey\s*=\s*oldKey[\s\S]*?_walkWearableIDB[\s\S]*?_sessionKey\s*=\s*newKey/.test(cryptoSrc31));
+
+  // P0-5: encryption-on + session-locked refuses to silently write plaintext
+  const storeSrc31 = await fetch('/js/wearables-store.js').then(r => r.text());
+  assert('Encrypt-or-throw: session-locked path throws session-locked error (no silent plaintext)',
+    /code\s*=\s*'session-locked'/.test(storeSrc31) &&
+    /encrypted;\s*unlock with your passphrase before syncing/.test(storeSrc31));
+
+  // ═══════════════════════════════════════
   // 17t. Settings tab split — Wearables + Agent Access (v1.30.0)
   // ═══════════════════════════════════════
   console.log('%c 17t. Settings Tab Split ', 'font-weight:bold;color:#f59e0b');
@@ -1309,8 +1348,10 @@ return (async function() {
     /export\s+async\s+function\s+exportEncryptedBackup/.test(backupSrc));
   assert('restoreAutoBackup hydrates wearable IDB rows back via restoreWearableIDB',
     /export\s+async\s+function\s+restoreAutoBackup[\s\S]*?restoreWearableIDB\(backup\.wearableIDB\)/.test(backupSrc));
-  assert('restoreWearableIDB iterates per-source and upsertDailyBatch',
-    /restoreWearableIDB[\s\S]{0,400}upsertDailyBatch/.test(backupSrc));
+  // v1.31.0: restoreWearableIDB now uses upsertDailyBatchRaw to preserve
+  // encryption envelopes from an encrypted backup (no decrypt-on-restore).
+  assert('restoreWearableIDB iterates per-source and upsertDailyBatchRaw (preserves encrypted wrappers)',
+    /async function restoreWearableIDB[\s\S]*?upsertDailyBatchRaw/.test(backupSrc));
 
   // P0-C: PDF report falls back to wearableSummary.metrics for biometrics.
   const exportSrc2 = await fetch('/js/export.js').then(r => r.text());

@@ -318,7 +318,14 @@ export async function loadProfile(profileId) {
     import('./wearables-connect.js'),
   ]).then(async ([manualMod, summaryMod, connectMod]) => {
     try { await manualMod.migrateBiometricsToManual(profileId, state.importedData?.biometrics); } catch {}
+    // Profile-switch race guard: the user can swap profile A→B during the
+    // ~100ms cold-cache IDB read window. If that happens, abort BEFORE
+    // syncWearableSummary persists A's metrics into B's wearableSummary
+    // and saves them under B's localStorage key. Same shape as the
+    // v1.24.1 OAuth-callback profile-swap guard.
+    if (state.currentProfile !== profileId) return;
     try { await summaryMod.syncWearableSummary(profileId, connectMod.listConnectedSources()); } catch {}
+    if (state.currentProfile !== profileId) return; // re-check post-await — sync also takes IDB time
   }).catch(() => {});
 }
 

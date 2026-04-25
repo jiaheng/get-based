@@ -75,17 +75,32 @@ function txPromise(tx) {
 // plaintext so IDB cursors / range queries still work. The envelope replaces
 // every other field with `{ source, date, _payload: { _enc:'v1', iv, ct }}`.
 //
-// When encryption is OFF (or the session is locked), returns the row as-is
-// — same plaintext shape as pre-v1.29.0.
+// When encryption is OFF, returns the row as-is — same plaintext shape as
+// pre-v1.29.0. When encryption is ON but the session is LOCKED (key cleared
+// after passphrase prompt dismiss / lock timeout), THROWS rather than
+// silently degrading the at-rest guarantee. Callers can catch and queue
+// the write; better than landing cleartext rows in an "encrypted at rest"
+// IDB without telling anyone.
 async function _encryptRowIfEnabled(row) {
   let crypto;
   try { crypto = await import('./crypto.js'); } catch { return row; }
   if (!crypto.getEncryptionEnabled?.()) return row;
+  // Already-encrypted rows (e.g. from a backup-restore RAW path) pass through
+  // untouched. Note: when encryption is OFF we DON'T hit this branch because
+  // we returned above; that scenario goes through the RAW upsert API
+  // (upsertDailyBatchRaw) which doesn't call this helper.
   const { source, date, _payload, ...rest } = row;
-  // If already encrypted, don't double-wrap.
   if (_payload?._enc === 'v1') return row;
   const env = await crypto.encryptObject(rest);
-  if (!env) return row; // session locked — fall back to plaintext write
+  if (!env) {
+    // Encryption-on but session locked (or unavailable). Refuse rather than
+    // silently writing cleartext. The error propagates up to the adapter
+    // sync orchestrator, which logs + shows a toast asking the user to
+    // unlock. Better than silent downgrade.
+    const e = new Error('Wearable storage is encrypted; unlock with your passphrase before syncing.');
+    e.code = 'session-locked';
+    throw e;
+  }
   return { source, date, _payload: env };
 }
 
@@ -145,6 +160,44 @@ export async function getDaily(profileId, source, date) {
     req.onerror = () => reject(req.error);
   });
   return raw ? _decryptRowIfWrapped(raw) : null;
+}
+
+// Raw range read — returns rows AS STORED in IDB without decrypt. Used by
+// the backup snapshot path so encrypted rows survive the round-trip
+// AS-WRAPPERS instead of being decrypted into the snapshot in plaintext
+// (which would silently downgrade the at-rest encryption guarantee).
+export async function getDailyRangeRaw(profileId, source, startDate, endDate) {
+  const db = await openWearablesDB(profileId);
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_DAILY, 'readonly');
+    const store = tx.objectStore(STORE_DAILY);
+    const keyRange = IDBKeyRange.bound([source, startDate], [source, endDate]);
+    const rows = [];
+    const req = store.openCursor(keyRange);
+    req.onsuccess = () => {
+      const cursor = req.result;
+      if (cursor) { rows.push(cursor.value); cursor.continue(); }
+      else resolve(rows);
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+// Raw write — accepts rows AS-IS without re-encrypting. Used by the
+// backup-restore path so wrapped rows go back into IDB untouched. Plain
+// rows that come from a non-encrypted backup land in a possibly-encrypted
+// destination IDB still as plaintext — they'll be re-encrypted on next
+// mutation via the normal upsertDaily path (write-on-touch).
+export async function upsertDailyBatchRaw(profileId, rows) {
+  if (!rows || rows.length === 0) return;
+  const db = await openWearablesDB(profileId);
+  const tx = db.transaction(STORE_DAILY, 'readwrite');
+  const store = tx.objectStore(STORE_DAILY);
+  for (const row of rows) {
+    if (!row || !row.source || !row.date) continue;
+    store.put(row);
+  }
+  return txPromise(tx);
 }
 
 // Inclusive range query for ONE source. ISO dates; lexicographic order matches
