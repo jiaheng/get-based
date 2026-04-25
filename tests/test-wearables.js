@@ -1269,9 +1269,12 @@ return (async function() {
   const wearablesDoc = await fetch('/docs/guide/wearables.md').then(r => r.text());
   assert('docs/guide/wearables.md uses single-maintainer voice ("I", not "we")',
     !/we don't yet have/.test(wearablesDoc));
+  // The collapsed v1.30.0 entry replaced the per-version privacy bullets;
+  // single-maintainer voice now applies across the whole entry. Just guard
+  // against the plural-voice anti-pattern coming back ("We never see").
   const changelogSrc = await fetch('/js/changelog.js').then(r => r.text());
-  assert('changelog.js v1.24.0 privacy bullet uses "The relay never sees" not "We never see"',
-    /relay never sees/.test(changelogSrc));
+  assert('changelog.js does not use plural "We never see" voice',
+    !/We never see/.test(changelogSrc));
 
   // Doc-source assertions (cross-device-sync.md, dashboard.md, marker count
   // consistency across pdf-import.md / custom-markers.md / manual-entry.md)

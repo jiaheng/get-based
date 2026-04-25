@@ -5,152 +5,22 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
-    version: '1.30.0', date: '2026-04-25', title: 'Settings split — Wearables and Agent Access are now separate tabs',
+    version: '1.30.0', date: '2026-04-25', title: 'Wearables — connect your devices, sync HRV / sleep / recovery, share with AI agents',
     items: [
-      'The old <i>Integrations</i> tab mixed two different concepts — incoming wearable data sources and outgoing read permission for AI agents. Split into <b>Wearables</b> (Oura, WHOOP, Fitbit, Withings, Ultrahuman, Polar, Apple Health, Manual entries) and <b>Agent Access</b> (token management + the wearable-series push window). Five tabs total: Display · AI · Data · Wearables · Agent Access.',
-      'Old deep-links pointing at <code>integrations</code> redirect to <code>wearables</code> automatically — no broken links.',
-    ]
-  },
-  {
-    version: '1.29.0', date: '2026-04-25', title: 'Configurable agent series window + wearable IDB encrypted at rest',
-    items: [
-      '<b>Settings → Integrations → Agent Access "Push wearable daily series" is now a tri-state.</b> Off / 7 days / 30 days / 90 days. The browser pushes only the chosen window to the gateway. Costs (real-measured): ~100 / ~400 / ~1200 tokens for 7 / 30 / 90 days. Pick the cheapest window that covers your reasoning needs.',
-      '<b>New MCP tool <code>getbased_wearables_series</code></b> in <a href="https://github.com/elkimek/getbased-agents" target="_blank">getbased-agents</a>. Args: <code>metric=</code> (e.g. <code>hrv_rmssd</code>, <code>rhr</code>, <code>sleep_score</code>) and <code>days=</code> (7/30/90, defaults to whatever\'s pushed). Returns the full pivoted matrix, or a single metric line. Falls back gracefully when the user hasn\'t enabled the toggle.',
-      '<b>Wearable IndexedDB rows now encrypt at rest.</b> When encryption-at-rest is enabled in Settings → Security, every L1 row\'s non-key fields wrap into an AES-GCM envelope. Compound key (<code>source</code>, <code>date</code>) stays plaintext so range queries still work. New writes encrypt automatically; existing plaintext rows pass through reads untouched and migrate to encrypted on next rewrite. Closes the gap flagged in v1.28.0\'s encryption doc.',
-    ]
-  },
-  {
-    version: '1.28.2', date: '2026-04-25', title: 'Drop the jargon footer note',
-    items: [
-      'Removed the strip footer caveat reading "Deep HRV (SDNN · pNN50 · HF/LF) needs an ECG chest strap — Oura provides RMSSD only." Real users don\'t know what those acronyms mean and the note made the strip feel like it was apologising for itself. The detail-modal HRV stats and the AI context already label HRV as <i>overnight</i> / <i>daytime</i> without jargon.',
-    ]
-  },
-  {
-    version: '1.28.1', date: '2026-04-25', title: 'Test isolation fix — tests no longer write into the user\'s real profile',
-    items: [
-      '<b>Critical test-isolation bug.</b> The v1.27.5 sync-flow + UI-flow tests swapped the localStorage <code>labcharts-active-profile</code> key but didn\'t also assign <code>state.currentProfile</code>. Because <code>saveImportedData()</code> keys off the in-memory <code>state.currentProfile</code> (not localStorage), any save inside the test wrote the test\'s fake state into the USER\'S real profile storage. On a wearables worktree this overwrote real Oura access tokens with <code>test-rfr</code> placeholders and wiped <code>wearableConnections.manual</code>. Tests now snapshot + restore both, plus drop their own storage keys on cleanup. New regression guard in <code>test-wearables.js</code> that pins the correct pattern in both test files so a future contributor can\'t reintroduce the half-swap.',
-      'No production-code change. If you noticed your Oura saying it needed reconnection or "Manual — waiting on first device sync" after a recent build, that\'s why. Re-OAuth Oura; the manual connection rebuilt itself from existing IDB rows on the next sync.',
-    ]
-  },
-  {
-    version: '1.28.0', date: '2026-04-25', title: 'Wearables P2 cleanup — profile-switch refresh, recommendations hooks, focus trap, security polish',
-    items: [
-      '<b>Profile switch now refreshes the wearable summary.</b> Was only running once at boot — switching profiles left a stale strip until the next adapter sync. Now <code>loadProfile</code> runs migrate + summary recompute for the freshly-loaded profile.',
-      '<b>Detail modal traps Tab inside the dialog.</b> Keyboard navigation could leak past the modal onto background controls (strip, supplements, chat FAB). Standard focus-trap with Tab and Shift-Tab.',
-      '<b>Wearable trends now drive supplement suggestions.</b> New <code>detectWearableTrendSlots</code> hook: 7-day overnight HRV below your own P25 → magnesium; 7-day resting HR above your own P75 → magnesium (overtraining/illness signal); chronic sleep score below 70 → melatonin. Conservative thresholds — only fires against your own baseline IQR, not a fixed cutoff.',
-      '<b>Coverage days counts non-null rows only.</b> Was inflating with bare <code>{source, date}</code> stubs that survived from Apple Health imports of all-null fields.',
-      '<b>Polar profile-swap mid-sync no longer commits stale transactions.</b> The pre-await connection snapshot is now passed into <code>commitAfterWriteIfAny</code> so a profile swap during a long-running backfill can\'t commit the old profile\'s transactions against the new profile\'s token.',
-      '<b>Manual save / delete double-clicks are now per-metric.</b> The op-token counter was module-scoped — clicking Save on one card while another was mid-save bailed the first one silently. Now keyed by metric.',
-      '<b>Profile-delete IndexedDB cleanup.</b> <code>deleteWearablesDB</code> now closes any cached connection before <code>indexedDB.deleteDatabase</code> — was silently hitting <code>onblocked</code> and waiting for tab close.',
-      '<b>JSON import prunes stale source overrides.</b> <code>wearablePrimaryOverride</code> entries pointing at sources without a connection or rows are now dropped on import, rather than producing a misleading ✓ in the source picker until the user re-OAuths.',
-      '<b>Security polish.</b> <code>fetchAccountInfo</code> now receives only <code>{ userId }</code> rather than the whole connection object (defensive against future contributors logging the second arg with refresh token attached). Error toasts run through a token-scrubber that redacts <i>Bearer …</i> / <i>access_token=…</i> / <i>refresh_token=…</i> patterns before showing — defends against vendors echoing tokens in error bodies.',
-      '<b>Accessibility.</b> Manual-entry delete button reads as a sentence to screen readers ("Delete weight reading from April 23, 2026, 75.5 kg"). Strip-header has an explicit aria-label distinct from the live source list. Niche disclosure summary reads as "+ N vendor-specific scores" instead of the bare "+ N more". Settings → Agent Access label includes "and context" (covers wearables + cards too, not just labs).',
-      '<b>Encryption-at-rest gap documented.</b> <code>docs/guide/encryption.md</code> now flags that the wearable IndexedDB raw rows are NOT wrapped by the encryption-at-rest passphrase layer — only localStorage is. The L2 summary that flows into sync IS encrypted; raw rows are local-only and at-rest cleartext. Documented honestly.',
-    ]
-  },
-  {
-    version: '1.27.5', date: '2026-04-25', title: 'Wearables test integrity — replaces fragile source-greps with behavioral assertions',
-    items: [
-      '<b>No user-visible change.</b> Test-only commit closing the audit\'s test-integrity findings: behavioral coverage of the v1.26 source-badge gate fix (renders strip with 2 sources, asserts ≥2 source-badge buttons in HTML), the v1.26 daytime-empty tooltip (opens HRV modal, asserts "Not from Oura · why?" text + title attr carries the long explanation), the v1.27.0 series-append-not-replace ordering (builds both blocks, asserts series block follows base context). Direct token-leak prevention test for <code>buildLabContext</code> against sentinel access/refresh tokens. Source-grep coverage for the <code>wearableConnections</code> preserve-on-pull merge (Evolu pull is hard to drive without a fully-mocked engine — kept as grep with documentation).',
-    ]
-  },
-  {
-    version: '1.27.4', date: '2026-04-25', title: 'Wearables P1 cleanup — sync hygiene, picker honesty, touch targets, doc drift',
-    items: [
-      '<b>Disconnect-then-reconnect was missing data.</b> The <code>last-sync</code> meta entry survived disconnect, so the next reconnect\'s incremental sync started from the old end-date instead of refetching the cleared range. Now cleared on disconnect.',
-      '<b>Source picker checkmark fixed.</b> When you forced a primary source that had no data, the L2 picker silently fell back to auto — but the picker still showed your stale override with a ✓. Now reflects the EFFECTIVE primary the L2 actually used.',
-      '<b>Polar connect refuses gracefully when the token grant is missing user_id.</b> Previously a missing <code>x_user_id</code> would have aliased two different profiles\' Polar data via the literal "user" fallback. Now flags <i>needs reauth</i> with a clear message.',
-      '<b>Scheduler stops the 401 retry storm.</b> <code>recoverIfL1Empty</code> now skips a connection that\'s already flagged <code>needsReauth</code>, so a stale token doesn\'t trigger a backfill that 401s and re-flags the same flag every tick.',
-      '<b>Agent gateway no longer leaks profile names.</b> The push to the relay carried a full <code>profiles: [{id,name},…]</code> array — the relay only needs the active <code>profileId</code>. Profile names can include real names; this was gratuitous PII over-share.',
-      '<b>Service worker now caches <code>wearables-manual.js</code></b> — was missing from the SW static-cache list, would 404 offline for users with manual entries.',
-      '<b>Mobile touch targets ≥44px.</b> Strip sync, reorder arrows, source picker items, manual-entry delete, action buttons, and inline log save/cancel all hit the standard tap-target threshold under <code>(pointer: coarse)</code>.',
-      '<b>"Push 30-day wearable series" toggle copy fixed</b> — said "~1500 extra tokens" when reality is ~400 (real-measured). Matches the docs.',
-      '<b>Doc drift cleanup.</b> Dashboard guide lists the wearable strip in the layout flow. Cross-device-sync guide explicitly explains the L2-syncs / L1-stays-local / tokens-don\'t-sync split. Marker-count drift fixed across <code>pdf-import.md</code>, <code>custom-markers.md</code>, <code>manual-entry.md</code> — all 17, not 18. Single-maintainer voice in <code>wearables.md</code> ("I" not "we").',
-    ]
-  },
-  {
-    version: '1.27.3', date: '2026-04-25', title: 'Fix: backups + profile delete + PDF report all carry wearable data now',
-    items: [
-      '<b>Auto-backup + folder-backup + manual export now include 90 days of wearable raw rows.</b> Previously only the L2 summary survived a backup restore — every daily HRV / sleep / RHR / manual entry was silently lost. New <code>buildFullBackupSnapshot</code> + restore path round-trips the whole wearable IndexedDB.',
-      '<b>Deleting a profile now drops its wearable IndexedDB.</b> Previously only its localStorage keys were cleared — the per-profile wearable database lingered indefinitely with up to 90 days of HRV/sleep/RHR + manual entries.',
-      '<b>PDF report Biometrics section reads the wearable summary as fallback.</b> Wearable-only users (no legacy <code>biometrics</code> array) had blank weight / BP / pulse rows in the printed report; now those pull from <code>wearableSummary.metrics.{weight, bp_systolic, bp_diastolic, rhr}</code>.',
-    ]
-  },
-  {
-    version: '1.27.2', date: '2026-04-25', title: 'Wearables test coverage — 349 → 532 assertions (no user-visible change)',
-    items: [
-      'Three new test files cover the layers that were previously source-grep-only: <code>test-wearables-fetchers.js</code> drives every adapter (Oura / WHOOP / Fitbit / Withings / Ultrahuman / Polar) against mocked HTTP responses and asserts canonical-row shape per metric, including 30-day chunking for Oura\'s heartrate cap and 401/429/500 error handling. <code>test-wearables-sync-flow.js</code> orchestrates real <code>backfillWearable</code> + <code>incrementalSyncWearable</code> + <code>syncWearableSummary</code> + <code>disconnectWearable</code> end-to-end with a fake connection, checking IDB writes, last-sync meta, and L2 gate triggers (initial, min-cadence). <code>test-wearables-ui-flows.js</code> drives real DOM clicks: detail-modal entry × → confirm dialog (the v1.24.1 regression site), source-swap button → picker, reorder ◀ ▶ → savedOrder persists, niche-card disclosure renders.',
-    ]
-  },
-  {
-    version: '1.27.1', date: '2026-04-25', title: 'Apple Health daytime HR + wearables in JSON export + agent docs',
-    items: [
-      '<b>Apple Health users now get a daytime HR card.</b> Previously the importer skipped <code>HKQuantityTypeIdentifierHeartRate</code> samples; v1.27.1 routes them into <i>hr_day</i>, filtered to the 06:00–22:00 local window and averaged. RestingHeartRate stays in the <i>rhr</i> slot via min-aggregation.',
-      '<b>JSON export carries the wearable layer.</b> <i>Settings → Data → Export Client</i> now includes <code>wearableSummary</code>, <code>wearableCardOrder</code>, and <code>wearablePrimaryOverride</code> so you can move profiles between devices or hand the JSON to an agent. OAuth tokens (<code>wearableConnections</code>) are still excluded — same shape as Evolu sync.',
-      '<b>Agent Access docs updated</b> with the wearable-series toggle walkthrough at <a href="https://getbased.health/docs/guide/agent-access" target="_blank">docs/guide/agent-access</a>: section format, example output, token cost, privacy guarantees, and the <code>getbased_section(\'wearables-series-30d\')</code> MCP call.',
-    ]
-  },
-  {
-    version: '1.27.0', date: '2026-04-25', title: 'Agents can read your 30-day wearable daily series',
-    items: [
-      '<b>Agent Access (Settings → Integrations → Agent Access) gains a "Push 30-day wearable series" toggle.</b> When on, the browser builds a pivoted matrix of daily values (HRV, RHR, sleep, readiness, steps…) from your local L1 IndexedDB and pushes it to the gateway as <code>[section:wearables-series-30d]</code>. Any MCP-connected agent (Hermes, OpenClaw, Claude Code, etc.) can pull it via <code>getbased_section(\'wearables-series-30d\')</code>.',
-      '<b>Off by default — opt in if you want time-series reasoning.</b> Adds ~400 tokens per agent prompt (real measurement on 30 days × 13 metrics; cached cleanly by the prompt cache so the marginal cost per turn is small). The always-on ~200-token L2 summary keeps working unchanged.',
-      '<b>Privacy unchanged.</b> Raw daily samples still never sync via Evolu — they read from the browser\'s local IDB only. The gateway sees the rendered string. OAuth tokens stay local (still stripped by <code>stripWearableCredentials</code>).',
-      '<b>Format.</b> One line per metric, chronological values separated by <code>→</code>, no-reading days as <code>—</code>. Each line includes the primary source so the agent knows whether HRV came from Oura, Apple Health, or Polar workouts. 1dp rounding to keep tokens tight without losing meaningful precision.',
-      '<b>Toggle re-pushes immediately</b> so the agent sees the new section the next time it queries (no 5-second debounce wait).',
-    ]
-  },
-  {
-    version: '1.26.0', date: '2026-04-25', title: 'Wearables UX audit — source badges, honest deltas, calmer strip',
-    items: [
-      '<b>Every card shows its source.</b> When ≥2 wearables are connected, every populated card now carries a <i>via X</i> badge so you can see at a glance whether HRV came from Oura, sleep score from Fitbit, weight from Manual. Click any badge to switch source.',
-      '<b>Honest deltas.</b> Steps no longer shows a baseline-delta arrow against an in-progress count (132 vs 997 baseline at 9 AM read like a 87% drop). Stress / activity / any "lower-is-better" metric at zero against a non-zero baseline no longer flashes "↓ 100%". Zero-baseline metrics suppress the delta entirely instead of "→ —".',
-      '<b>Source picker reachable on every card.</b> A <i>via {Source} · swap</i> button now sits in the detail-modal header — previously the source switcher only appeared when ≥2 vendors declared the same metric.',
-      '<b>Subtle sub-labels.</b> "HRV overnight" / "Resting HR overnight" replaced with a 🌙 sun-glyph (overnight) and ☀️ (daytime). Resting HR drops the redundant sub entirely. Screen readers still hear "overnight" / "daytime" via spoken aria.',
-      '<b>Daytime empty-state row tightened.</b> Long per-vendor explanation moves to a hover/tap tooltip; the visible cell reads <i>Not from {Source} · why?</i>',
-      '<b>Niche cards collapsed.</b> Cardio age + Resilience level (Oura proprietary scores) move into a <i>+ 2 more</i> disclosure unless you reorder them up. Strip drops from 12 to 10 cards by default.',
-      '<b>Reorder mode visual cue.</b> An accent banner pill + dashed grid outline make it obvious you\'re in arrange-mode. Button label expanded from <code>⇄</code> to <code>⇄ Reorder</code>.',
-      '<b>Manual-row count populates immediately.</b> The "Counting readings…" placeholder in Settings → Integrations → Manual now resolves on first paint, not just when you toggle the row open.',
-      '<b>Apple Health export instructions are a numbered list</b> behind a <i>How to export from your iPhone</i> disclosure, not a 3-line run-on paragraph.',
-      '<b>"Re-sync last 90 days" looks secondary.</b> The button is softer than the primary <i>Sync</i> action with a "(may take a moment)" hint, since it can hit vendor rate limits and take 30s+.',
-      '<b>BP cards have proper aria.</b> Screen readers now hear <i>"Blood pressure systolic 135 mmHg"</i> instead of <i>"BP syst 135 mmHg"</i>.',
-      '<b>Resilience level "1 /5" gap closed</b> — value + unit now render as a single token, not separated.',
-      '<b>Mobile FAB no longer overlaps the strip</b> (added 80px bottom margin under 600px viewports). Source badge switches from all-caps to title-case at narrow widths so it doesn\'t shout.',
-    ]
-  },
-  {
-    version: '1.25.3', date: '2026-04-25', title: 'HRV modal explains why daytime HRV is missing per source',
-    items: [
-      'When the active HRV source can\'t supply daytime data (Oura/WHOOP overnight-only, Polar workout-only with no recent workouts), the detail modal now shows a <i>Daytime HRV — —</i> row with a per-vendor explanation pointing at sources that would populate it (Apple Health, Fitbit <code>dailyRmssd</code>, Polar workouts). Previously the row was just absent and users assumed the feature was broken. The latest/7d/30d sub-stats appear identically to <i>Daytime HR</i> as soon as a daytime-capable HRV source is connected.',
-    ]
-  },
-  {
-    version: '1.25.2', date: '2026-04-25', title: 'Daytime HRV / HR show 7-day + 30-day averages, not just today',
-    items: [
-      'A single quiet or active day can swing daytime HR by 20+ bpm, so showing only the latest value made the companion stat noisy. The HRV / RHR detail modal now adds <i>Daytime (7d)</i> and <i>Daytime (30d)</i> averages alongside <i>Daytime (latest)</i>, the same shape as the overnight stats. The 30-day cell is suppressed until there\'s at least 2 weeks of data so it doesn\'t lie about a one-week trend.',
-    ]
-  },
-  {
-    version: '1.25.1', date: '2026-04-25', title: 'Fix: Oura daytime HR backfill now populates the full 90 days',
-    items: [
-      'The v1.25.0 daytime-HR work fetched Oura\'s <code>heartrate</code> endpoint with a 90-day window in one shot — but the endpoint caps each query at 30 days and quietly returns 400. The error was swallowed and the backfill silently produced rows with no daytime HR. Now chunked into 29-day slices so a 90-day backfill actually populates <i>Daytime HR</i> for every day. <b>Re-sync Oura once</b> via Settings → Integrations → Oura → <i>Re-sync last 90 days</i>.',
-    ]
-  },
-  {
-    version: '1.25.0', date: '2026-04-25', title: 'Daytime HRV + heart rate, alongside overnight',
-    items: [
-      '<b>Wearable adapters now distinguish overnight from daytime HRV / RHR.</b> Until today, every adapter dumped whatever signal the vendor calls "daily HRV" into one slot — but Oura/WHOOP/Fitbit measure overnight rMSSD during sleep, while Polar measures workout HRV during exercise, and Withings reports a daytime spot pulse from the scale. Same slot, three different numbers. v1.25.0 splits them.',
-      '<b>Per-vendor mapping</b> — Oura adds a <code>heartrate</code> stream pull and aggregates awake-tagged samples into <i>daytime HR</i>. WHOOP\'s 24h cycle-average HR routes to <i>daytime HR</i>. Fitbit splits <code>deepRmssd</code> (overnight) from <code>dailyRmssd</code> (broader day aggregate). Ultrahuman\'s 24h <code>.avg</code> fields move to the daytime slots; the overnight slots fill from <code>.sleep</code> sub-fields. Withings scale pulse moves from <i>resting HR</i> (it never was) to <i>daytime HR</i>; the overnight slot now sources from sleep summary <code>hr_min</code>. Polar workout HR + HRV move to the daytime slots; overnight RHR sources from sleep nights. Apple Health splits HRV SDNN samples by hour-of-day window (22:00–06:00 = overnight, 06:00–22:00 = daytime).',
-      '<b>Strip stays calm.</b> Daytime values do NOT get their own cards — they\'d clutter the dashboard with two HRV cards and two HR cards. Instead, when you open the detail modal for HRV or RHR, the matching daytime aggregate appears as an extra stat row underneath the overnight number.',
-      '<b>AI context labels both windows explicitly.</b> The chat prompt now sees <i>HRV (overnight)</i> AND <i>HRV (daytime)</i>, <i>Resting HR (overnight)</i> AND <i>Heart rate (daytime)</i> — distinct enough that the model can reason about stress reactivity vs recovery instead of conflating them.',
-      '<b>Honesty fixes.</b> Withings users will see their <i>Resting HR</i> card go empty if they only have a scale connected (no sleep summary) — that\'s correct, the scale never measured RHR. Polar users similarly: workout HR isn\'t resting. The fix is to either log a sleep night or connect another wearable that measures overnight HR.',
-      '<b>Re-sync your wearables once</b> to populate the new daytime slots — existing 90-day backfills don\'t auto-reprocess. Settings → Integrations → expand any vendor → <i>Re-sync last 90 days</i>.',
-    ]
-  },
-  {
-    version: '1.24.1', date: '2026-04-25', title: 'Fix: deleting manual readings actually deletes them',
-    items: [
-      'The × on each manual reading inside a wearable detail modal threw silently and the row stayed in storage. Confirming the dialog now removes the entry, refreshes the L2 summary, and repaints the strip card. Same fix for the <i>Delete all manual entries</i> action under Settings → Integrations → Manual.',
+      '<b>Connect 7 wearables.</b> Oura, WHOOP, Fitbit, Withings, Ultrahuman, Polar, plus Apple Health (file import). HRV, resting heart rate, sleep, readiness, activity, steps, weight, blood pressure — whatever each device tracks shows up alongside your blood work in a single dashboard strip. Beta status; WHOOP + Ultrahuman are awaiting partner credentials.',
+      '<b>Or log it yourself.</b> Weight, blood pressure, and resting HR have inline cards on the dashboard. Tap an empty card → fill the form (number, date, optional context like <i>post-workout</i> or <i>morning-fasted</i>) → save. Same shape as wearable-synced cards.',
+      '<b>Tap any card for the full picture.</b> Detail modal shows a 90-day chart, baseline, 7- and 30-day rolling averages, source breakdown, and every individual reading — with per-row delete and a <i>+ Add reading</i> button for backfills.',
+      '<b>Overnight vs daytime.</b> HRV and heart rate are split into <i>overnight</i> (recovery signal — what your wearable measures during sleep) and <i>daytime</i> (stress reactivity — measured during the waking window). The strip shows overnight; the daytime companion appears as a sub-stat in the detail modal so the strip stays calm. The AI sees both labelled separately so it can reason about recovery vs reactivity.',
+      '<b>Pick which device drives each metric.</b> If you have two wearables that both track sleep, tap the <i>via {vendor}</i> badge → choose which one wins for that metric. Per-metric, persisted, overridable. Auto-pick falls back when your override has no data.',
+      '<b>Reorder your strip.</b> Tap the ⇄ button → each card grows ◀ ▶ arrows → one click moves the card one slot. Order saves per-profile.',
+      '<b>Strip is calm by default.</b> Vendor-specific scores (Oura\'s Cardio age, Resilience level) collapse into a <i>+ N more</i> disclosure unless you reorder them up. Steps cards drop the misleading "↓ 87% vs baseline" arrow that fired against in-progress day counts. Stress / activity at zero against a non-zero baseline no longer flashes "↓ 100%".',
+      '<b>Wearables flow into AI chat.</b> A compact ~200-token summary (HRV, sleep, recovery + last 5 anomaly events) lands in every chat prompt when AI Context → Include wearable data is on. The AI can correlate "HRV dropped 4 days before that crash" with the rest of your bloodwork picture.',
+      '<b>Agent Access — share with external AI agents.</b> Generate a read-only token → connect any MCP-compatible agent (Hermes, OpenClaw, Claude Code…). Settings → Agent Access has its own tab. Optional <i>Push wearable daily series</i> select (off / 7 / 30 / 90 days) lets the agent reason about time-series, not just the summary. New <code>getbased_wearables_series</code> MCP tool lets agents pull a single metric (e.g. just HRV) for cheap follow-ups instead of the whole matrix.',
+      '<b>Encrypted at rest.</b> When encryption-at-rest is on (Settings → Security), wearable IndexedDB rows are wrapped in AES-GCM. Compound keys stay plaintext so range queries work; everything else (HRV, sleep, RHR values) is encrypted. New writes encrypt automatically; existing rows migrate on next mutation.',
+      '<b>Privacy by design.</b> Raw daily samples never sync — they live in your browser\'s local storage only. The cross-device sync carries just the compact summary + anomaly events (encrypted, end-to-end). OAuth tokens are per-device — they never sync, so a stolen sync mnemonic can\'t grant continuous access to your live wearable feeds. Each device authorises each wearable independently.',
+      '<b>Backups + JSON export now carry the wearable layer.</b> Auto-backup, folder-backup, and Settings → Data → Export Client all round-trip your 90 days of raw rows + summary + reorder preferences. Profile delete cleans up its own wearable database.',
+      '<b>Settings split.</b> The old <i>Integrations</i> tab is now two: <b>Wearables</b> (your connected devices + manual entries) and <b>Agent Access</b> (token, push preferences for AI agents). Different mental models — incoming data vs outgoing permission — deserve different roofs.',
+      '<b>Documentation.</b> New <a href="https://getbased.health/docs/guide/wearables">Wearables guide</a> + <a href="https://getbased.health/docs/guide/agent-access">Agent Access guide</a> with full setup walkthroughs and the cross-device-sync split (what travels, what stays local).',
     ]
   },
   {
@@ -164,20 +34,6 @@ const CHANGELOG = [
       '<b>Supplement mito-effect database refreshed:</b> added Urolithin A, Methylene Blue, Spermidine, Fisetin, Caffeine, and Ethanol — the most conspicuous omissions. Mechanism notes updated for Metformin (Complex I primacy contested by 2018-2024 mGPDH/AMPK research), Aspirin (uncoupling is high-dose only), Resveratrol (SIRT1 binding contested), and Melatonin (protective antioxidant, not direct activity boost). Total compounds: 108 → 114.',
       '<b>Recommended models bumped:</b> Claude Opus 4.7 and GPT-5.5 now surface in the recommended section across OpenRouter, PPQ, Routstr, and Venice as soon as each provider catches up.',
       '<b>Existing imports keep working,</b> but <b>re-import your DNA / mtDNA file once</b> to populate the 5 new autosomal SNPs, refresh CETP TaqIB heterozygous calls (silently mis-matched until today on existing imports), and resolve the 11 new mtDNA sub-haplogroups. Recalibrated effect labels and the dot-color refresh happen automatically.',
-    ]
-  },
-  {
-    version: '1.24.0', date: '2026-04-24', title: 'Health Metrics — wearables + manual entry in one unified dashboard strip',
-    items: [
-      '<b>Seven wearable integrations.</b> Connect Oura, WHOOP, Withings, Ultrahuman, Fitbit, Polar, or Apple Health (file import). Each one syncs the metrics it exposes — HRV, resting heart rate, sleep, readiness, activity, steps, weight, blood pressure, and more — into a single dashboard view alongside your blood work.',
-      '<b>Manual entry is a first-class source.</b> Weight, blood pressure, and resting heart rate moved from the Edit Client modal to the dashboard strip. Empty cards appear with a <code>+ log</code> affordance — tap to open an inline form (number field + date picker + optional context chips like <i>post-workout</i> or <i>morning-fasted</i>), Enter to save. Same card shape as wearable-synced metrics, labeled <i>via Manual</i>. Existing biometrics data migrates automatically on first load.',
-      '<b>Per-metric source picker.</b> When two sources cover the same metric (e.g. Oura + manual both provide resting HR), tap the <i>via {vendor}</i> badge to switch which one drives the card. Per-metric, persisted, overridable.',
-      '<b>Manage every reading individually.</b> Tap any card → detail modal now lists every manual entry for that metric with per-row delete and a <code>+ Add reading</code> button that accepts backfilled dates. No more "all or nothing" — fix a typo without wiping history.',
-      '<b>Reorder your strip.</b> Tap the ⇄ button in the strip header → each card grows ◀ ▶ arrows → one click moves that card one slot. Works the same on mouse and touch. Order persists per-profile.',
-      '<b>Settings → Integrations panel</b> for managing connections. Real vendor logos, one-click connect, expand a row to sync / re-sync 90 days / disconnect. Manual is in the same list — expand it for entry counts + a <i>Delete all manual entries</i> escape hatch (wearable data untouched).',
-      '<b>Settings → AI → AI Context</b> has a toggle to include or exclude wearable data from the AI chat context. On by default; turn it off to keep metrics out of every prompt.',
-      '<b>Privacy by design.</b> Wearable data stays on your device. Only a compact summary plus anomaly events sync to your other devices via the existing Evolu CRDT. The relay never sees your raw HRV / sleep / heart-rate data. OAuth tokens stay per-device — never sync.',
-      '<b>Notes.</b> Polar exposes HRV only from recorded workouts (not overnight averages like Oura / WHOOP / Fitbit). Apple Health is file-import — export from your iPhone and drop the zip in. All seven integrations are <i>beta</i>; WHOOP and Ultrahuman are waiting on partner credentials for the OAuth handshake.',
     ]
   },
   {
