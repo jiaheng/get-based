@@ -5,6 +5,14 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.29.0', date: '2026-04-25', title: 'Configurable agent series window + wearable IDB encrypted at rest',
+    items: [
+      '<b>Settings → Integrations → Agent Access "Push wearable daily series" is now a tri-state.</b> Off / 7 days / 30 days / 90 days. The browser pushes only the chosen window to the gateway. Costs (real-measured): ~100 / ~400 / ~1200 tokens for 7 / 30 / 90 days. Pick the cheapest window that covers your reasoning needs.',
+      '<b>New MCP tool <code>getbased_wearables_series</code></b> in <a href="https://github.com/elkimek/getbased-agents" target="_blank">getbased-agents</a>. Args: <code>metric=</code> (e.g. <code>hrv_rmssd</code>, <code>rhr</code>, <code>sleep_score</code>) and <code>days=</code> (7/30/90, defaults to whatever\'s pushed). Returns the full pivoted matrix, or a single metric line. Falls back gracefully when the user hasn\'t enabled the toggle.',
+      '<b>Wearable IndexedDB rows now encrypt at rest.</b> When encryption-at-rest is enabled in Settings → Security, every L1 row\'s non-key fields wrap into an AES-GCM envelope. Compound key (<code>source</code>, <code>date</code>) stays plaintext so range queries still work. New writes encrypt automatically; existing plaintext rows pass through reads untouched and migrate to encrypted on next rewrite. Closes the gap flagged in v1.28.0\'s encryption doc.',
+    ]
+  },
+  {
     version: '1.28.2', date: '2026-04-25', title: 'Drop the jargon footer note',
     items: [
       'Removed the strip footer caveat reading "Deep HRV (SDNN · pNN50 · HF/LF) needs an ECG chest strap — Oura provides RMSSD only." Real users don\'t know what those acronyms mean and the note made the strip feel like it was apologising for itself. The detail-modal HRV stats and the AI context already label HRV as <i>overnight</i> / <i>daytime</i> without jargon.',

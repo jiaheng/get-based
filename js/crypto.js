@@ -140,6 +140,47 @@ function formatEncryptedValue(iv, ciphertext) {
 }
 
 // ═══════════════════════════════════════════════
+// OBJECT ENCRYPTION (for IDB rows where the envelope IS an object)
+// ═══════════════════════════════════════════════
+// Wearable L1 IndexedDB stores rows as objects; we don't want to base64-
+// stringify them like we do for localStorage. These helpers wrap a JSON-
+// serializable plain object into `{_enc:'v1', iv:Uint8Array, ct:Uint8Array}`
+// that re-serializes through structured-clone (IDB) without coercion.
+//
+// Returns null when encryption is off / locked — callers fall back to
+// writing the plain object. Reads detect the envelope marker and decrypt
+// transparently; legacy plaintext rows pass through.
+
+export async function encryptObject(plainObj) {
+  if (!getEncryptionEnabled() || !_sessionKey) return null;
+  const json = JSON.stringify(plainObj);
+  const enc = new TextEncoder();
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    _sessionKey,
+    enc.encode(json),
+  );
+  return { _enc: 'v1', iv, ct: new Uint8Array(ct) };
+}
+
+export async function decryptObject(envelope) {
+  if (!envelope || envelope._enc !== 'v1' || !_sessionKey) return null;
+  const dec = new TextDecoder();
+  const plaintext = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: envelope.iv },
+    _sessionKey,
+    envelope.ct,
+  );
+  return JSON.parse(dec.decode(plaintext));
+}
+
+export function isEncryptedObject(o) {
+  return o && typeof o === 'object' && o._enc === 'v1' &&
+         o.iv instanceof Uint8Array && o.ct instanceof Uint8Array;
+}
+
+// ═══════════════════════════════════════════════
 // STORAGE WRAPPERS
 // ═══════════════════════════════════════════════
 export async function encryptedSetItem(key, value) {

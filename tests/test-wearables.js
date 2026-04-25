@@ -883,6 +883,94 @@ return (async function() {
   assert('WebCrypto+base64url yields RFC 7636 challenge', b64url === RFC_CHALLENGE, `got ${b64url}`);
 
   // ═══════════════════════════════════════
+  // 17u. Tri-state agent series + IDB encryption (v1.29.0)
+  // ═══════════════════════════════════════
+  console.log('%c 17u. Tri-state Series + IDB Crypto ', 'font-weight:bold;color:#f59e0b');
+
+  const labCtxV29 = await import('/js/lab-context.js?bust=' + Date.now());
+  // Tri-state preference API exists.
+  assert('getAgentWearableSeriesDays exported',
+    typeof labCtxV29.getAgentWearableSeriesDays === 'function');
+  assert('setAgentWearableSeriesDays exported',
+    typeof labCtxV29.setAgentWearableSeriesDays === 'function');
+  // Default = 0 (off).
+  labCtxV29.setAgentWearableSeriesDays(0);
+  assert('Default tri-state value is 0 (off)',
+    labCtxV29.getAgentWearableSeriesDays() === 0);
+  // 7/30/90 round-trip.
+  for (const N of [7, 30, 90]) {
+    labCtxV29.setAgentWearableSeriesDays(N);
+    assert(`Set/get tri-state ${N} round-trips`,
+      labCtxV29.getAgentWearableSeriesDays() === N);
+  }
+  // Invalid values rejected.
+  labCtxV29.setAgentWearableSeriesDays(45);
+  assert('Invalid day value (45) is silently rejected',
+    labCtxV29.getAgentWearableSeriesDays() === 90); // unchanged from previous valid
+  // Legacy 'on' migrates to 30.
+  localStorage.setItem(`labcharts-${localStorage.getItem('labcharts-active-profile') || 'default'}-agent-wearable-series`, 'on');
+  assert('Legacy "on" reads as 30 (default migration)',
+    labCtxV29.getAgentWearableSeriesDays() === 30);
+  labCtxV29.setAgentWearableSeriesDays(0); // reset
+
+  // Boolean back-compat shims still work.
+  assert('isAgentWearableSeriesEnabled / setAgentWearableSeriesEnabled back-compat',
+    typeof labCtxV29.isAgentWearableSeriesEnabled === 'function' &&
+    typeof labCtxV29.setAgentWearableSeriesEnabled === 'function');
+
+  // Section tag matches selected window.
+  if (window._labState?.importedData?.wearableSummary) {
+    labCtxV29.setAgentWearableSeriesDays(7);
+    const block7 = await labCtxV29.buildWearableSeriesSection().catch(() => '');
+    if (block7) {
+      assert('buildWearableSeriesSection() with no arg uses preference (7d → wearables-series-7d)',
+        /\[section:wearables-series-7d\]/.test(block7));
+    }
+    labCtxV29.setAgentWearableSeriesDays(0);
+  }
+
+  // Settings UI is now a select, not a checkbox.
+  const settingsV29 = await fetch('/js/settings.js').then(r => r.text());
+  assert('Settings → Agent Access uses a <select> for the series window',
+    /id="agent-wearable-series-select"/.test(settingsV29));
+  assert('Settings select dispatches to setAgentWearableSeriesDays (not the boolean setter)',
+    /window\.setAgentWearableSeriesDays\(this\.value === 'off'/.test(settingsV29));
+  assert('Settings select offers Off / 7 / 30 / 90 options',
+    /<option value="off"/.test(settingsV29) &&
+    /<option value="7"/.test(settingsV29) &&
+    /<option value="30"/.test(settingsV29) &&
+    /<option value="90"/.test(settingsV29));
+
+  // IDB encryption — round-trip a row through encrypt+decrypt assuming
+  // encryption is OFF in tests (default), assert plaintext pass-through.
+  const storeV29 = await import('/js/wearables-store.js?bust=' + Date.now());
+  const cryptoV29 = await import('/js/crypto.js?bust=' + Date.now());
+  assert('crypto.js exports encryptObject / decryptObject / isEncryptedObject',
+    typeof cryptoV29.encryptObject === 'function' &&
+    typeof cryptoV29.decryptObject === 'function' &&
+    typeof cryptoV29.isEncryptedObject === 'function');
+  // With encryption OFF, encryptObject returns null (caller falls back).
+  const offEnv = await cryptoV29.encryptObject({ test: 1 });
+  assert('encryptObject returns null when encryption is disabled',
+    offEnv === null);
+  // wearables-store.js source: rows are encrypted-on-write, decrypted-on-read.
+  const storeSrcV29 = await fetch('/js/wearables-store.js').then(r => r.text());
+  assert('upsertDaily encrypts via _encryptRowIfEnabled before put',
+    /_encryptRowIfEnabled\(stamped\)/.test(storeSrcV29) || /_encryptRowIfEnabled\(\{ importedAt[\s\S]{0,40}\)/.test(storeSrcV29));
+  assert('upsertDailyBatch encrypts the entire batch before opening the tx',
+    /Promise\.all\(rows[\s\S]{0,200}_encryptRowIfEnabled\(\{ importedAt: stamp/.test(storeSrcV29));
+  assert('getDaily decrypts via _decryptRowIfWrapped on read',
+    /_decryptRowIfWrapped\(raw\)/.test(storeSrcV29));
+  assert('getDailyRange decrypts every row before resolving',
+    /raws\.map\(r\s*=>\s*_decryptRowIfWrapped\(r\)\)/.test(storeSrcV29));
+  // Compound key fields stay plaintext (range queries depend on this).
+  assert('Encryption envelope leaves source + date plaintext',
+    /const\s*\{\s*source,\s*date,\s*_payload,\s*\.\.\.rest\s*\}\s*=\s*row/.test(storeSrcV29) &&
+    /\{\s*source,\s*date,\s*_payload:\s*env\s*\}/.test(storeSrcV29));
+  assert('Read-side defensively returns wrapper if decrypt fails (no whole-range data loss)',
+    /decrypted\)\s*return\s*row/.test(storeSrcV29));
+
+  // ═══════════════════════════════════════
   // 17v. Test isolation regression guard (v1.28.1)
   // ═══════════════════════════════════════
   console.log('%c 17v. Test Isolation ', 'font-weight:bold;color:#f59e0b');
@@ -1144,9 +1232,11 @@ return (async function() {
 
   // In-app token-cost copy aligned with measured reality (~400 not ~1500).
   const settingsSrc = await fetch('/js/settings.js').then(r => r.text());
-  assert('Agent series toggle blurb cites ~400 tokens (matches docs/guide/agent-access.md)',
-    /~400 extra tokens per agent prompt/.test(settingsSrc));
-  assert('Agent series toggle blurb does NOT cite the stale ~1500 figure',
+  // v1.29.0: tri-state toggle (off / 7 / 30 / 90) — copy now cites all three
+  // window sizes with their respective costs.
+  assert('Agent series tri-state copy cites the 7/30/90 token costs',
+    /~100 \/ 400 \/ 1200 extra tokens for 7 \/ 30 \/ 90 days/.test(settingsSrc));
+  assert('Agent series toggle no longer cites the stale ~1500 figure',
     !/~1500 extra tokens per agent prompt/.test(settingsSrc));
 
   // Single-maintainer voice — no "we don't yet have" / "We never see" in
@@ -1411,11 +1501,17 @@ return (async function() {
   labCtxAgent.setAgentWearableSeriesEnabled(false);  // restore default
 
   // Source-grep guards: pushContextToGateway must concat the series block.
+  // v1.29.0: takes the user's chosen days (tri-state preference) instead of
+  // a hardcoded 30. The variable is named `seriesDays`.
   const syncSrc = await fetch('/js/sync.js').then(r => r.text());
-  assert('pushContextToGateway awaits buildWearableSeriesSection',
-    /buildWearableSeriesSection\(30\)/.test(syncSrc));
+  assert('pushContextToGateway reads seriesDays from getAgentWearableSeriesDays',
+    /seriesDays\s*=\s*getAgentWearableSeriesDays\(\)/.test(syncSrc));
+  assert('pushContextToGateway awaits buildWearableSeriesSection(seriesDays)',
+    /buildWearableSeriesSection\(seriesDays\)/.test(syncSrc));
   assert('pushContextToGateway swallows series errors (.catch → empty string)',
-    /buildWearableSeriesSection\(30\)\.catch\(\(\)\s*=>\s*''\)/.test(syncSrc));
+    /buildWearableSeriesSection\(seriesDays\)\.catch\(\(\)\s*=>\s*''\)/.test(syncSrc));
+  assert('pushContextToGateway skips series build entirely when seriesDays === 0',
+    /seriesDays\s*>\s*0[\s\S]{0,80}buildWearableSeriesSection/.test(syncSrc));
   assert('Series block is appended AFTER baseContext, not replacing it',
     /seriesBlock\s*\?\s*`\$\{baseContext\}\\n\$\{seriesBlock\}/.test(syncSrc));
 

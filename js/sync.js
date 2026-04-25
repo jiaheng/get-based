@@ -906,15 +906,16 @@ export function pushContextToGateway() {
   clearTimeout(_contextPushTimer);
   _contextPushTimer = setTimeout(async () => {
     try {
-      const { buildLabContext, buildWearableSeriesSection } = await import('./lab-context.js');
+      const { buildLabContext, buildWearableSeriesSection, getAgentWearableSeriesDays } = await import('./lab-context.js');
       const baseContext = buildLabContext({ skipGroupFilter: true });
-      // Optional 30-day wearable daily series — gated on a separate Settings
-      // toggle (Agent Access → Push 30-day wearable series). Off by default
-      // because it adds ~1500 tokens vs the always-on ~200-token summary.
-      // Reads L1 IDB on the browser; the gateway only ever sees the rendered
-      // string. Append AFTER the rest so the section parser treats it as a
-      // sibling block.
-      const seriesBlock = await buildWearableSeriesSection(30).catch(() => '');
+      // Optional wearable daily-series section — user picks 0 (off) / 7 /
+      // 30 / 90 days in Settings → Integrations → Agent Access. Reads L1
+      // IDB on the browser; the gateway only ever sees the rendered string.
+      // Append AFTER the rest so the section parser treats it as a sibling.
+      const seriesDays = getAgentWearableSeriesDays();
+      const seriesBlock = seriesDays > 0
+        ? await buildWearableSeriesSection(seriesDays).catch(() => '')
+        : '';
       const context = seriesBlock ? `${baseContext}\n${seriesBlock}\n` : baseContext;
       const profileId = state.currentProfile || 'default';
       // The gateway only needs the active profileId — DON'T leak the full

@@ -903,15 +903,20 @@ function renderMessengerSection() {
       </div>
       <button class="import-btn import-btn-secondary" style="font-size:12px;padding:5px 14px;width:100%" onclick="regenerateMessengerToken()">Regenerate token</button>
       <div style="margin-top:18px;padding-top:14px;border-top:1px dashed var(--border)">
-        <div style="display:flex;align-items:center;justify-content:space-between">
-          <div style="flex:1;margin-right:14px">
-            <div style="font-size:13px;color:var(--text-secondary)">Push 30-day wearable series</div>
-            <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Adds a daily-values matrix (HRV, RHR, sleep…) so agents can spot trends. ~400 extra tokens per agent prompt (real-measured at 30 days × 13 metrics); cached cleanly so the marginal cost per turn is small. Off by default — turn on if you want time-series reasoning.</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:14px">
+          <div style="flex:1">
+            <div style="font-size:13px;color:var(--text-secondary)">Push wearable daily series</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Adds a pivoted daily-values matrix (HRV, RHR, sleep…) so agents can spot trends. ~100 / 400 / 1200 extra tokens for 7 / 30 / 90 days respectively (real-measured at 13 metrics); cached cleanly so the marginal cost per turn is small. Off by default — pick 7 days for cheap follow-ups, 30 for monthly reasoning, 90 for season-spanning analysis.</div>
           </div>
-          <label class="chat-websearch-toggle-label" style="display:flex" aria-label="Push wearable series to agent">
-            <input type="checkbox" id="agent-wearable-series-toggle" ${window.isAgentWearableSeriesEnabled?.() ? 'checked' : ''} onchange="window.setAgentWearableSeriesEnabled(this.checked); window.pushContextToGateway && window.pushContextToGateway()" style="display:none">
-            <span class="chat-toggle-slider"></span>
-          </label>
+          <select id="agent-wearable-series-select"
+            onchange="window.setAgentWearableSeriesDays(this.value === 'off' ? 0 : Number(this.value)); window.pushContextToGateway && window.pushContextToGateway()"
+            aria-label="Wearable series window pushed to agent"
+            style="font-size:12px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text-primary);min-width:90px">
+            <option value="off"${(window.getAgentWearableSeriesDays?.() || 0) === 0 ? ' selected' : ''}>Off</option>
+            <option value="7"${window.getAgentWearableSeriesDays?.() === 7 ? ' selected' : ''}>7 days</option>
+            <option value="30"${window.getAgentWearableSeriesDays?.() === 30 ? ' selected' : ''}>30 days</option>
+            <option value="90"${window.getAgentWearableSeriesDays?.() === 90 ? ' selected' : ''}>90 days</option>
+          </select>
         </div>
       </div>
     ` : `

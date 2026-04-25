@@ -70,14 +70,9 @@ When encryption is enabled, the following are encrypted:
 - All imported lab data (entries, notes, supplements, cycle data, context cards)
 - Chat conversation history
 - Custom personality settings
+- **Wearable IndexedDB rows** (per-profile L1 daily values: HRV, sleep, RHR, manual entries — added v1.29.0). The compound key (`source`, `date`) stays plaintext so range queries still work; every other field is wrapped in an AES-GCM envelope. New writes encrypt automatically; existing plaintext rows pass through reads untouched until they're rewritten.
 
 Settings such as your chosen AI provider and theme are stored in plaintext (they contain no health data).
-
-::: warning Wearable raw rows are not encrypted at rest
-The wearable strip's L1 storage (per-profile IndexedDB, `labcharts-wearables-{profileId}`, holding the raw 90-day daily HRV / sleep / RHR / manual entries) is **not** wrapped by the encryption-at-rest layer. The wrapper only covers localStorage. The L2 summary that flows into syncing IS encrypted — same layer as the rest — but the raw rows used for detail-modal charts and the agent's optional 30-day series sit in cleartext IDB.
-
-If at-rest cleartext for wearable rows is a problem for your threat model, disconnect each wearable in Settings → Integrations (which clears its rows) and rely on the L2 summary alone.
-:::
 
 AI API requests are always transmitted to your chosen provider over HTTPS, regardless of your encryption setting. Your provider's privacy policy governs how they handle those requests.
 

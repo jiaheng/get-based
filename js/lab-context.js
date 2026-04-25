@@ -863,20 +863,38 @@ export function buildWearableContext(importedData) {
 // prompt vs the always-on ~200-token summary).
 
 const AGENT_SERIES_DEFAULT_DAYS = 30;
+const AGENT_SERIES_VALID = new Set(['off', '7', '30', '90']);
 function _agentSeriesKey() {
   const pid = localStorage.getItem('labcharts-active-profile') || 'default';
   return `labcharts-${pid}-agent-wearable-series`;
 }
-export function isAgentWearableSeriesEnabled() {
-  return localStorage.getItem(_agentSeriesKey()) === 'on';
+// Tri-state preference: 'off' | '7' | '30' | '90'. Legacy 'on' migrates to
+// '30' (the v1.27.0 default). Anything else defaults to 'off'.
+export function getAgentWearableSeriesDays() {
+  const v = localStorage.getItem(_agentSeriesKey());
+  if (v === 'on') return AGENT_SERIES_DEFAULT_DAYS;
+  if (v === 'off' || v === null) return 0;
+  if (AGENT_SERIES_VALID.has(v)) return v === 'off' ? 0 : Number(v);
+  return 0;
 }
-export function setAgentWearableSeriesEnabled(on) {
-  localStorage.setItem(_agentSeriesKey(), on ? 'on' : 'off');
+export function setAgentWearableSeriesDays(days) {
+  // Accept 0 / 7 / 30 / 90 numerically, plus 'off' string for clarity.
+  const v = (days === 0 || days === 'off') ? 'off' : String(days);
+  if (!AGENT_SERIES_VALID.has(v)) return;
+  localStorage.setItem(_agentSeriesKey(), v);
 }
+// Back-compat shims — the boolean API is what Settings used in v1.27. The
+// new tri-state replaces it; keep these around so a stale page.html with
+// the old toggle markup doesn't crash.
+export function isAgentWearableSeriesEnabled() { return getAgentWearableSeriesDays() > 0; }
+export function setAgentWearableSeriesEnabled(on) { setAgentWearableSeriesDays(on ? AGENT_SERIES_DEFAULT_DAYS : 0); }
 
-export async function buildWearableSeriesSection(days = AGENT_SERIES_DEFAULT_DAYS) {
+export async function buildWearableSeriesSection(days) {
   if (!isWearableContextEnabled()) return '';
-  if (!isAgentWearableSeriesEnabled()) return '';
+  // If `days` not provided, read user preference. 0/off = no section.
+  const N = (days != null) ? days : getAgentWearableSeriesDays();
+  if (!N || N <= 0) return '';
+  days = N;
   const summary = state.importedData?.wearableSummary;
   if (!summary?.metrics || Object.keys(summary.metrics).length === 0) return '';
 
@@ -955,6 +973,8 @@ Object.assign(window, {
   setWearableContextEnabled,
   isAgentWearableSeriesEnabled,
   setAgentWearableSeriesEnabled,
+  getAgentWearableSeriesDays,
+  setAgentWearableSeriesDays,
   buildWearableContext,
   buildWearableSeriesSection,
   injectLensChunks,

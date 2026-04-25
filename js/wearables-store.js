@@ -70,11 +70,43 @@ function txPromise(tx) {
   });
 }
 
+// Field-level AES-GCM envelope around the non-key fields of an L1 row when
+// encryption-at-rest is enabled. Compound key fields (`source`, `date`) stay
+// plaintext so IDB cursors / range queries still work. The envelope replaces
+// every other field with `{ source, date, _payload: { _enc:'v1', iv, ct }}`.
+//
+// When encryption is OFF (or the session is locked), returns the row as-is
+// — same plaintext shape as pre-v1.29.0.
+async function _encryptRowIfEnabled(row) {
+  let crypto;
+  try { crypto = await import('./crypto.js'); } catch { return row; }
+  if (!crypto.getEncryptionEnabled?.()) return row;
+  const { source, date, _payload, ...rest } = row;
+  // If already encrypted, don't double-wrap.
+  if (_payload?._enc === 'v1') return row;
+  const env = await crypto.encryptObject(rest);
+  if (!env) return row; // session locked — fall back to plaintext write
+  return { source, date, _payload: env };
+}
+
+async function _decryptRowIfWrapped(row) {
+  if (!row || !row._payload) return row;
+  let crypto;
+  try { crypto = await import('./crypto.js'); } catch { return row; }
+  if (!crypto.isEncryptedObject?.(row._payload)) return row;
+  const decrypted = await crypto.decryptObject(row._payload).catch(() => null);
+  if (!decrypted) return row; // session locked / corrupt — return wrapper as-is
+  // Return the merged shape so callers can read fields directly.
+  return { source: row.source, date: row.date, ...decrypted };
+}
+
 export async function upsertDaily(profileId, row) {
   if (!row || !row.source || !row.date) throw new Error('upsertDaily requires {source, date}');
+  const stamped = { importedAt: Date.now(), ...row };
+  const towrite = await _encryptRowIfEnabled(stamped);
   const db = await openWearablesDB(profileId);
   const tx = db.transaction(STORE_DAILY, 'readwrite');
-  tx.objectStore(STORE_DAILY).put({ importedAt: Date.now(), ...row });
+  tx.objectStore(STORE_DAILY).put(towrite);
   return txPromise(tx);
 }
 
@@ -91,32 +123,35 @@ export async function deleteDaily(profileId, source, date) {
 
 export async function upsertDailyBatch(profileId, rows) {
   if (!rows || rows.length === 0) return;
+  const stamp = Date.now();
+  // Encrypt all rows up-front so the actual IDB write is a single tx that
+  // doesn't await — keeps the transaction lifetime short.
+  const towrite = await Promise.all(rows
+    .filter(r => r && r.source && r.date)
+    .map(r => _encryptRowIfEnabled({ importedAt: stamp, ...r })));
   const db = await openWearablesDB(profileId);
   const tx = db.transaction(STORE_DAILY, 'readwrite');
   const store = tx.objectStore(STORE_DAILY);
-  const stamp = Date.now();
-  for (const row of rows) {
-    if (!row || !row.source || !row.date) continue;
-    store.put({ importedAt: stamp, ...row });
-  }
+  for (const row of towrite) store.put(row);
   return txPromise(tx);
 }
 
 export async function getDaily(profileId, source, date) {
   const db = await openWearablesDB(profileId);
-  return new Promise((resolve, reject) => {
+  const raw = await new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_DAILY, 'readonly');
     const req = tx.objectStore(STORE_DAILY).get([source, date]);
     req.onsuccess = () => resolve(req.result || null);
     req.onerror = () => reject(req.error);
   });
+  return raw ? _decryptRowIfWrapped(raw) : null;
 }
 
 // Inclusive range query for ONE source. ISO dates; lexicographic order matches
 // chronological because format is YYYY-MM-DD.
 export async function getDailyRange(profileId, source, startDate, endDate) {
   const db = await openWearablesDB(profileId);
-  return new Promise((resolve, reject) => {
+  const raws = await new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_DAILY, 'readonly');
     const store = tx.objectStore(STORE_DAILY);
     const keyRange = IDBKeyRange.bound([source, startDate], [source, endDate]);
@@ -129,6 +164,11 @@ export async function getDailyRange(profileId, source, startDate, endDate) {
     };
     req.onerror = () => reject(req.error);
   });
+  // Decrypt-on-read. Plaintext rows pass through untouched; encrypted rows
+  // unwrap. Any single-row decrypt failure leaves the wrapper as-is rather
+  // than failing the whole range — same defensive shape as the rest of the
+  // codebase.
+  return Promise.all(raws.map(r => _decryptRowIfWrapped(r)));
 }
 
 // Count rows for a given source (fast sanity check, also used by Safari-eviction recovery).
