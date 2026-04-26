@@ -4,13 +4,14 @@
 
 import { state } from './state.js';
 import { showNotification, isDebugMode, escapeHTML } from './utils.js';
-import { profileStorageKey, getProfiles, saveProfiles, migrateProfileData } from './profile.js';
+import { profileStorageKey, getProfiles, saveProfiles, migrateProfileData, loadProfile } from './profile.js';
 import { getEncryptionEnabled, encryptedSetItem, encryptedGetItem } from './crypto.js';
 
 function dbg(...args) { if (isDebugMode()) console.log('[sync]', ...args); }
 
 let evolu = null;
 let profileQuery = null;
+let tombstoneQuery = null;
 let _syncEnabled = false;
 let _syncing = false;
 let _pulling = false;
@@ -165,6 +166,16 @@ export async function initSync() {
         .where("isDeleted", "is not", 1)
     );
 
+    // Companion query that returns ONLY tombstoned rows. Used during pull
+    // to apply remote deletes locally — when device A tombstones profile X,
+    // device B sees X here and wipes its local copy. Without this, B's
+    // local profiles list keeps showing X even though A "deleted" it.
+    tombstoneQuery = evolu.createQuery((db) =>
+      db.selectFrom("profileData")
+        .selectAll()
+        .where("isDeleted", "=", 1)
+    );
+
     // Subscribe to sync updates
     evolu.subscribeQuery(profileQuery)(() => {
       _subscriptionFireCount++;
@@ -173,8 +184,11 @@ export async function initSync() {
     });
 
     // Load initial data — store promise for enableSync to await
-    _queryLoaded = evolu.loadQuery(profileQuery).then(() => {
-      dbg('Initial query loaded');
+    _queryLoaded = Promise.all([
+      evolu.loadQuery(profileQuery),
+      evolu.loadQuery(tombstoneQuery),
+    ]).then(() => {
+      dbg('Initial queries loaded');
     }).catch(e => {
       console.warn('[sync] Query load failed:', e);
     });
@@ -707,6 +721,75 @@ async function pushAllProfiles() {
 // PULL — Evolu → localStorage
 // ═══════════════════════════════════════════════
 
+// Wipe local copies of any profiles that were tombstoned on the relay (by
+// this or another device). Mirrors the local-wipe steps in
+// profile.js:deleteProfile so a tombstoned profile is fully gone — not just
+// hidden by the active-rows query. The user's local profiles list is the
+// source of truth for "what shows in the UI"; without this loop a remote
+// delete would leave the entry there indefinitely.
+async function applyRemoteTombstones() {
+  if (!tombstoneQuery) return;
+  const tombs = evolu.getQueryRows(tombstoneQuery) || [];
+  if (tombs.length === 0) return;
+  const profiles = getProfiles();
+  const tombIds = new Set(tombs.map(t => t.profileId).filter(Boolean));
+  const survivors = profiles.filter(p => !tombIds.has(p.id));
+  if (survivors.length === profiles.length) return; // nothing local to wipe
+
+  // CRDT safety: never wipe the last profile out from under the user. If
+  // every local profile is tombstoned (mass-delete from another device),
+  // keep the active one as a safety landing pad — the user can finish
+  // deleting it themselves once they confirm.
+  if (survivors.length === 0) {
+    dbg('All profiles tombstoned remotely — keeping active profile as safety');
+    return;
+  }
+
+  const wipedIds = [];
+  for (const tombId of tombIds) {
+    if (!profiles.find(p => p.id === tombId)) continue; // not local — nothing to wipe
+    // Mirror profile.js:deleteProfile's local cleanup. Doing it inline here
+    // (instead of calling deleteProfile) avoids the confirm dialog and the
+    // recursive deleteProfileFromRelay call — the tombstone is already on
+    // the relay, that's how we got here.
+    localStorage.removeItem(profileStorageKey(tombId, 'imported'));
+    localStorage.removeItem(profileStorageKey(tombId, 'units'));
+    localStorage.removeItem(profileStorageKey(tombId, 'suppOverlay'));
+    localStorage.removeItem(profileStorageKey(tombId, 'noteOverlay'));
+    localStorage.removeItem(profileStorageKey(tombId, 'rangeMode'));
+    localStorage.removeItem(profileStorageKey(tombId, 'suppImpact'));
+    localStorage.removeItem(`labcharts-${tombId}-chat`);
+    localStorage.removeItem(`labcharts-${tombId}-chat-threads`);
+    localStorage.removeItem(`labcharts-${tombId}-chatRailOpen`);
+    localStorage.removeItem(`labcharts-${tombId}-chatPersonality`);
+    localStorage.removeItem(`labcharts-${tombId}-chatPersonalityCustom`);
+    localStorage.removeItem(`labcharts-${tombId}-focusCard`);
+    localStorage.removeItem(`labcharts-${tombId}-contextHealth`);
+    localStorage.removeItem(`labcharts-${tombId}-onboarded`);
+    localStorage.removeItem(`labcharts-${tombId}-tour`);
+    localStorage.removeItem(`labcharts-${tombId}-cycleTour`);
+    localStorage.removeItem(`labcharts-${tombId}-phaseOverlay`);
+    localStorage.removeItem(`labcharts-${tombId}-sync-ts`);
+    try {
+      const wsMod = await import('./wearables-store.js');
+      await wsMod.deleteWearablesDB(tombId).catch(() => {});
+    } catch { /* wearables-store optional */ }
+    wipedIds.push(tombId);
+  }
+
+  if (wipedIds.length === 0) return;
+  await saveProfiles(survivors);
+  dbg(`Applied ${wipedIds.length} remote tombstone(s):`, wipedIds.join(', '));
+
+  // If the active profile got tombstoned remotely, swap to a survivor so
+  // the UI doesn't dereference a wiped profile. loadProfile rehydrates
+  // state.importedData from localStorage of the new id.
+  if (wipedIds.includes(state.currentProfile)) {
+    showNotification?.(`Profile was deleted on another device — switching to "${survivors[0].name || 'next'}"`, 'info', 3500);
+    loadProfile(survivors[0].id);
+  }
+}
+
 async function onSyncReceived() {
   if (!evolu || !profileQuery || _pulling) {
     dbg('onSyncReceived skipped:', !evolu ? 'no evolu' : !profileQuery ? 'no query' : 'already pulling');
@@ -715,6 +798,12 @@ async function onSyncReceived() {
   _pulling = true;
   updateSyncStatus({ pull: 'pulling' });
   try {
+    // Apply remote tombstones FIRST — when another device deleted a profile,
+    // wipe our local copy before processing live rows. Skipping this leaves
+    // orphan profiles in the local list that the active query no longer
+    // returns, and the user sees ghost entries that resync never explains.
+    await applyRemoteTombstones();
+
     const rows = evolu.getQueryRows(profileQuery);
     dbg(`onSyncReceived: ${rows?.length ?? 0} rows`);
     if (!rows || rows.length === 0) return;

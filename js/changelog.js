@@ -5,6 +5,12 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.30.9', date: '2026-04-26', title: 'Sync — remote profile deletes now wipe local copies',
+    items: [
+      '<b>When another device tombstones a profile, this device wipes its local copy on next pull</b> — instead of leaving a ghost entry that the active-rows query no longer returns. Pairs with v1.30.8\'s push-side delete propagation: now profile deletion completes itself across all paired devices in a single round-trip. Safety guard: if every local profile is tombstoned at once, we keep the active one as a landing pad rather than wiping the user out of their own app.',
+    ]
+  },
+  {
     version: '1.30.8', date: '2026-04-26', title: 'Sync — deleting a profile now propagates to other devices',
     items: [
       '<b>Deleting a profile now actually deletes it on the relay</b> instead of leaving the data behind. Previous behaviour: <code>deleteProfile</code> wiped local state (localStorage + the wearables IndexedDB) but never told the Evolu sync layer to drop the row. The relay kept the full <code>dataJson</code> blob, so any paired device pulling later resurrected the profile. Now we soft-delete (<code>isDeleted: 1</code>) on the Evolu row at the same time as the local wipe — the local query already filters tombstoned rows, the tombstone replicates to peers, and CRDT last-write-wins handles the cross-device conflict resolution automatically.',

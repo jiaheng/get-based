@@ -36,6 +36,17 @@ return (async function() {
   assert('deleteProfile in profile.js calls deleteProfileFromRelay',
     /deleteProfile\([\s\S]+?deleteProfileFromRelay/.test(profileSrc));
 
+  // Tombstone-aware pull: a remote delete from another device wipes the
+  // local copy on next sync, so multi-device cleanup completes itself.
+  assert('sync.js declares a tombstoneQuery selecting isDeleted = 1 rows',
+    /tombstoneQuery\s*=\s*evolu\.createQuery[\s\S]{0,300}isDeleted[",\s]+=[",\s]+1/.test(syncSrc));
+  assert('applyRemoteTombstones wipes the local imported blob for tombstoned profiles',
+    /applyRemoteTombstones[\s\S]{0,2000}localStorage\.removeItem\(profileStorageKey\(tombId,\s*'imported'\)\)/.test(syncSrc));
+  assert('applyRemoteTombstones runs before the active-rows pass in onSyncReceived',
+    /async function onSyncReceived[\s\S]{0,800}await\s+applyRemoteTombstones[\s\S]{0,400}getQueryRows\(profileQuery\)/.test(syncSrc));
+  assert('applyRemoteTombstones keeps at least one survivor (mass-delete safety)',
+    /survivors\.length\s*===\s*0[\s\S]{0,200}return/.test(syncSrc));
+
   // ═══════════════════════════════════════
   // 2. SYNC PAYLOAD FORMAT
   // ═══════════════════════════════════════
