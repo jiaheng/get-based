@@ -121,6 +121,73 @@ return (async function() {
       heartrateCalls.length >= 3, `got ${heartrateCalls.length} chunks`);
   } finally { restoreFetch(); }
 
+  // Time-series fallback — Oura's freshly-uploaded sessions have hrv.items /
+  // heart_rate.items populated but the scalar `average_hrv` /
+  // `average_heart_rate` aren't computed yet. Without the time-series
+  // fallback today's HRV/RHR read as null even though Oura cloud shows
+  // them (Oura's app computes these client-side from the items array).
+  // Regression guard for the issue reported on v1.30.x where HRV/RHR
+  // lagged 2 days behind sleep_score on the same source.
+  try {
+    installMocks([
+      { matcher: /heartrate.*start_datetime/, body: { data: [], next_token: null }},
+      { matcher: 'usercollection/sleep', body: {
+        data: [{
+          day: '2026-04-23',
+          total_sleep_duration: 26000,
+          // Scalars not yet computed by Oura's pipeline:
+          average_hrv: null,
+          average_heart_rate: null,
+          lowest_heart_rate: null,
+          // Time series IS available (this is how Oura's app renders today's
+          // sleep before the scalars finalise):
+          hrv: { interval: 300, timestamp: '2026-04-23T00:00:00Z',
+                 items: [40, 42, 0, 45, 48, 0, 52, 50, 47, 0, 44, 41] },
+          heart_rate: { interval: 300, timestamp: '2026-04-23T00:00:00Z',
+                        items: [62, 60, 0, 56, 54, 0, 52, 53, 55, 0, 58, 60] },
+        }],
+        next_token: null,
+      }},
+      { matcher: 'usercollection/daily_sleep', body: { data: [{ day: '2026-04-23', score: 78 }], next_token: null }},
+      { matcher: /usercollection\//, body: { data: [], next_token: null }},
+    ]);
+    const rows = await oura.fetchOuraDailyRange('test-token', '2026-04-23', '2026-04-23');
+    const r = rows.find(x => x.date === '2026-04-23');
+    // HRV mean of [40,42,45,48,52,50,47,44,41] (zeros filtered) = 409/9 ≈ 45.44
+    assert('Oura hrv_rmssd falls back to time-series mean when scalar null',
+      r?.hrv_rmssd != null && Math.abs(r.hrv_rmssd - 45.44) < 0.5,
+      `got ${r?.hrv_rmssd}`);
+    assert('Oura time-series HRV filters zero-valued samples (gaps in recording)',
+      r?.hrv_rmssd > 40, // would be 28.something if zeros were included
+      `got ${r?.hrv_rmssd}`);
+    // RHR mean of [62,60,56,54,52,53,55,58,60] = 510/9 ≈ 56.67
+    assert('Oura rhr falls back to time-series mean when scalar null',
+      r?.rhr != null && Math.abs(r.rhr - 56.67) < 0.5,
+      `got ${r?.rhr}`);
+  } finally { restoreFetch(); }
+
+  // Scalar still wins when present — regression guard against priority flip.
+  try {
+    installMocks([
+      { matcher: /heartrate.*start_datetime/, body: { data: [], next_token: null }},
+      { matcher: 'usercollection/sleep', body: {
+        data: [{
+          day: '2026-04-23',
+          total_sleep_duration: 26000,
+          average_hrv: 42, average_heart_rate: 58, lowest_heart_rate: 54,
+          hrv: { interval: 300, items: [99, 99, 99] }, // intentionally divergent
+          heart_rate: { interval: 300, items: [99, 99, 99] },
+        }],
+        next_token: null,
+      }},
+      { matcher: /usercollection\//, body: { data: [], next_token: null }},
+    ]);
+    const rows = await oura.fetchOuraDailyRange('test-token', '2026-04-23', '2026-04-23');
+    const r = rows.find(x => x.date === '2026-04-23');
+    assert('Oura prefers scalar average_hrv over hrv.items when both present', r?.hrv_rmssd === 42);
+    assert('Oura prefers scalar average_heart_rate over heart_rate.items when both present', r?.rhr === 58);
+  } finally { restoreFetch(); }
+
   // ═══════════════════════════════════════
   // 2. WHOOP — recovery + sleep + cycle
   // ═══════════════════════════════════════

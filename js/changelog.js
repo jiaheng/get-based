@@ -5,6 +5,12 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.30.4', date: '2026-04-26', title: 'Oura — fix HRV/RHR lagging behind sleep score',
+    items: [
+      '<b>Oura HRV and RHR now sync today\'s data</b> instead of staying 1–2 days behind. Root cause: Oura\'s <code>/sleep</code> API returns the time-series HRV samples (<code>hrv.items</code>) shortly after a session ends, but the scalar <code>average_hrv</code> only fills in once the full overnight analysis pipeline finishes hours later. Our adapter only read the scalar — so today\'s HRV/RHR cards stayed null even though Oura cloud was already showing the value (their app computes the average client-side from the items array). The fetcher now falls back to a zero-filtered mean of the time series when the scalar isn\'t ready yet, matching what Oura\'s own UI does.',
+    ]
+  },
+  {
     version: '1.30.3', date: '2026-04-26', title: 'Wearables — honest "as of" dates on stale metrics',
     items: [
       '<b>Strip cards now show when a metric\'s latest reading actually is.</b> If HRV from your Oura ring is still showing yesterday\'s value because the <code>/sleep</code> endpoint hasn\'t finished processing tonight\'s data (a common 12–48h lag), the card now shows "as of Apr 24" so the value reads honestly instead of looking fresh while sync says "synced 2 minutes ago." Hover for an explanation. The hint only appears when one metric on a source lags the others — fully-fresh sources read clean.',

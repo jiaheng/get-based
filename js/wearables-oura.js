@@ -133,6 +133,25 @@ function meanOrNull(arr) {
   return nums.reduce((a, b) => a + b, 0) / nums.length;
 }
 
+// Oura's /sleep response carries time-series HRV/HR as { interval, items,
+// timestamp } objects, not bare arrays. Items are 5-minute samples; zeros
+// indicate "no measurement" (e.g. movement / poor signal) and must be
+// excluded from the mean — counting them as zero would drag a 45 ms HRV
+// down to 20 ms. Returns null when no valid samples exist.
+function timeSeriesMean(obj) {
+  if (!obj || !Array.isArray(obj.items) || obj.items.length === 0) return null;
+  const nums = obj.items.filter(v => typeof v === 'number' && isFinite(v) && v > 0);
+  if (nums.length === 0) return null;
+  return nums.reduce((a, b) => a + b, 0) / nums.length;
+}
+
+function timeSeriesMin(obj) {
+  if (!obj || !Array.isArray(obj.items) || obj.items.length === 0) return null;
+  const nums = obj.items.filter(v => typeof v === 'number' && isFinite(v) && v > 0);
+  if (nums.length === 0) return null;
+  return Math.min(...nums);
+}
+
 // Returns canonical L1 rows for the inclusive date range [startDate, endDate].
 // Each row is keyed by date; missing metrics are null (not omitted) so consumers
 // can see "no spo2 today" vs "spo2 not yet fetched."
@@ -190,8 +209,26 @@ export async function fetchOuraDailyRange(accessToken, startDate, endDate) {
 
   for (const [day, s] of sleepByDay) {
     const row = ensureRow(day);
-    row.hrv_rmssd = s?.average_hrv ?? meanOrNull(s?.hrv) ?? meanOrNull(s?.hrv_samples);
-    row.rhr       = s?.average_heart_rate ?? s?.lowest_heart_rate ?? null;
+    // HRV: prefer the scalar Oura computes, but fall back to the per-sample
+    // time series when the scalar isn't filled yet. This is the common case
+    // for last-night's session — `hrv.items` is published shortly after the
+    // session ends (Oura's mobile app uses these to render the timeline) but
+    // `average_hrv` only appears once their analysis pipeline finishes a few
+    // hours later. Without this fallback today's HRV reads as null even when
+    // the cloud shows data.
+    row.hrv_rmssd = s?.average_hrv
+      ?? timeSeriesMean(s?.hrv)
+      ?? meanOrNull(s?.hrv_samples) // legacy field name on older sessions
+      ?? null;
+    // RHR: prefer the night's average (matches Oura's "Average HR" / what
+    // their app labels as "Resting"), then the lowest scalar, then fall
+    // back to per-sample time series. Same fresh-session lag applies —
+    // scalars may be unfilled while heart_rate.items is already present.
+    row.rhr = s?.average_heart_rate
+      ?? s?.lowest_heart_rate
+      ?? timeSeriesMean(s?.heart_rate)
+      ?? timeSeriesMin(s?.heart_rate)
+      ?? null;
   }
   for (const d of dailySleep) {
     if (!d?.day) continue;
