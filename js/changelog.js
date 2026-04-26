@@ -5,6 +5,12 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.30.8', date: '2026-04-26', title: 'Sync — deleting a profile now propagates to other devices',
+    items: [
+      '<b>Deleting a profile now actually deletes it on the relay</b> instead of leaving the data behind. Previous behaviour: <code>deleteProfile</code> wiped local state (localStorage + the wearables IndexedDB) but never told the Evolu sync layer to drop the row. The relay kept the full <code>dataJson</code> blob, so any paired device pulling later resurrected the profile. Now we soft-delete (<code>isDeleted: 1</code>) on the Evolu row at the same time as the local wipe — the local query already filters tombstoned rows, the tombstone replicates to peers, and CRDT last-write-wins handles the cross-device conflict resolution automatically.',
+    ]
+  },
+  {
     version: '1.30.7', date: '2026-04-26', title: 'Wearables — Sync now button now refetches a 7-day window',
     items: [
       '<b>The strip\'s "Sync now" button now actually fetches fresh data</b> when you click it twice on the same day. The bug was a too-aggressive incremental window: <code>lastSync.endDate</code> was set to today by the first sync, so the second sync requested a <code>[today, today]</code> window from Oura\'s <code>/sleep</code>, which (for reasons internal to Oura) sometimes returned no rows. The Settings → "Re-sync last 90 days" path always worked because it re-fetches a wide window. Now the manual <i>Sync now</i> button forces a 7-day window even when <code>lastSync.endDate</code> is today, overlapping with already-synced data so any session Oura is willing to return is captured. Background scheduler still uses the narrow window — the Evolu write budget stays small.',

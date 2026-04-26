@@ -421,6 +421,12 @@ export function deleteProfile(profileId, onComplete) {
     // outside localStorage. Drop it too so deleted profiles don't leak 90d
     // of HRV/sleep/RHR + manual entries onto disk indefinitely.
     import('./wearables-store.js').then(m => m.deleteWearablesDB(profileId)).catch(() => {});
+    // Propagate the delete to the relay so other devices stop seeing this
+    // profile. Without this, a paired device pulling later would resurrect
+    // the profile (the Evolu row's dataJson outlives our local wipe).
+    // Soft-delete via Evolu's isDeleted column — the query filter drops
+    // tombstoned rows; CRDT LWW handles cross-device conflict resolution.
+    import('./sync.js').then(m => m.deleteProfileFromRelay(profileId)).catch(() => {});
     if (state.currentProfile === profileId) {
       loadProfile(updated[0].id);
     } else {

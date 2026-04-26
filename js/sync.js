@@ -653,6 +653,33 @@ export async function pushCurrentProfile() {
   pushContextToGateway();
 }
 
+// Soft-delete a profile's row on the relay so other devices stop seeing it.
+// Local wipe alone is insufficient — without this, the Evolu row keeps its
+// full dataJson and any device that pulls (or any device the user re-syncs
+// to later) resurrects the profile. Idempotent: missing row → no-op.
+export async function deleteProfileFromRelay(profileId) {
+  if (!evolu || !_syncEnabled) return { skipped: true, reason: 'sync-off' };
+  if (!profileId || typeof profileId !== 'string') return { skipped: true, reason: 'bad-id' };
+  try {
+    const rows = evolu.getQueryRows(profileQuery);
+    const row = rows?.find(r => r.profileId === profileId);
+    if (!row) return { skipped: true, reason: 'no-row' };
+    // Evolu's soft-delete idiom: set isDeleted=1; the local query filters
+    // these out (see profileQuery's .where clause), and the row replicates
+    // to peers carrying the tombstone — they apply the same filter and
+    // stop seeing the profile. CRDT LWW means a stale device that hasn't
+    // pulled yet won't accidentally resurrect the row, because its newer
+    // tombstone wins on next pull-merge.
+    evolu.update('profileData', { id: row.id, isDeleted: 1, syncedAt: new Date().toISOString() });
+    localStorage.removeItem(`labcharts-${profileId}-sync-ts`);
+    dbg('Soft-deleted on relay:', profileId);
+    return { ok: true };
+  } catch (e) {
+    console.error('[sync] Profile delete propagation failed:', e);
+    return { ok: false, error: e.message };
+  }
+}
+
 // Push all profiles on first enable
 async function pushAllProfiles() {
   const profiles = getProfiles();
@@ -1020,6 +1047,7 @@ Object.assign(window, {
   restoreFromMnemonic,
   isSyncEnabled,
   pushCurrentProfile,
+  deleteProfileFromRelay,
   checkRelayConnection,
   isMessengerEnabled,
   getMessengerToken,

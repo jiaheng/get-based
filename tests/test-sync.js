@@ -20,10 +20,21 @@ return (async function() {
   // ═══════════════════════════════════════
   console.log('%c 1. Module Exports ', 'font-weight:bold;color:#f59e0b');
 
-  const requiredExports = ['isSyncEnabled', 'initSync', 'enableSync', 'disableSync', 'getMnemonic', 'restoreFromMnemonic', 'getSyncRelay', 'setSyncRelay', 'onDataSaved', 'pushCurrentProfile'];
+  const requiredExports = ['isSyncEnabled', 'initSync', 'enableSync', 'disableSync', 'getMnemonic', 'restoreFromMnemonic', 'getSyncRelay', 'setSyncRelay', 'onDataSaved', 'pushCurrentProfile', 'deleteProfileFromRelay'];
   for (const fn of requiredExports) {
     assert(`sync.js exports ${fn}`, syncSrc.includes(`export function ${fn}`) || syncSrc.includes(`export async function ${fn}`));
   }
+
+  // Profile-delete propagation (closes the bug where deleting a profile in
+  // getbased only wiped local state — the Evolu row stayed on the relay
+  // and other devices kept seeing the deleted profile).
+  assert('deleteProfileFromRelay sets isDeleted=1 via evolu.update',
+    /deleteProfileFromRelay[\s\S]{0,800}evolu\.update\([\s\S]{0,200}isDeleted:\s*1/.test(syncSrc));
+  assert('deleteProfileFromRelay is idempotent on missing rows (returns no-row reason)',
+    /deleteProfileFromRelay[\s\S]{0,500}reason:\s*'no-row'/.test(syncSrc));
+  const profileSrc = await fetch('/js/profile.js').then(r => r.text());
+  assert('deleteProfile in profile.js calls deleteProfileFromRelay',
+    /deleteProfile\([\s\S]+?deleteProfileFromRelay/.test(profileSrc));
 
   // ═══════════════════════════════════════
   // 2. SYNC PAYLOAD FORMAT
