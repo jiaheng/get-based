@@ -74,10 +74,33 @@ const _PROXY_ALLOWED_ORIGINS = [
 ];
 export function _proxyHostBlocked(host) {
   if (!host) return true;
-  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]') return true;
-  if (host.endsWith('.local') || host.endsWith('.localhost')) return true;
-  if (host === '168.63.129.16') return true;
-  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  const h = host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
+  if (h === 'localhost' || h === '127.0.0.1' || h === '::1') return true;
+  if (h.endsWith('.local') || h.endsWith('.localhost')) return true;
+  if (h === '168.63.129.16') return true;
+  // IPv6 literal: same allowlist-only-2000::/3 strategy as api/proxy.js
+  if (h.includes(':')) {
+    const lower = h.toLowerCase();
+    if (lower === '::' || lower === '0:0:0:0:0:0:0:0') return true;
+    if (/^fc[0-9a-f]{2}:/.test(lower) || /^fd[0-9a-f]{2}:/.test(lower)) return true;
+    if (/^fe[89ab][0-9a-f]:/.test(lower)) return true;
+    const v4Embed = lower.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+    if (v4Embed) return _proxyHostBlocked(v4Embed[1]);
+    if (lower.startsWith('::ffff:')) {
+      const tail = lower.slice(7);
+      const hex = tail.replace(/:/g, '');
+      if (/^[0-9a-f]{1,8}$/.test(hex)) {
+        const padded = hex.padStart(8, '0');
+        const a = parseInt(padded.slice(0, 2), 16);
+        const b = parseInt(padded.slice(2, 4), 16);
+        const c = parseInt(padded.slice(4, 6), 16);
+        const d = parseInt(padded.slice(6, 8), 16);
+        return _proxyHostBlocked(`${a}.${b}.${c}.${d}`);
+      }
+    }
+    return !/^[23][0-9a-f]{3}:/.test(lower);
+  }
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
   if (!m) return false;
   for (let i = 1; i <= 4; i++) {
     const octet = m[i];

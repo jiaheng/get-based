@@ -41,7 +41,18 @@ return (async function() {
   assert('sync.js declares a tombstoneQuery selecting isDeleted = 1 rows',
     /tombstoneQuery\s*=\s*evolu\.createQuery[\s\S]{0,300}isDeleted[",\s]+=[",\s]+1/.test(syncSrc));
   assert('applyRemoteTombstones wipes the local imported blob for tombstoned profiles',
-    /applyRemoteTombstones[\s\S]{0,2000}localStorage\.removeItem\(profileStorageKey\(tombId,\s*'imported'\)\)/.test(syncSrc));
+    /applyRemoteTombstones[\s\S]{0,4000}localStorage\.removeItem\(profileStorageKey\(tombId,\s*'imported'\)\)/.test(syncSrc));
+  // Quarantine: a remote-driven mass-delete (≥ 2 profiles tombstoned at
+  // once) is auth'd only by the BIP-39 mnemonic. If the mnemonic leaks,
+  // an attacker could publish tombstones for every profileId. Single-
+  // profile deletes auto-apply (most common: user just deleted on
+  // another device); batched deletes require user confirm.
+  assert('applyRemoteTombstones quarantines batches >= TOMBSTONE_BATCH_THRESHOLD',
+    syncSrc.includes('TOMBSTONE_BATCH_THRESHOLD') && syncSrc.includes('Quarantined'));
+  assert('Settings can apply / reject pending tombstones (out-of-band confirm)',
+    syncSrc.includes('export function listPendingTombstones')
+      && syncSrc.includes('export async function applyPendingTombstone')
+      && syncSrc.includes('export async function rejectPendingTombstone'));
   assert('applyRemoteTombstones runs before the active-rows pass in onSyncReceived',
     /async function onSyncReceived[\s\S]{0,800}await\s+applyRemoteTombstones[\s\S]{0,400}getQueryRows\(profileQuery\)/.test(syncSrc));
   assert('applyRemoteTombstones keeps at least one survivor (mass-delete safety)',
@@ -61,8 +72,13 @@ return (async function() {
 
   assert('parseSyncPayload handles v3 format', syncSrc.includes('parsed._v === 3'));
   assert('parseSyncPayload handles v2 compat', syncSrc.includes('parsed._v === 2'));
-  assert('parseSyncPayload has v1 backward compat', syncSrc.includes('importedData: parsed, profile: null'));
-  assert('parseSyncPayload validates payload size', syncSrc.includes('dataJson.length > 50_000_000'));
+  assert('parseSyncPayload has v1 backward compat (gated on importedData shape)',
+    syncSrc.includes('importedData: safe(parsed)'));
+  assert('parseSyncPayload validates payload size (5 MB cap)', syncSrc.includes('MAX_SYNC_PAYLOAD_BYTES'));
+  assert('parseSyncPayload strips wearableConnections from incoming blob (defence-in-depth)',
+    syncSrc.includes("'wearableConnections' in imp"));
+  assert('parseSyncPayload v1 compat rejects unknown shapes',
+    syncSrc.includes("Invalid sync payload: unknown shape"));
   assert('parseSyncPayload validates payload type', syncSrc.includes("typeof dataJson !== 'string'"));
 
   // ═══════════════════════════════════════

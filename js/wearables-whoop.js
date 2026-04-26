@@ -94,7 +94,17 @@ export async function fetchWhoopDailyRange(accessToken, startDate, endDate) {
   }
 
   for (const r of recoveries) {
-    const day = dayFromIso(r?.created_at) || dayFromIso(r?.cycle?.start);
+    // Attribute by the cycle the recovery describes, not by `created_at`.
+    // WHOOP's `created_at` is when their pipeline finished writing the
+    // score — typically the morning AFTER the sleep cycle ended. Cycles
+    // bracket sleep-to-sleep, not calendar days, so a recovery describing
+    // Tuesday's sleep can have created_at=Wednesday morning. Using
+    // created_at mis-attributes Tuesday's HRV/RHR to Wednesday's row.
+    // Prefer cycle.start (or sleep.start), fall back to created_at only
+    // as last resort for malformed records.
+    const day = dayFromIso(r?.cycle?.start)
+      || dayFromIso(r?.sleep?.start)
+      || dayFromIso(r?.created_at);
     if (!day) continue;
     const s = r?.score || {};
     const row = ensureRow(day);

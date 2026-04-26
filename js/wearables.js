@@ -36,6 +36,7 @@ import { getActiveProfileId } from './profile.js';
 import { getDailyRange } from './wearables-store.js';
 import { MANUAL_METRICS } from './wearables-manual.js';
 import { getChartColors } from './theme.js';
+import { isoDay } from './wearables-oura.js';
 
 // ─────────────────────────────────────────────────────────
 // MOCK SUMMARY — remove once the real L2 pipeline ships
@@ -240,7 +241,7 @@ function renderEmptyManualCard(metricId, canon) {
       <span class="wearable-value wearable-value-dash">–</span>
     </div>
     <div class="wearable-card-bottom">
-      <div class="wearable-empty-cta">+ log</div>
+      <div class="wearable-empty-cta">+ Log</div>
     </div>
   </div>`;
 }
@@ -320,9 +321,42 @@ function renderCard(metricId, canon, metric, showSourceBadge, sourceMaxDate) {
   </div>`;
 }
 
+// Compact "connect a wearable" stub for users who have lab data but no
+// connected source. Without this the wearables feature has no persistent
+// dashboard surface — users who skipped the welcome hero, never opened
+// chat onboarding, and dismissed the demo cards have no way of
+// discovering it post-import. Dismissible (per-profile) so it doesn't
+// nag users who genuinely don't want a wearable.
+function renderWearableStripStub() {
+  const dismissed = localStorage.getItem(`labcharts-wearable-stub-dismissed-${state.currentProfile}`) === '1';
+  if (dismissed) return '';
+  return `<section class="wearable-strip wearable-strip-stub">
+    <div class="wearable-strip-stub-body">
+      <span class="wearable-strip-icon" aria-hidden="true">⌬</span>
+      <div class="wearable-strip-stub-text">
+        <strong>Connect a wearable</strong> to see HRV, sleep, recovery and body composition trends alongside your blood work.
+        <span class="wearable-strip-stub-brands">Oura · Withings · Fitbit · Polar · Apple Health</span>
+      </div>
+      <div class="wearable-strip-stub-actions">
+        <button class="wearable-strip-stub-cta" onclick="window.openSettingsModal('wearables')">Connect</button>
+        <button class="wearable-strip-stub-dismiss" title="Hide this hint" aria-label="Dismiss wearable hint" onclick="dismissWearableStub()">×</button>
+      </div>
+    </div>
+  </section>`;
+}
+
+function dismissWearableStub() {
+  localStorage.setItem(`labcharts-wearable-stub-dismissed-${state.currentProfile}`, '1');
+  if (window.navigate) window.navigate('dashboard');
+}
+
 export function renderWearableStrip() {
   const summary = getWearableSummary();
-  if (!summary) return '';
+  if (!summary) {
+    // No real summary AND mock is suppressed (or off). Surface the stub
+    // so users who skipped the welcome flow still discover the feature.
+    return renderWearableStripStub();
+  }
   // Sort by ADAPTERS registry order (Oura first, Apple Health last) instead
   // of summary.sources insertion order — that way the strip header reads
   // "Oura + Fitbit + Apple Health" regardless of which one the user
@@ -333,8 +367,8 @@ export function renderWearableStrip() {
   };
   const sourceIds = Object.keys(summary.sources || {})
     .sort((a, b) => adapterOrderIndex(a) - adapterOrderIndex(b));
-  if (sourceIds.length === 0) return '';
-  if (!summary.metrics || Object.keys(summary.metrics).length === 0) return '';
+  if (sourceIds.length === 0) return renderWearableStripStub();
+  if (!summary.metrics || Object.keys(summary.metrics).length === 0) return renderWearableStripStub();
 
   const collapsed = localStorage.getItem('wearables-strip-collapsed') === '1';
   // Connected vendors that haven't returned any rows yet (e.g. Polar account
@@ -423,7 +457,7 @@ export function renderWearableStrip() {
       <div class="wearable-strip-title">
         <span class="wearable-strip-icon" aria-hidden="true">⌬</span>
         <span>Wearables: <span class="wearable-source-label">${escapeHTML(sourceLabel)}${coverageLabel}</span></span>
-        ${isMock ? '<span class="wearable-strip-demo-pill">demo data</span>' : ''}
+        ${isMock ? '<button type="button" class="wearable-strip-demo-pill" onclick="event.stopPropagation();window.openSettingsModal(\'wearables\')" title="This is a sample. Connect your own wearable to see real data here.">demo data — connect yours</button>' : ''}
         ${reorderMode ? '<span class="wearable-strip-reorder-pill">⇄ Reorder mode — use ◀ ▶ on each card</span>' : ''}
       </div>
       <div class="wearable-strip-meta">
@@ -529,9 +563,10 @@ async function openWearableDetail(metricId) {
   // Series may have gaps (ring not worn, feature off) — we plot what's there
   // and label missing days via Chart.js spanGaps rather than forward-filling.
   const profileId = getActiveProfileId();
-  const endDate = new Date().toISOString().slice(0, 10);
-  const start = new Date(); start.setUTCDate(start.getUTCDate() - 90);
-  const startDate = start.toISOString().slice(0, 10);
+  // Local-tz: vendor adapters tag rows with the user's local day, not UTC.
+  const endDate = isoDay();
+  const start = new Date(); start.setDate(start.getDate() - 90);
+  const startDate = isoDay(start);
   let rows = [];
   try { rows = await getDailyRange(profileId, m.primarySource, startDate, endDate); }
   catch (e) { showNotification?.(`Couldn't read local history: ${e.message}`, 'error', 4000); return; }
@@ -625,9 +660,20 @@ function _installWearableModalFocusTrap(modal) {
 // Render the Manual entries list + add-reading form inside the detail modal.
 // Only renders when `manualEntries` is non-empty OR the metric is manual-
 // capable (weight/BP/RHR). Returns a fully-formed <section>.
-function buildManualEntriesSection(metricId, manualEntries) {
+function buildManualEntriesSection(metricId, manualEntries, primarySource) {
   if (!MANUAL_METRICS.includes(metricId)) return '';
   if (manualEntries.length === 0) {
+    // When a vendor source already provides this metric, the "No manual
+    // entries yet" empty state reads as confusing noise — the user has
+    // 90 days of data and is being told "no entries." Show a compact
+    // add-only affordance instead. When the user has NO vendor source
+    // for this metric, the explicit empty state is still useful.
+    if (primarySource && primarySource !== 'manual') {
+      return `<section class="wearable-manual-entries wearable-manual-entries-compact">
+        <button type="button" class="wearable-manual-add-btn" onclick="openManualAddFromDetail('${escapeHTML(metricId)}')">+ Add a manual reading</button>
+        <div id="wearable-manual-add-slot"></div>
+      </section>`;
+    }
     return `<section class="wearable-manual-entries">
       <div class="wearable-manual-entries-head">
         <span class="wearable-manual-entries-title">Manual entries</span>
@@ -656,7 +702,7 @@ function buildManualEntriesSection(metricId, manualEntries) {
     const valueRead = formatValue(e.v, unit);
     const ariaText = `Delete ${metricLabel.toLowerCase()} reading from ${formatSpokenDate(e.date)}, ${valueRead}${unit ? ' ' + unit : ''}`;
     return `<li class="wearable-manual-entry" data-entry-date="${escapeHTML(e.date)}">
-      <span class="wearable-manual-entry-date">${escapeHTML(e.date)}</span>
+      <span class="wearable-manual-entry-date">${escapeHTML(shortDate(e.date))}</span>
       <span class="wearable-manual-entry-val">${valueRead}${unit ? ` <span class="wearable-manual-entry-unit">${escapeHTML(unit)}</span>` : ''}</span>
       ${tagChips}
       <button type="button" class="wearable-manual-entry-del" title="Delete this reading" aria-label="${escapeHTML(ariaText)}" onclick="deleteManualEntryFromDetail('${escapeHTML(metricId)}','${escapeHTML(e.date)}')">×</button>
@@ -708,11 +754,11 @@ function buildWearableDetailHtml(canon, m, series, metricId, manualEntries = [])
   const companionUnitSpaced = companion ? unitSpaced : '';
 
   const baseStats = [
-    ['Latest',   `${formatV(m.latest)}${unitSpaced}`, m.latestDate || ''],
+    ['Latest',   `${formatV(m.latest)}${unitSpaced}`, m.latestDate ? shortDate(m.latestDate) : ''],
     ['Baseline (90d)', `${formatV(m.baseline)}${unitSpaced}`, 'median'],
     ['7-day avg', `${formatV(m.rolling?.d7)}${unitSpaced}`, ''],
     ['30-day avg', `${formatV(m.rolling?.d30)}${unitSpaced}`, ''],
-    ['P25 – P75', `${formatV(m.baselineP25)} – ${formatV(m.baselineP75)}${unitSpaced}`, 'interquartile'],
+    ['Typical range', `${formatV(m.baselineP25)} – ${formatV(m.baselineP75)}${unitSpaced}`, '25th–75th percentile'],
     ['Coverage', `${series.length}d`, `of last 90 days`],
   ];
   // Daytime companion: emit up to three sub-stats — latest, 7-day average,
@@ -723,7 +769,7 @@ function buildWearableDetailHtml(canon, m, series, metricId, manualEntries = [])
     baseStats.push([
       `${companionLabel} (latest)`,
       `${formatV(companion.latest)}${companionUnitSpaced}`,
-      companion.latestDate ? `daytime · ${companion.latestDate}` : 'daytime',
+      companion.latestDate ? `daytime · ${shortDate(companion.latestDate)}` : 'daytime',
     ]);
     if (typeof companion.rolling?.d7 === 'number') {
       baseStats.push([
@@ -771,7 +817,7 @@ function buildWearableDetailHtml(canon, m, series, metricId, manualEntries = [])
     </div>`).join('');
 
   const emptyHint = series.length === 0
-    ? `<div class="wearable-detail-empty">No daily samples for this metric in the last 90 days. Either the source adapter lacks the scope, the feature is off on the device, or the ring wasn't worn. Try Sync now or reconnect with full scopes.</div>`
+    ? `<div class="wearable-detail-empty">No daily samples for this metric in the last 90 days. Either your wearable doesn't share this metric, the feature is off on your device, or you didn't wear it. Try Sync now, or reconnect to refresh permissions.</div>`
     : (metricId === 'activity_score' && series.every(p => p.v === 0))
       ? `<div class="wearable-detail-empty">Every day shows 0 — Oura suppresses the Activity composite score while Rest Mode is on. Check the <b>Steps</b> card for raw movement data, or disable Rest Mode in the Oura app.</div>`
       : '';
@@ -795,7 +841,7 @@ function buildWearableDetailHtml(canon, m, series, metricId, manualEntries = [])
     <div class="modal-chart" style="height:260px"><canvas id="chart-modal"></canvas></div>
     ${emptyHint}
     <div class="wearable-detail-stats">${statsCells}</div>
-    ${buildManualEntriesSection(metricId, manualEntries)}`;
+    ${buildManualEntriesSection(metricId, manualEntries, m.primarySource)}`;
 }
 
 function renderWearableChart(canvas, canon, m, series) {
@@ -984,7 +1030,7 @@ async function chooseWearableSource(metricId, event) {
 async function syncWearableNow(triggerEl) {
   const sources = Object.keys(listConnectedSources());
   if (sources.length === 0) {
-    showNotification?.('Connect a wearable in Settings → Data first', 'info');
+    showNotification?.('Connect a wearable in Settings → Wearables first', 'info');
     return;
   }
   // Spin the inline button icon for the duration of the sync. The button
@@ -996,9 +1042,16 @@ async function syncWearableNow(triggerEl) {
     showNotification?.('Syncing wearables…', 'info', 1500);
     // force:true → bypass L2 gate so the strip never appears stuck on a
     // stale snapshot when a user explicitly clicks "sync now."
-    for (const sid of sources) await syncNow(sid, { force: true });
+    let totalRows = 0;
+    for (const sid of sources) {
+      const res = await syncNow(sid, { force: true });
+      totalRows += res?.rows ?? 0;
+    }
     if (window.navigate) window.navigate('dashboard');
-    showNotification?.('Wearables synced', 'success', 2000);
+    showNotification?.(
+      totalRows > 0 ? `Wearables synced — ${totalRows} new row${totalRows === 1 ? '' : 's'}` : 'Wearables synced — already up to date',
+      'success', 2000
+    );
   } catch { /* per-source error already surfaced */ }
   finally {
     btn?.classList.remove('is-syncing');
@@ -1133,7 +1186,7 @@ function renderRowDetail(adapter, conn, { isPendingClient, isFileImport }) {
   // Connected OAuth — identity + manage actions
   if (conn && !conn.needsReauth && adapter.authType === 'oauth2') {
     const acct = conn.account || {};
-    const when = conn.lastSyncAt ? new Date(conn.lastSyncAt).toLocaleString() : 'never';
+    const when = conn.lastSyncAt ? formatAgo(conn.lastSyncAt) : 'never';
     // Vendor identity priority: vendor-supplied identity string → email →
     // full name → user-id → generic fallback. Withings supplies a
     // last-measure timestamp string; Polar exposes first/last name + userId;
@@ -1150,17 +1203,17 @@ function renderRowDetail(adapter, conn, { isPendingClient, isFileImport }) {
     return `<div class="wearable-adapter-identity">${identity}</div>
       <div class="wearable-adapter-meta">Last sync: ${escapeHTML(when)}</div>
       <div class="wearable-adapter-actions">
-        <button class="wearable-action wearable-action-primary" onclick="handleWearableSyncNow('${escapeHTML(adapter.id)}', this)" aria-label="Sync ${escapeHTML(adapter.displayName)} now">
+        <button class="wearable-action wearable-action-primary" title="Refetches the last 7 days — catches today's reading even if you synced earlier." onclick="handleWearableSyncNow('${escapeHTML(adapter.id)}', this)" aria-label="Sync ${escapeHTML(adapter.displayName)} now">
           <svg class="wearable-action-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 4 21 12 13 12"/></svg>
-          <span>Sync</span>
+          <span>Sync now <span class="wearable-action-hint">(catches today)</span></span>
         </button>
-        <button class="wearable-action wearable-action-secondary" title="Refetches 90 days of history — may take 30s+ depending on the vendor's rate limits." onclick="handleWearableBackfill('${escapeHTML(adapter.id)}')">Re-sync last 90 days <span class="wearable-action-hint">(may take a moment)</span></button>
+        <button class="wearable-action wearable-action-secondary" title="Refetches 90 days of history — useful after a long absence or to recover missing days. May take 30s+." onclick="handleWearableBackfill('${escapeHTML(adapter.id)}')">Backfill 90 days <span class="wearable-action-hint">(slower, fills gaps)</span></button>
         <button class="wearable-action wearable-action-danger" onclick="handleWearableDisconnect('${escapeHTML(adapter.id)}')">Disconnect</button>
       </div>`;
   }
   // Apple Health connected — different actions
   if (conn && isFileImport) {
-    const when = new Date(conn.lastSyncAt).toLocaleString();
+    const when = formatAgo(conn.lastSyncAt);
     const fileName = conn.fileName ? escapeHTML(conn.fileName) : 'export';
     return `<div class="wearable-adapter-identity">Imported from ${fileName}</div>
       <div class="wearable-adapter-meta">Last import: ${escapeHTML(when)} · ${conn.coverageDays ?? '?'} days</div>
@@ -1283,7 +1336,7 @@ function openManualAddFromDetail(metricId, event) {
   if (event) event.stopPropagation();
   const slot = document.getElementById('wearable-manual-add-slot');
   if (!slot) return;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = isoDay();
   const isBP = metricId === 'bp_systolic' || metricId === 'bp_diastolic';
   const isRhr = metricId === 'rhr';
   const kind = isBP ? 'bp' : metricId === 'weight' ? 'weight' : isRhr ? 'rhr' : null;
@@ -1545,10 +1598,11 @@ async function handleWearableSyncNow(adapterId, triggerEl) {
   const btn = triggerEl;
   btn?.classList.add('is-syncing');
   if (btn) btn.disabled = true;
+  const name = adapterById(adapterId)?.displayName || adapterId;
   try {
-    showNotification?.(`Syncing ${adapterId}…`, 'info', 1500);
+    showNotification?.(`Syncing ${name}…`, 'info', 1500);
     const res = await syncNow(adapterId, { force: true });
-    showNotification?.(`${adapterId} synced (${res.rows ?? 0} new)`, 'success', 2500);
+    showNotification?.(`${name} synced (${res.rows ?? 0} new)`, 'success', 2500);
     refreshSettingsWearables();
     if (window.navigate) window.navigate('dashboard');
   } catch { /* syncNow already notified */ }
@@ -1559,11 +1613,12 @@ async function handleWearableSyncNow(adapterId, triggerEl) {
 }
 
 async function handleWearableBackfill(adapterId) {
+  const name = adapterById(adapterId)?.displayName || adapterId;
   try {
-    showNotification?.(`Backfilling ${adapterId}…`, 'info', 2000);
+    showNotification?.(`Backfilling ${name}…`, 'info', 2000);
     const bf = await backfillWearable(adapterId);
     await syncWearableSummary(getActiveProfileId(), listConnectedSources());
-    showNotification?.(`${adapterId} backfilled ${bf.rows} days`, 'success');
+    showNotification?.(`${name} backfilled ${bf.rows} days`, 'success');
     refreshSettingsWearables();
     if (window.navigate) window.navigate('dashboard');
   } catch (e) {
@@ -1572,9 +1627,10 @@ async function handleWearableBackfill(adapterId) {
 }
 
 function handleWearableDisconnect(adapterId) {
-  showConfirmDialog(`Disconnect ${adapterId} and delete its local data?`, async () => {
+  const name = adapterById(adapterId)?.displayName || adapterId;
+  showConfirmDialog(`Disconnect ${name} and delete its local data?`, async () => {
     await disconnectWearable(adapterId, { deleteData: true });
-    showNotification?.(`${adapterId} disconnected`, 'success');
+    showNotification?.(`${name} disconnected`, 'success');
     refreshSettingsWearables();
     if (window.navigate) window.navigate('dashboard');
   });
@@ -1617,7 +1673,7 @@ function openManualLogForm(metricId, event) {
   if (event) event.stopPropagation();
   const card = document.querySelector(`.wearable-card-empty[data-empty-metric="${metricId}"]`);
   if (!card) return;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = isoDay();
   if (metricId === 'weight') {
     card.innerHTML = `
       <div class="wearable-card-top"><span class="wearable-metric-name">Weight</span></div>
@@ -1719,6 +1775,7 @@ function cancelManualLog(event) {
 
 Object.assign(window, {
   renderWearableStrip,
+  dismissWearableStub,
   toggleWearableStrip,
   openWearableDetail,
   _uninstallWearableModalFocusTrap,

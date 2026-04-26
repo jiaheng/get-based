@@ -374,23 +374,28 @@ export async function incrementalSyncWearable(adapterId, { force = false } = {})
 
   const lastSync = await getMeta(profileId, `last-sync:${adapterId}`);
   const fallbackStart = daysAgoIso(7);
-  // Manual sync clicks pass force:true → always use at least a 7-day
-  // window. When `lastSync.endDate` is already today (because the user
-  // synced earlier the same day), the previous `[today, today]` window
-  // sometimes returns no rows from Oura's /sleep — observed bug where
-  // strip's "Sync now" did nothing while Settings → "Re-sync last 90
-  // days" caught the missing HRV/RHR. The wider window overlaps with
-  // already-synced data; upsertDailyBatch is idempotent so the cost is
-  // a few extra rows fetched once per click.
+  // Always use AT LEAST a 7-day window. When `lastSync.endDate` is already
+  // today (because the user synced earlier the same day), the previous
+  // `[today, today]` window sometimes returns no rows from Oura's /sleep —
+  // observed bug where strip's "Sync now" did nothing while Settings →
+  // "Re-sync last 90 days" caught the missing HRV/RHR. Background
+  // scheduler runs every 6h and used to have the same regression; floor
+  // here closes both paths. Wider window overlaps with already-synced
+  // data; upsertDailyBatch is idempotent (read-merge-put preserves
+  // non-null fields) so the cost is a handful of redundant rows per sync.
   let startDate;
-  if (force) {
-    startDate = fallbackStart;
-  } else if (lastSync?.endDate && lastSync.endDate < fallbackStart) {
-    startDate = fallbackStart;
+  if (lastSync?.endDate && lastSync.endDate < fallbackStart) {
+    // Previous sync is older than 7 days — backfill from there, but cap
+    // at BACKFILL_DAYS to avoid 90+ day windows on long-stale connections.
+    const back = daysAgoIso(BACKFILL_DAYS);
+    startDate = lastSync.endDate < back ? back : lastSync.endDate;
   } else {
-    startDate = lastSync?.endDate || daysAgoIso(BACKFILL_DAYS);
+    startDate = fallbackStart;
   }
   const endDate = isoDay();
+  // The `force` arg is now informational only — kept for API compatibility
+  // and used downstream by syncWearableSummary to bypass the L2 gate.
+  void force;
 
   const adapter = adapterById(adapterId);
   // Pass `lastSyncUnix` so adapters that support incremental fetch (Withings)
@@ -454,7 +459,7 @@ export async function syncNow(adapterId, { force = false } = {}) {
   } catch (e) {
     const displayName = adapterById(adapterId)?.displayName || adapterId;
     if (e?.code === 'needs-reauth') {
-      showNotification?.(`${displayName} needs reconnection — open Settings → Integrations`, 'error', 5000);
+      showNotification?.(`${displayName} needs reconnection — open Settings → Wearables`, 'error', 5000);
     } else if (e?.status === 401 || e?.status === 403) {
       const conn = getConnection(adapterId);
       if (conn) saveConnection(adapterId, { ...conn, needsReauth: true });

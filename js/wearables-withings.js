@@ -16,6 +16,7 @@
 // our side — we reduce intra-day samples before writing to L1.
 
 import { isDebugMode } from './utils.js';
+import { isoDay } from './wearables-oura.js';
 
 const WITHINGS_API = 'https://wbsapi.withings.net';
 const PROXY_URL    = '/api/proxy';
@@ -193,7 +194,7 @@ export async function fetchWithingsPersonalInfo(accessToken) {
     // Withings doesn't expose email via getmeas. We can confirm the token
     // works (got a response) and stamp the date of the most recent measure
     // as a friendly identifier ("Withings · last measure 2026-04-22").
-    const lastDate = meas?.updatetime ? new Date(meas.updatetime * 1000).toISOString().slice(0, 10) : null;
+    const lastDate = meas?.updatetime ? isoDay(new Date(meas.updatetime * 1000)) : null;
     return { ok: true, account: { email: null, lastMeasure: lastDate, identity: lastDate ? `Withings — last measure ${lastDate}` : 'Withings (account verified)' } };
   } catch (e) {
     return { ok: false, error: e.message, status: e.status };
@@ -264,7 +265,9 @@ export async function fetchWithingsDailyRange(accessToken, startDate, endDate, l
   for (const group of (meas?.measuregrps || [])) {
     const epoch = group?.date;
     if (!epoch) continue;
-    const day = new Date(epoch * 1000).toISOString().slice(0, 10);
+    // Local-tz: a measurement at 23:30 local should be tagged with today,
+    // not "tomorrow UTC" for users in positive offsets.
+    const day = isoDay(new Date(epoch * 1000));
     const row = ensureRow(day);
     for (const m of (group.measures || [])) {
       const field = MEAS_TYPES[m.type];

@@ -1315,18 +1315,29 @@ return (async function() {
   const storeSrcV29 = await fetch('/js/wearables-store.js').then(r => r.text());
   assert('upsertDaily encrypts via _encryptRowIfEnabled before put',
     /_encryptRowIfEnabled\(stamped\)/.test(storeSrcV29) || /_encryptRowIfEnabled\(\{ importedAt[\s\S]{0,40}\)/.test(storeSrcV29));
-  assert('upsertDailyBatch encrypts the entire batch before opening the tx',
-    /Promise\.all\(rows[\s\S]{0,200}_encryptRowIfEnabled\(\{ importedAt: stamp/.test(storeSrcV29));
+  // Two-phase upsert: read existing → merge in JS → write merged. Earlier
+  // implementations encrypted-then-put in one tx, which destroyed null
+  // fields on partial-fetch syncs (e.g. Withings `lastupdate` returning
+  // sleep-only on a re-sync would null today's weight). The phased shape
+  // preserves existing non-null fields when the incoming row has nulls.
+  assert('upsertDailyBatch reads existing rows in a phase-1 tx before merging',
+    /Phase 1[\s\S]{0,1200}readonly[\s\S]{0,400}store\.get/.test(storeSrcV29));
+  assert('upsertDailyBatch merges incoming over existing via _mergeRow',
+    /_mergeRow\(existingPlain/.test(storeSrcV29));
+  assert('upsertDailyBatch writes the merged batch in a phase-2 tx',
+    /Phase 2[\s\S]{0,200}readwrite/.test(storeSrcV29));
+  assert('_mergeRow preserves existing values when incoming field is null',
+    /v === null \|\| v === undefined[\s\S]{0,80}continue/.test(storeSrcV29));
   assert('getDaily decrypts via _decryptRowIfWrapped on read',
     /_decryptRowIfWrapped\(raw\)/.test(storeSrcV29));
-  assert('getDailyRange decrypts every row before resolving',
-    /raws\.map\(r\s*=>\s*_decryptRowIfWrapped\(r\)\)/.test(storeSrcV29));
+  assert('getDailyRange filters null decrypts (drops unreadable rows from range)',
+    /decrypted\.filter\(r => r !== null\)/.test(storeSrcV29));
   // Compound key fields stay plaintext (range queries depend on this).
   assert('Encryption envelope leaves source + date plaintext',
     /const\s*\{\s*source,\s*date,\s*_payload,\s*\.\.\.rest\s*\}\s*=\s*row/.test(storeSrcV29) &&
     /\{\s*source,\s*date,\s*_payload:\s*env\s*\}/.test(storeSrcV29));
-  assert('Read-side defensively returns wrapper if decrypt fails (no whole-range data loss)',
-    /decrypted\)\s*return\s*row/.test(storeSrcV29));
+  assert('Read-side returns null on decrypt failure (no nested-envelope re-write hazard)',
+    /if \(!decrypted\) return null/.test(storeSrcV29));
 
   // ═══════════════════════════════════════
   // 17v. Test isolation regression guard (v1.28.1)

@@ -11,6 +11,7 @@ import { saveImportedData } from './data.js';
 import { getDailyRange } from './wearables-store.js';
 import { DEFAULT_METRIC_ORDER } from './wearable-adapters.js';
 import { isDebugMode } from './utils.js';
+import { isoDay } from './wearables-oura.js';
 
 // ─────────────────────────────────────────────────────────
 // Tunables — see docs/contributor/wearables-architecture.md (planned)
@@ -268,7 +269,11 @@ export function shouldWriteL2(newSummary, oldSummary) {
     // the card still reads "Tuesday's value" even though L1 has Wed/Thu/Fri.
     // The cost is one extra L2 write per metric per day at most — still
     // well inside the few-writes-per-month Evolu sync budget.
-    if (old.latestDate && neu.latestDate && neu.latestDate > old.latestDate) {
+    if (neu.latestDate && (!old.latestDate || neu.latestDate > old.latestDate)) {
+      // Bootstrap path: legacy summaries written before v1.30.5 don't have
+      // `latestDate`. Without the bootstrap branch a stuck card on a
+      // pre-existing profile would never unstick — defeating the entire
+      // purpose of this trigger for the users it most needs to help.
       trippedReason = trippedReason || `latest-advanced:${metricId}`;
     }
 
@@ -295,11 +300,17 @@ export function shouldWriteL2(newSummary, oldSummary) {
     }
 
     // 3. week rollover + weekly delta
+    // Compare ISO-week keys derived from latestDate, not weekly.length.
+    // weeklyMeans clips to 12 buckets, so once a profile has ≥12 weeks of
+    // data the array length stays at 12 forever — the old `weekly.length`
+    // diff was always false and the gate was effectively dead code.
     const oldLast = old.weekly?.[old.weekly.length - 1];
     const newLast = neu.weekly?.[neu.weekly.length - 1];
     const oldPrev = old.weekly?.[old.weekly.length - 2];
     if (typeof oldLast === 'number' && typeof newLast === 'number' && typeof oldPrev === 'number' && oldPrev !== 0) {
-      const weeksRolled = (neu.weekly?.length || 0) > (old.weekly?.length || 0);
+      const oldWk = old.latestDate ? isoWeekOf(old.latestDate) : null;
+      const newWk = neu.latestDate ? isoWeekOf(neu.latestDate) : null;
+      const weeksRolled = oldWk && newWk && newWk > oldWk;
       const deltaPct = Math.abs((newLast - oldPrev) / oldPrev) * 100;
       if (weeksRolled && deltaPct >= GATE_WEEKLY_DELTA_PCT) {
         trippedReason = trippedReason || `week-rollover:${metricId}`;
@@ -352,10 +363,12 @@ export async function syncWearableSummary(profileId, connectedSources, { force =
   const sourceIds = Object.keys(connectedSources);
   if (sourceIds.length === 0) return { wrote: false, reason: 'no-sources' };
 
-  // Pull last 90 days of rows for every connected source.
-  const endDate = new Date().toISOString().slice(0, 10);
-  const start = new Date(); start.setUTCDate(start.getUTCDate() - 90);
-  const startDate = start.toISOString().slice(0, 10);
+  // Pull last 90 days of rows for every connected source. Local-tz dates
+  // so the window aligns with vendor `day`/date fields (Oura, Withings,
+  // etc. use the user's local day boundary, not UTC).
+  const endDate = isoDay();
+  const start = new Date(); start.setDate(start.getDate() - 90);
+  const startDate = isoDay(start);
 
   const rowsBySource = {};
   for (const sid of sourceIds) {

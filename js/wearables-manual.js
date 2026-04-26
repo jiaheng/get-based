@@ -12,6 +12,7 @@
 import { upsertDaily, upsertDailyBatch, countSource, getDaily, deleteDaily, getMeta, setMeta } from './wearables-store.js';
 import { state } from './state.js';
 import { saveImportedData } from './data.js';
+import { isoDay } from './wearables-oura.js';
 
 // Merge helper — read the existing manual row for `date` (if any), shallow-merge
 // the new patch on top, write back. Needed because IDB `put` replaces the whole
@@ -77,7 +78,7 @@ export async function logManualMetric(profileId, metric, { date, value, tags }) 
   if (value == null || !isFinite(value)) {
     throw new Error('logManualMetric: value must be a finite number');
   }
-  const d = date || new Date().toISOString().slice(0, 10);
+  const d = date || isoDay();
   const patch = { [metric]: value };
   if (Array.isArray(tags) && tags.length) patch.tags = _sanitizeTags(tags);
   await _mergeManualRow(profileId, d, patch);
@@ -89,7 +90,7 @@ export async function logManualMetric(profileId, metric, { date, value, tags }) 
  * (+ optional pulse) in a single reading. One row per date.
  */
 export async function logManualBP(profileId, { date, systolic, diastolic, pulse, tags }) {
-  const d = date || new Date().toISOString().slice(0, 10);
+  const d = date || isoDay();
   const row = { source: 'manual', date: d };
   if (systolic != null && isFinite(systolic)) row.bp_systolic = systolic;
   if (diastolic != null && isFinite(diastolic)) row.bp_diastolic = diastolic;

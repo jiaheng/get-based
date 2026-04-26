@@ -107,10 +107,17 @@ async function _encryptRowIfEnabled(row) {
 async function _decryptRowIfWrapped(row) {
   if (!row || !row._payload) return row;
   let crypto;
-  try { crypto = await import('./crypto.js'); } catch { return row; }
+  try { crypto = await import('./crypto.js'); } catch { return null; }
   if (!crypto.isEncryptedObject?.(row._payload)) return row;
   const decrypted = await crypto.decryptObject(row._payload).catch(() => null);
-  if (!decrypted) return row; // session locked / corrupt — return wrapper as-is
+  // Session locked / corrupt → return null. Earlier we returned the
+  // wrapped row, but downstream consumers (`_mergeManualRow`,
+  // `upsertDailyBatch`'s read-modify-write) would spread `_payload` into
+  // a "merged" row and then `_encryptRowIfEnabled` re-wrapped it,
+  // producing nested envelopes that `isEncryptedObject` couldn't detect
+  // on the next read. Returning null forces callers to treat the row as
+  // unreadable, which is the honest semantic when the session is locked.
+  if (!decrypted) return null;
   // Return the merged shape so callers can read fields directly.
   return { source: row.source, date: row.date, ...decrypted };
 }
@@ -136,15 +143,69 @@ export async function deleteDaily(profileId, source, date) {
   return txPromise(tx);
 }
 
+// Merge two canonical rows: incoming wins UNLESS its field is null/undefined,
+// in which case the existing value survives. This is the central protection
+// against partial-fetch overwrites — vendor adapters initialise every
+// canonical field to null and only populate what came back, so a same-day
+// re-sync that returns a subset (e.g. Withings `lastupdate` finds nothing
+// new for weight but does for sleep) must not blank the fields it didn't
+// fetch. Special-cased: `source`, `date`, `importedAt`, `tags` always come
+// from the incoming row. Mirrors `_mergeManualRow` semantics.
+function _mergeRow(existing, incoming) {
+  if (!existing) return incoming;
+  const out = { ...existing };
+  for (const [k, v] of Object.entries(incoming)) {
+    if (k === 'source' || k === 'date') { out[k] = v; continue; }
+    if (k === 'importedAt') { out[k] = v; continue; }
+    if (k === 'tags') { out[k] = v; continue; }
+    if (v === null || v === undefined) continue; // preserve existing
+    out[k] = v;
+  }
+  return out;
+}
+
 export async function upsertDailyBatch(profileId, rows) {
   if (!rows || rows.length === 0) return;
   const stamp = Date.now();
-  // Encrypt all rows up-front so the actual IDB write is a single tx that
-  // doesn't await — keeps the transaction lifetime short.
-  const towrite = await Promise.all(rows
-    .filter(r => r && r.source && r.date)
-    .map(r => _encryptRowIfEnabled({ importedAt: stamp, ...r })));
+  const cleaned = rows.filter(r => r && r.source && r.date);
+  if (cleaned.length === 0) return;
   const db = await openWearablesDB(profileId);
+
+  // Phase 1 — read existing rows in a read tx. We can't await between
+  // get() and put() inside a single tx (IDB auto-closes the tx on the
+  // first microtask yield), so the read and decrypt happen first, then
+  // a fresh write tx applies all merged puts in one shot. Race window:
+  // a concurrent write between phases could be overwritten — acceptable
+  // because (a) wearable syncs are serialized via _syncing/_pulling
+  // guards upstream, (b) we're protecting against the much more common
+  // partial-fetch overwrite.
+  const existingRows = await new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_DAILY, 'readonly');
+    const store = tx.objectStore(STORE_DAILY);
+    const out = new Map();
+    let pending = cleaned.length;
+    if (pending === 0) return resolve(out);
+    for (const incoming of cleaned) {
+      const req = store.get([incoming.source, incoming.date]);
+      req.onsuccess = () => {
+        if (req.result) out.set(`${incoming.source}|${incoming.date}`, req.result);
+        if (--pending === 0) resolve(out);
+      };
+      req.onerror = () => reject(req.error);
+    }
+  });
+
+  // Decrypt existing rows + build merged payloads (await-friendly outside tx)
+  const towrite = [];
+  for (const incoming of cleaned) {
+    const key = `${incoming.source}|${incoming.date}`;
+    const existing = existingRows.get(key);
+    const existingPlain = existing ? await _decryptRowIfWrapped(existing) : null;
+    const merged = _mergeRow(existingPlain, { importedAt: stamp, ...incoming });
+    towrite.push(await _encryptRowIfEnabled(merged));
+  }
+
+  // Phase 2 — write all merged rows in a single fresh tx, no awaits.
   const tx = db.transaction(STORE_DAILY, 'readwrite');
   const store = tx.objectStore(STORE_DAILY);
   for (const row of towrite) store.put(row);
@@ -217,11 +278,13 @@ export async function getDailyRange(profileId, source, startDate, endDate) {
     };
     req.onerror = () => reject(req.error);
   });
-  // Decrypt-on-read. Plaintext rows pass through untouched; encrypted rows
-  // unwrap. Any single-row decrypt failure leaves the wrapper as-is rather
-  // than failing the whole range — same defensive shape as the rest of the
-  // codebase.
-  return Promise.all(raws.map(r => _decryptRowIfWrapped(r)));
+  // Decrypt-on-read. Plaintext rows pass through untouched; encrypted
+  // rows unwrap. Any single-row decrypt failure (session locked / corrupt)
+  // returns null from _decryptRowIfWrapped — drop those rows from the
+  // range rather than passing them through, since downstream consumers
+  // can't render a wrapped row safely.
+  const decrypted = await Promise.all(raws.map(r => _decryptRowIfWrapped(r)));
+  return decrypted.filter(r => r !== null);
 }
 
 // Count rows for a given source (fast sanity check, also used by Safari-eviction recovery).

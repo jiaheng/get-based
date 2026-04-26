@@ -414,6 +414,26 @@ export function closeSettingsModal() {
 // ═══════════════════════════════════════════════
 // SYNC SECTION
 // ═══════════════════════════════════════════════
+function renderPendingTombstones() {
+  const pending = window.listPendingTombstones?.() || [];
+  if (pending.length === 0) return '';
+  const rows = pending.map(p => `
+    <div class="sync-tombstone-row" data-tomb-id="${escapeAttr(p.id)}">
+      <span class="sync-tombstone-name">${escapeHTML(p.name)}</span>
+      <span class="sync-tombstone-meta">${p.at ? `flagged ${new Date(p.at).toLocaleDateString()}` : ''}</span>
+      <button class="sync-tombstone-btn sync-tombstone-apply" onclick="window.applyPendingTombstone('${escapeAttr(p.id)}').then(() => window.openSettingsModal('data'))">Apply delete</button>
+      <button class="sync-tombstone-btn sync-tombstone-reject" onclick="window.rejectPendingTombstone('${escapeAttr(p.id)}').then(() => window.openSettingsModal('data'))">Restore</button>
+    </div>`).join('');
+  return `
+    <div class="sync-tombstone-banner">
+      <div class="sync-tombstone-head">
+        <strong>${pending.length} profile${pending.length === 1 ? '' : 's'} flagged for deletion on another device</strong>
+        <span class="sync-tombstone-help">Confirm each — Apply wipes locally, Restore re-publishes.</span>
+      </div>
+      ${rows}
+    </div>`;
+}
+
 function renderSyncSection() {
   const enabled = isSyncEnabled();
   const relay = getSyncRelay();
@@ -429,6 +449,7 @@ function renderSyncSection() {
     </div>` : '';
   return `
     ${blockerBanner}
+    ${renderPendingTombstones()}
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${enabled ? '16' : '8'}px;${blocker ? 'opacity:0.5;pointer-events:none' : ''}">
       <div>
         <div style="font-size:13px;font-weight:600;color:var(--text-primary)">Cross-device sync</div>

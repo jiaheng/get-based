@@ -133,6 +133,9 @@ export async function fetchPolarDailyRange(accessToken, startDate, endDate, conn
     }
     return byDate.get(day);
   }
+  // Sleep endpoint is windowed by the API itself, so we filter sleep rows
+  // to the requested range. Activity/exercise come from one-shot transactions
+  // and we accept every dated item — see notes on the transaction blocks.
   function inRange(day) {
     return day >= startDate && day <= endDate;
   }
@@ -163,11 +166,16 @@ export async function fetchPolarDailyRange(accessToken, startDate, endDate, conn
         try {
           const item = await polarGET(itemUrl, accessToken);
           const day = item?.date || item?.['created']?.slice(0, 10);
-          if (!day || !inRange(day)) continue;
+          // No inRange() filter here. Polar transactions are exactly-once —
+          // committing without writing means the data is gone forever from
+          // the user's queue. Earlier the inRange check dropped retroactively
+          // dated activities (e.g. a workout that synced from a watch days
+          // late) and the transaction commit then permanently lost them.
+          // Keep every dated item; downstream L2 windows trim what they
+          // care about, and L1 upserts dedupe so duplicates are harmless.
+          if (!day) continue;
           const row = ensureRow(day);
           if (row.steps == null && typeof item['active-steps'] === 'number') row.steps = item['active-steps'];
-          // Daytime activity-window HR average — NOT a resting reading. The
-          // overnight `rhr` slot is populated separately from sleep min above.
           if (row.hr_day == null && typeof item?.['heart-rate']?.average === 'number') row.hr_day = item['heart-rate'].average;
         } catch (e) { logDebug('activity-item', e); }
       }
@@ -186,7 +194,10 @@ export async function fetchPolarDailyRange(accessToken, startDate, endDate, conn
         try {
           const ex = await polarGET(itemUrl, accessToken);
           const day = (ex?.['start-time'] || '').slice(0, 10);
-          if (!day || !inRange(day)) continue;
+          // No inRange() filter — same exactly-once concern as the activity
+          // transaction above. Drop the workout from THIS sync's window
+          // would mean Polar marks it consumed and we never see it again.
+          if (!day) continue;
           const row = ensureRow(day);
           // Workout-gated HRV: this is a daytime/active measurement during
           // exercise — semantically distinct from overnight rMSSD. Route to

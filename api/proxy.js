@@ -29,13 +29,51 @@ const ALLOWED_ORIGINS = [
 /// before fetch), out of scope for this pass.
 function _isBlockedHost(host) {
   if (!host) return true;
+  // Strip IPv6 brackets if present — URL.hostname keeps them on bracketed
+  // literals depending on runtime, so normalise both shapes.
+  const h = host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
   // Loopback + localhost aliases
-  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]') return true;
-  if (host.endsWith('.local') || host.endsWith('.localhost')) return true;
+  if (h === 'localhost' || h === '127.0.0.1' || h === '::1') return true;
+  if (h.endsWith('.local') || h.endsWith('.localhost')) return true;
   // Azure metadata
-  if (host === '168.63.129.16') return true;
+  if (h === '168.63.129.16') return true;
+
+  // IPv6 literal: block loopback, unique-local (fc00::/7), link-local
+  // (fe80::/10), unspecified (::), IPv4-mapped (::ffff:127.0.0.1 / :a.b.c.d
+  // / :hex), and IPv4-compatible (::w.x.y.z). The check is conservative:
+  // any string containing ':' is treated as IPv6 and inspected.
+  if (h.includes(':')) {
+    const lower = h.toLowerCase();
+    if (lower === '::' || lower === '0:0:0:0:0:0:0:0') return true;
+    // fc00::/7 unique-local: high byte 0xfc or 0xfd (binary 1111110x)
+    if (/^fc[0-9a-f]{2}:/.test(lower) || /^fd[0-9a-f]{2}:/.test(lower)) return true;
+    // fe80::/10 link-local
+    if (/^fe[89ab][0-9a-f]:/.test(lower)) return true;
+    // IPv4-mapped/translated: ::ffff:a.b.c.d / ::ffff:0:a.b.c.d / ::a.b.c.d
+    const v4Embed = lower.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+    if (v4Embed) return _isBlockedHost(v4Embed[1]);
+    // IPv4-mapped hex form ::ffff:7f00:0001 etc — collapse and recheck via
+    // last 32 bits when it's a clear ::ffff: prefix.
+    if (lower.startsWith('::ffff:')) {
+      const tail = lower.slice(7);
+      // Hex pair → dotted quad if it looks like 0001:0002 etc.
+      const hex = tail.replace(/:/g, '');
+      if (/^[0-9a-f]{1,8}$/.test(hex)) {
+        const padded = hex.padStart(8, '0');
+        const a = parseInt(padded.slice(0, 2), 16);
+        const b = parseInt(padded.slice(2, 4), 16);
+        const c = parseInt(padded.slice(4, 6), 16);
+        const d = parseInt(padded.slice(6, 8), 16);
+        return _isBlockedHost(`${a}.${b}.${c}.${d}`);
+      }
+    }
+    // Unknown / private IPv6 ranges we haven't enumerated — be safe and
+    // allow only globally routable (2000::/3) IPv6 addresses through.
+    return !/^[23][0-9a-f]{3}:/.test(lower);
+  }
+
   // IPv4 literal check — reject strictly-decimal 0-255 octets in reserved ranges
-  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
   if (!m) return false;
   for (let i = 1; i <= 4; i++) {
     const octet = m[i];

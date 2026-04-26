@@ -3915,6 +3915,33 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
      readings. (Desktop FAB is smaller and the strip isn't bottom-anchored.) */
   box-shadow: var(--shadow);
 }
+.wearable-strip-stub {
+  border-style: dashed;
+}
+.wearable-strip-stub-body {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.wearable-strip-stub-text {
+  flex: 1; min-width: 200px; font-size: 13px; line-height: 1.5;
+  color: var(--text-secondary);
+}
+.wearable-strip-stub-text strong { color: var(--text-primary); }
+.wearable-strip-stub-brands {
+  display: block; margin-top: 2px; font-size: 11px; color: var(--text-muted);
+}
+.wearable-strip-stub-actions {
+  display: flex; gap: 6px; align-items: center;
+}
+.wearable-strip-stub-cta {
+  background: var(--accent); color: #fff; border: none; padding: 6px 14px;
+  border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer;
+}
+.wearable-strip-stub-cta:hover { filter: brightness(1.08); }
+.wearable-strip-stub-dismiss {
+  background: none; border: none; color: var(--text-muted); cursor: pointer;
+  font-size: 18px; line-height: 1; padding: 4px 8px; border-radius: 4px;
+}
+.wearable-strip-stub-dismiss:hover { background: var(--bg-secondary); color: var(--text-primary); }
 @media (max-width: 600px) {
   .wearable-strip {
     margin-bottom: 80px; /* room for chat FAB + import FAB stacked */
@@ -3939,7 +3966,9 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
   background: var(--yellow-bg); color: var(--yellow);
   padding: 2px 7px; border-radius: 8px;
   border: 1px solid rgba(251, 191, 36, 0.25);
+  cursor: pointer; transition: filter 0.15s;
 }
+.wearable-strip-demo-pill:hover { filter: brightness(1.1); }
 /* Reorder-mode banner — visible cue that the strip is in arrange-mode so the
    user knows the ◀ ▶ arrows are intentional, not accidental. */
 .wearable-strip-reorder-pill {
@@ -4100,6 +4129,12 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
   margin-top: 14px; padding-top: 12px;
   border-top: 1px solid var(--border);
 }
+.wearable-manual-entries-compact {
+  text-align: right;
+}
+.wearable-manual-entries-compact .wearable-manual-add-btn {
+  font-size: 12px; opacity: 0.85;
+}
 .wearable-manual-entries-head {
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 8px;
@@ -4251,6 +4286,15 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
   color: var(--text-muted); font-style: italic; white-space: nowrap;
   cursor: help;
 }
+/* On narrow strip cards the baseline + staleness chip stack as two muted
+   grey lines below the value, which reads as a paragraph blob. Hide the
+   baseline annotation when the staleness hint is present and viewport is
+   tight; the staleness chip already implies "this isn't your most recent
+   typical reading" and the detail modal carries the precise baseline. */
+@media (max-width: 600px) {
+  .wearable-card .wearable-staleness ~ .wearable-baseline,
+  .wearable-card:has(.wearable-staleness) .wearable-baseline { display: none; }
+}
 
 .wearable-sparkline {
   width: 100%; height: 32px; display: block;
@@ -4288,16 +4332,15 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
 .wearable-trend-improving { color: var(--green); background: var(--green-bg); }
 .wearable-trend-flat      { color: var(--text-muted); background: rgba(128,128,128,0.08); }
 .wearable-source-badge {
-  font-size: 9px; font-weight: 600; color: var(--text-muted);
-  text-transform: uppercase; letter-spacing: 0.05em;
+  font-size: 10px; font-weight: 600; color: var(--text-muted);
+  letter-spacing: 0.02em;
   padding: 1px 5px; border-radius: 4px;
   background: rgba(128,128,128,0.08);
   min-width: 0; max-width: 100%;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-/* On narrow viewports the badge is large enough that all-caps reads as
-   shouty next to the lowercase metric labels — switch to title-case + a
-   slightly larger size so it sits more naturally. */
+/* Badge keeps title-case at every width — earlier the all-caps desktop
+   variant read as shouty next to the lowercase metric labels. */
 @media (max-width: 600px) {
   .wearable-source-badge {
     font-size: 10px;
@@ -4832,6 +4875,30 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
   .wearable-strip { padding: 12px 12px 10px; }
   .wearable-strip-meta { font-size: 11px; gap: 8px; flex-wrap: wrap; }
 }
+
+/* Pending-tombstone confirm UI in Settings → Sync. Surfaces remote-driven
+   profile deletes that exceeded the auto-apply threshold so the user can
+   authorise them out-of-band (defence against mnemonic-leak mass-wipe). */
+.sync-tombstone-banner {
+  margin-bottom: 16px; padding: 12px 14px;
+  border: 1px solid #fbbf24; background: rgba(251,191,36,0.08);
+  border-radius: 6px; font-size: 12px;
+}
+.sync-tombstone-head { margin-bottom: 8px; line-height: 1.45; }
+.sync-tombstone-head strong { color: #fbbf24; }
+.sync-tombstone-help { display: block; color: var(--text-muted); font-size: 11px; margin-top: 2px; }
+.sync-tombstone-row {
+  display: flex; align-items: center; gap: 8px; padding: 6px 0;
+  border-top: 1px solid rgba(251,191,36,0.18);
+}
+.sync-tombstone-name { flex: 1; font-weight: 500; color: var(--text-primary); }
+.sync-tombstone-meta { font-size: 11px; color: var(--text-muted); }
+.sync-tombstone-btn {
+  font-size: 11px; padding: 4px 10px; border-radius: 4px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-primary);
+}
+.sync-tombstone-apply { background: #ef4444; color: #fff; border-color: #ef4444; }
+.sync-tombstone-reject { background: #22c55e; color: #fff; border-color: #22c55e; }
 
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {

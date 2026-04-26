@@ -1299,7 +1299,8 @@ export function renderChatMessages() {
             <p style="margin:0 0 6px">⧬ Do you wear a smartwatch or fitness tracker? HRV, sleep, recovery and body composition give me a much richer picture alongside your blood work.</p>
             <div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0">
               <button class="ctx-btn-option" onclick="event.stopPropagation();closeChatPanel();window.openSettingsModal('wearables')">Connect a wearable</button>
-              <span style="font-size:12px;color:var(--text-muted);align-self:center">Oura · Withings · Fitbit · Polar · WHOOP · Apple Health</span>
+              <button class="ctx-btn-option" onclick="event.stopPropagation();this.closest('.chat-onboard-wearable').style.display='none'">I don't wear one</button>
+              <span style="font-size:12px;color:var(--text-muted);align-self:center">Oura · Withings · Fitbit · Polar · Apple Health</span>
             </div>
             <div style="font-size:11px;color:var(--text-muted);line-height:1.5">Raw daily samples stay on your device. Sync only carries a compact encrypted summary.</div>
           </div>`;
