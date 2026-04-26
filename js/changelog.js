@@ -5,91 +5,15 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
-    version: '1.31.0', date: '2026-04-26', title: 'Wearables — end-to-end audit fixes (data-loss, security, UX)',
+    version: '1.31.0', date: '2026-04-26', title: 'Wearables — connect your devices, share with AI agents',
     items: [
-      '<b>Vendor adapters no longer null today\'s data on partial syncs.</b> Earlier <code>upsertDailyBatch</code> did a full-row replacement; if a same-day re-sync returned only a subset of fields (e.g. Withings <code>lastupdate</code> finds nothing new for weight but does for sleep) the unfilled fields blanked. Now read-merge-put: incoming nulls preserve existing values across all six vendors. Fixed across Oura, Withings, Fitbit, WHOOP, Ultrahuman, Polar, Apple Health.',
-      '<b>Polar transactions only commit items we actually wrote.</b> Earlier Polar items dated outside the requested window were silently dropped, but the transaction still committed — Polar\'s exactly-once semantics meant retroactively-dated workouts were permanently lost. The fetcher now keeps every dated item; downstream L2 windows trim what they care about.',
-      '<b>Sync mnemonic no longer exposed via <code>window._syncDebug</code> in production.</b> Anyone with console access (screen-share, malicious extension) could read the BIP-39 seed with one line. Now gated on Settings → Privacy → Debug mode. Same fix for the partial-mnemonic line in <code>_syncDiag</code>.',
-      '<b>Profile-delete tombstone wipes are now confirmed when ≥ 2 profiles are deleted at once.</b> Defence against mnemonic-leak: an attacker publishing tombstones for every profileId would silently wipe all paired devices on next pull. Single deletes auto-apply (most common: user just deleted on another device); batched deletes surface in Settings → Sync with Apply / Restore buttons.',
-      '<b>Sync payload validation tightened.</b> Incoming blobs are stripped of <code>wearableConnections</code> regardless of producer (defence-in-depth — push side already strips, but a compromised relay could inject); the v1 backward-compat branch now rejects unknown shapes; the JSON length cap dropped from 50 MB to 5 MB (a normal payload is well under 1 MB).',
-      '<b>WHOOP HRV/RHR attributed to the cycle they describe, not the morning the score landed.</b> Earlier <code>created_at</code> mapped Tuesday\'s recovery to Wednesday\'s row; now <code>cycle.start</code> wins.',
-      '<b>L2 write gate handles legacy summaries lacking <code>latestDate</code>.</b> Stuck-card fix from v1.30.5 now bootstraps correctly on profiles with pre-v1.30.5 summaries.',
-      '<b>Background scheduler\'s narrow-window regression closed.</b> Manual sync (v1.30.7) widened to 7 days; the every-6-hour scheduler used the same narrow path. Now the floor is universal.',
-      '<b>Local-tz dates instead of UTC.</b> Vendor APIs tag rows with the user\'s local-day boundary, not UTC. Earlier non-UTC users had their 90-day window misaligned by a day; now <code>isoDay()</code> derives from local components.',
-      '<b>SSRF allowlist now blocks IPv6 literals.</b> <code>https://[fc00::1]</code>, <code>https://[fe80::1]</code>, <code>https://[::ffff:127.0.0.1]</code> and IPv4-mapped hex variants previously bypassed the IPv4 dotted-quad guard.',
-      '<b>Pull dedupes by profileId and processes newest first.</b> Eliminates the race where an older Evolu row could overwrite a newer pull because the per-profile localStorage timestamp was bumped only at the bottom of the loop.',
-      '<b>UX cluster:</b> Settings tab name corrected in two stale toasts (Integrations → Wearables / Data → Wearables); per-vendor toasts use display names instead of lowercase ids; "Sync now" labelled "(catches today)" and "Re-sync 90 days" renamed "Backfill 90 days (slower, fills gaps)"; strip toast surfaces row count; Welcome hero says "Apple Health export" instead of "Apple Watch"; chat onboarding drops WHOOP from the brand list and adds an explicit "I don\'t wear one" branch; manual-entry empty state in detail modal becomes a single "+ Add manual reading" button when a vendor source already exists; "P25–P75 / interquartile" → "Typical range / 25th–75th percentile"; "+ log" → "+ Log"; via-source badge no longer all-caps on desktop; demo-pill is now an actionable "demo data — connect yours" button; date formats unified via <code>shortDate</code> ("Apr 22"), Settings "last sync" uses <code>formatAgo</code>.',
-      '<b>Mid-funnel discovery:</b> users with lab data but no wearables now see a dismissible "Connect a wearable" stub on the dashboard when no demo summary fires. Closes the gap from v1.30.2 — discovery worked for empty-state users but not for users post-import.',
-      '<b>L2 gate <code>week-rollover</code> trigger fixed.</b> Was dead code after 12 weeks of data because <code>weekly.length</code> caps at 12; now compares ISO-week keys derived from <code>latestDate</code>.',
-      '<b>Pull-side decrypt failure no longer produces nested envelopes.</b> Earlier <code>_decryptRowIfWrapped</code> returned the wrapper on failure; downstream merges spread <code>_payload</code> and re-encrypted, producing nested envelopes that broke on next read. Now returns null; <code>getDailyRange</code> filters those out.',
-    ]
-  },
-  {
-    version: '1.30.9', date: '2026-04-26', title: 'Sync — remote profile deletes now wipe local copies',
-    items: [
-      '<b>When another device tombstones a profile, this device wipes its local copy on next pull</b> — instead of leaving a ghost entry that the active-rows query no longer returns. Pairs with v1.30.8\'s push-side delete propagation: now profile deletion completes itself across all paired devices in a single round-trip. Safety guard: if every local profile is tombstoned at once, we keep the active one as a landing pad rather than wiping the user out of their own app.',
-    ]
-  },
-  {
-    version: '1.30.8', date: '2026-04-26', title: 'Sync — deleting a profile now propagates to other devices',
-    items: [
-      '<b>Deleting a profile now actually deletes it on the relay</b> instead of leaving the data behind. Previous behaviour: <code>deleteProfile</code> wiped local state (localStorage + the wearables IndexedDB) but never told the Evolu sync layer to drop the row. The relay kept the full <code>dataJson</code> blob, so any paired device pulling later resurrected the profile. Now we soft-delete (<code>isDeleted: 1</code>) on the Evolu row at the same time as the local wipe — the local query already filters tombstoned rows, the tombstone replicates to peers, and CRDT last-write-wins handles the cross-device conflict resolution automatically.',
-    ]
-  },
-  {
-    version: '1.30.7', date: '2026-04-26', title: 'Wearables — Sync now button now refetches a 7-day window',
-    items: [
-      '<b>The strip\'s "Sync now" button now actually fetches fresh data</b> when you click it twice on the same day. The bug was a too-aggressive incremental window: <code>lastSync.endDate</code> was set to today by the first sync, so the second sync requested a <code>[today, today]</code> window from Oura\'s <code>/sleep</code>, which (for reasons internal to Oura) sometimes returned no rows. The Settings → "Re-sync last 90 days" path always worked because it re-fetches a wide window. Now the manual <i>Sync now</i> button forces a 7-day window even when <code>lastSync.endDate</code> is today, overlapping with already-synced data so any session Oura is willing to return is captured. Background scheduler still uses the narrow window — the Evolu write budget stays small.',
-    ]
-  },
-  {
-    version: '1.30.6', date: '2026-04-26', title: 'Wearables — manual sync always refreshes the strip',
-    items: [
-      '<b>Manual "sync now" now bypasses the L2 write gate</b> so the strip can\'t appear stuck on a stale snapshot. Background scheduled syncs still go through the gate (preserves the few-writes-per-month Evolu sync budget); only user-initiated clicks force a refresh. Closes the loop on the v1.30.x "HRV/RHR show 2-day-old data" report — pairs with the v1.30.5 latest-advanced gate trigger and the v1.30.4 Oura time-series fallback. After this build, click <i>sync now</i> once and the strip will catch up to whatever is in your Oura cloud (HRV/RHR included).',
-    ]
-  },
-  {
-    version: '1.30.5', date: '2026-04-26', title: 'Wearables — strip cards now refresh on every sync',
-    items: [
-      '<b>Strip cards now refresh whenever a fresher data point lands</b> instead of "sticking" between threshold-tripping events. Bug was in the L2 write gate: it only persisted a new summary when a 5% rolling-mean shift, trend flip, or weekly rollover crossed a threshold — which made sense for sync-write minimisation but left the strip showing stale latest values when the underlying numbers were stable. Now any advance in <code>latestDate</code> forces a write. The cost is one extra L2 write per metric per day at most — still well inside the few-writes-per-month Evolu budget. This was the root cause of the "HRV/RHR show 2-day-old data even though sync ran 19 minutes ago" report.',
-    ]
-  },
-  {
-    version: '1.30.4', date: '2026-04-26', title: 'Oura — fix HRV/RHR lagging behind sleep score',
-    items: [
-      '<b>Oura HRV and RHR now sync today\'s data</b> instead of staying 1–2 days behind. Root cause: Oura\'s <code>/sleep</code> API returns the time-series HRV samples (<code>hrv.items</code>) shortly after a session ends, but the scalar <code>average_hrv</code> only fills in once the full overnight analysis pipeline finishes hours later. Our adapter only read the scalar — so today\'s HRV/RHR cards stayed null even though Oura cloud was already showing the value (their app computes the average client-side from the items array). The fetcher now falls back to a zero-filtered mean of the time series when the scalar isn\'t ready yet, matching what Oura\'s own UI does.',
-    ]
-  },
-  {
-    version: '1.30.3', date: '2026-04-26', title: 'Wearables — honest "as of" dates on stale metrics',
-    items: [
-      '<b>Strip cards now show when a metric\'s latest reading actually is.</b> If HRV from your Oura ring is still showing yesterday\'s value because the <code>/sleep</code> endpoint hasn\'t finished processing tonight\'s data (a common 12–48h lag), the card now shows "as of Apr 24" so the value reads honestly instead of looking fresh while sync says "synced 2 minutes ago." Hover for an explanation. The hint only appears when one metric on a source lags the others — fully-fresh sources read clean.',
-    ]
-  },
-  {
-    version: '1.30.2', date: '2026-04-26', title: 'Wearables — easier to discover',
-    items: [
-      '<b>Welcome screen now mentions wearables.</b> First-time visitors see a one-line "got an Oura / Withings / Fitbit / Polar / Apple Watch? Connect it" hint right under the import drop zone, so the feature isn\'t hidden until you scroll.',
-      '<b>Demo profiles connect a wearable.</b> Sarah loads with 90 days of Oura data telling an iron-deficiency / overtraining story (declining HRV, rising RHR, dropping steps, slight body-temp uptick); Alex loads with 90 days of Withings Body Scan showing a successful recomposition story (weight ↓, body fat ↓, muscle mass ↑, vascular age ↓, BP normalising). Click a demo card and the strip is live, not mocked.',
-      '<b>Chat onboarding asks about wearables.</b> The "extras" stage (alongside cycle / supplements / DNA) now asks if you wear a smartwatch and offers a one-click jump to Settings → Wearables.',
-    ]
-  },
-  {
-    version: '1.30.1', date: '2026-04-26', title: 'Withings — manually-entered readings now picked up',
-    items: [
-      '<b>Manual BP, weight, etc. now sync.</b> If you type a reading into the Withings app — including backfills from days past — it now shows up on the dashboard on the next sync. The fetcher switched to Withings\'s recommended <code>lastupdate</code> incremental query (anything modified since last sync), instead of a fixed time window that would miss retroactive entries.',
-      '<b>Forward-compatible measure types.</b> Dropped the per-measureType allowlist on the Withings request — any new metric your hardware emits flows through to the dashboard automatically (auto-hidden if no data), instead of being silently ignored until we update a constant. Thanks to <a href="https://github.com/marian001">@marian001</a> for the analysis (#144).',
-    ]
-  },
-  {
-    version: '1.30.0', date: '2026-04-25', title: 'Wearables — connect your devices, share with AI agents',
-    items: [
-      '<b>Five wearables.</b> Connect Oura, Fitbit, Withings, Polar, or Apple Health (file import). Or log weight / BP / resting HR by hand. HRV, sleep, recovery, biometrics show up in a single dashboard strip alongside your blood work. Withings users get full hardware coverage: every signal a Body Scan / ScanWatch / BPM produces — body composition, vascular age, PWV, SpO₂, body and skin temperature, sleep architecture (deep / light / REM / awake / breathing rate / snoring / apnea-class), and nerve health — surfaces automatically; cards stay hidden when your device doesn\'t measure that signal. (WHOOP and Ultrahuman support is built but private-beta only while we validate partner credentials.)',
-      '<b>Tap any card for detail.</b> 90-day chart, baselines, rolling averages, every individual reading. Multiple devices? Tap the <i>via Oura</i> / <i>via Fitbit</i> source badge to switch which one drives the card. Reorder via the ⇄ button.',
-      '<b>Overnight and daytime, separately.</b> HRV and heart rate split into recovery (overnight) and reactivity (daytime) — the AI can reason about both.',
-      '<b>AI chat sees a compact summary</b> by default. External agents (Hermes, OpenClaw, Claude Code, anything MCP) can connect via the new Agent Access tab — token, push controls, optional 7/30/90-day series for time-series reasoning.',
+      '<b>Five wearables, one dashboard.</b> Connect Oura, Fitbit, Withings, Polar, or Apple Health (file import). Or log weight / BP / resting HR by hand. HRV, sleep, recovery, body composition, blood pressure, steps — every signal your hardware produces surfaces in a single strip alongside your blood work. Withings users get the full Body Scan / ScanWatch / BPM picture: body fat %, muscle / bone / water mass, vascular age, PWV, SpO₂, body and skin temperature, sleep architecture (deep / light / REM / awake / breathing rate / snoring / apnea-class), nerve health — cards auto-hide when your device doesn\'t measure that signal. (WHOOP and Ultrahuman support is built but private-beta only while we validate partner credentials.)',
+      '<b>Tap any card for detail.</b> 90-day chart, baselines, rolling averages, every individual reading, manual-entry CRUD. Multiple devices? Tap the <i>via Oura</i> / <i>via Fitbit</i> source badge to switch which one drives the card. Reorder the strip via the ⇄ button — hold per profile, sync across devices.',
+      '<b>Overnight and daytime, separately.</b> HRV and heart rate split into recovery (overnight) and reactivity (daytime) so the AI can reason about both.',
+      '<b>AI chat sees a compact summary</b> by default. External agents (Hermes, OpenClaw, Claude Code, anything MCP) connect via the new Agent Access tab — token, push controls, optional 7 / 30 / 90-day series for time-series reasoning.',
+      '<b>Honest "as of {date}" dates.</b> If a metric\'s latest reading is older than its source\'s freshest reading (e.g. HRV from Oura\'s <code>/sleep</code> often lags daily_sleep by hours while the night\'s analysis finishes), the card surfaces the actual date so the value reads honestly. Hover for the explanation.',
       '<b>Privacy.</b> Raw daily samples never leave your device. Sync carries only the compact summary, encrypted end-to-end. OAuth tokens never sync — re-connect each device independently. Wearable storage is wrapped in AES-GCM when encryption-at-rest is enabled.',
-      '<b>Settings reorganised.</b> The old Integrations tab split into Wearables (your devices) and Agent Access (read permission for AI). See the user guide for the full setup walkthrough.',
+      '<b>Settings reorganised.</b> Old Integrations tab split into <b>Wearables</b> (your devices) and <b>Agent Access</b> (read permission for AI). See the <a href="https://getbased.health/docs/guide/wearables">user guide</a> for the full setup walkthrough.',
     ]
   },
   {
