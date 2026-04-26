@@ -206,12 +206,15 @@ return (async function() {
   // ─── Phase 15b: abort mid-ingest commits partial progress ───
   console.log('%c[15b] Abort mid-ingest', 'font-weight:bold');
   // Big batch so the embed loop runs long enough to race against the abort
-  // message. 40 files × ~8 chunks each = ~320 iterations; with the mock
-  // embedder each is a microtask, but macrotask boundaries between them
-  // give the 'abort' message a clear chance to land.
+  // message. With the mock embedder each chunk is a microtask, so we need
+  // enough macrotask boundaries between them for the 'abort' message to
+  // land. 40 files / 80 chunks finished before abort hit on fast CI runners
+  // (CI run #24952210745 / 2026-04-26 — 80/80 indexed, cancelled:false).
+  // Bumped to 200 files × ~25 chunks = ~5000 iterations so even the
+  // fastest CI thread has many yield opportunities before completion.
   const bigFiles = [];
-  for (let k = 0; k < 40; k++) {
-    bigFiles.push({ name: `abort-${k}.md`, text: 'lorem ipsum dolor sit amet. '.repeat(50) });
+  for (let k = 0; k < 200; k++) {
+    bigFiles.push({ name: `abort-${k}.md`, text: 'lorem ipsum dolor sit amet. '.repeat(150) });
   }
   const abortIngestDone = new Promise((resolve, reject) => {
     const onMsg = (e) => {
