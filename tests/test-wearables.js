@@ -386,6 +386,31 @@ return (async function() {
   assert('footer surfaces waiting hint for zero-coverage vendor', /Polar connected — waiting on first device sync/.test(mixedHtml));
   delete window._labState.importedData.wearableSummary;
 
+  // ── Per-metric staleness: when one metric's latestDate lags the source's
+  // freshest reading, the card surfaces an "as of {date}" hint. Mirrors the
+  // common Oura case where /sleep (HRV/RHR) processes hours-to-days after
+  // /daily_sleep (sleep_score). Regression guard against the "value reads
+  // fresh but is actually 2 days old" UX bug reported on v1.30.x.
+  const stalenessSummary = {
+    sources: { oura: { connectedSince: '2026-01-01', lastSyncAt: Date.now(), coverageDays: 90 } },
+    metrics: {
+      hrv_rmssd: { primarySource: 'oura', latest: 38, latestDate: '2026-04-22', baseline: 50, baselineP25: 42, baselineP75: 58, rolling: { d7: 38, d30: 45, d90: 50 }, trend30d: 'declining', weekly: [50, 48, 45, 42, 40, 38] },
+      sleep_score: { primarySource: 'oura', latest: 76, latestDate: '2026-04-24', baseline: 78, baselineP25: 73, baselineP75: 84, rolling: { d7: 76, d30: 78, d90: 78 }, trend30d: 'flat', weekly: [80, 79, 78, 77, 76, 76] },
+    },
+  };
+  window._labState.importedData.wearableSummary = stalenessSummary;
+  const stripStaleHtml = window.renderWearableStrip();
+  assert('Stale metric (HRV) gets "as of {date}" hint when its latestDate < source max',
+    /wearable-staleness[^>]*>\s*as of\s*[A-Z][a-z]+/.test(stripStaleHtml));
+  // Only one staleness hint should appear in the strip (HRV) — sleep_score's
+  // latestDate matches the source max, so its card must NOT carry a hint.
+  const stalenessHints = (stripStaleHtml.match(/wearable-staleness/g) || []).length;
+  assert('Exactly one staleness hint rendered (HRV stale, sleep_score fresh)',
+    stalenessHints === 1, `got ${stalenessHints}`);
+  assert('Staleness hint carries an explanatory tooltip on hover',
+    /wearable-staleness[^>]*title="[^"]+process/i.test(stripStaleHtml));
+  delete window._labState.importedData.wearableSummary;
+
   // ═══════════════════════════════════════
   // 9b. Detail modal
   // ═══════════════════════════════════════
@@ -1613,7 +1638,7 @@ return (async function() {
   // the SAME metric, which left HRV/Sleep/Steps with no source attribution.
   const wearablesSrc2 = await fetch('/js/wearables.js').then(r => r.text());
   assert('Strip passes showSourceBadges (whole-strip flag) into renderCard, not the per-metric provider count',
-    /renderCard\(metricId,\s*canon,\s*metric,\s*showSourceBadges\)/.test(wearablesSrc2));
+    /renderCard\(metricId,\s*canon,\s*metric,\s*showSourceBadges/.test(wearablesSrc2));
   assert('No leftover per-metric providersForMetric.length > 1 gate',
     !/providersForMetric\.length\s*>\s*1/.test(wearablesSrc2));
 

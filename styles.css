@@ -4246,6 +4246,11 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
   white-space: nowrap;
 }
+.wearable-staleness {
+  flex-basis: 100%; margin-top: 2px; font-size: 10px;
+  color: var(--text-muted); font-style: italic; white-space: nowrap;
+  cursor: help;
+}
 
 .wearable-sparkline {
   width: 100%; height: 32px; display: block;

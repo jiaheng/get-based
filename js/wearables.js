@@ -245,7 +245,16 @@ function renderEmptyManualCard(metricId, canon) {
   </div>`;
 }
 
-function renderCard(metricId, canon, metric, showSourceBadge) {
+// Format an ISO date (YYYY-MM-DD) as "Apr 24" for compact display next to a
+// metric value. Returns the raw input on parse failure.
+function shortDate(iso) {
+  if (!iso || typeof iso !== 'string') return iso || '';
+  const d = new Date(iso + 'T00:00:00Z');
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
+}
+
+function renderCard(metricId, canon, metric, showSourceBadge, sourceMaxDate) {
   const deltaCls = deltaClassFor(metric.latest, metric.baseline, canon.worseWhen);
   const deltaText = formatDelta(metric.latest, metric.baseline, metricId);
   // Space-prefix the sub so screen readers hear "HRV RMSSD" not "HRVRMSSD".
@@ -259,6 +268,15 @@ function renderCard(metricId, canon, metric, showSourceBadge) {
     ? (unitTight ? escapeHTML(canon.unit) : ' ' + escapeHTML(canon.unit))
     : '';
   const trendCls = trendClassFor(metric.trend30d, canon.worseWhen);
+  // Per-metric staleness: when this metric's latest sample is older than
+  // the freshest sample on its source (typically because the underlying
+  // endpoint has a processing delay — e.g. Oura's /usercollection/sleep
+  // populates HRV/RHR hours after /daily_sleep is up), surface an "as of
+  // {date}" hint so the value reads honestly rather than "fresh."
+  const isStale = metric.latestDate && sourceMaxDate && metric.latestDate < sourceMaxDate;
+  const stalenessHint = isStale
+    ? `<span class="wearable-staleness" title="Latest sample for this metric is from ${escapeHTML(metric.latestDate)} — your wearable hasn't published a more recent reading yet (some metrics process slower than others).">as of ${escapeHTML(shortDate(metric.latestDate))}</span>`
+    : '';
   const adapter = adapterById(metric.primarySource);
   // Source badge is interactive when >1 wearable is connected — click it to
   // open a small picker that overrides the primary source for this metric.
@@ -292,6 +310,7 @@ function renderCard(metricId, canon, metric, showSourceBadge) {
     <div class="wearable-value-row">
       <span class="wearable-value">${valueRead}</span>${unitLabel}
       <span class="wearable-baseline">baseline ${escapeHTML(String(metric.baseline))}${baselineUnit}</span>
+      ${stalenessHint}
     </div>
     ${sparklineSVG(metric.weekly, metric.baseline, canon.worseWhen)}
     <div class="wearable-card-bottom">
@@ -363,6 +382,18 @@ export function renderWearableStrip() {
 
   const reorderMode = !!state._wearableReorderMode;
 
+  // Per-source freshest latestDate across all metrics — lets the per-card
+  // renderer flag metrics whose latest sample is older than the source's
+  // own freshest reading (e.g. HRV from Oura's /sleep lags daily_sleep by
+  // hours-to-days while the night's session finishes processing).
+  const sourceMaxDate = {};
+  for (const m of Object.values(summary.metrics || {})) {
+    const src = m?.primarySource;
+    const d = m?.latestDate;
+    if (!src || !d) continue;
+    if (!sourceMaxDate[src] || d > sourceMaxDate[src]) sourceMaxDate[src] = d;
+  }
+
   // Header meta: most recent sync across connected sources + a short coverage label.
   const lastSyncAt = Math.max(0, ...sourceIds.map(s => summary.sources[s].lastSyncAt || 0));
   const coverageDays = Math.max(0, ...headerSourceIds.map(s => summary.sources[s].coverageDays || 0));
@@ -429,7 +460,7 @@ export function renderWearableStrip() {
       // can swap source per metric (auto-picker fallback when only one source
       // declares it). Single-source connections still hide the badge to avoid
       // redundancy with the header.
-      cardHtml = renderCard(metricId, canon, metric, showSourceBadges);
+      cardHtml = renderCard(metricId, canon, metric, showSourceBadges, sourceMaxDate[metric.primarySource]);
     }
     if (reorderMode) {
       const canLeft = i > 0;

@@ -5,6 +5,12 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.30.3', date: '2026-04-26', title: 'Wearables — honest "as of" dates on stale metrics',
+    items: [
+      '<b>Strip cards now show when a metric\'s latest reading actually is.</b> If HRV from your Oura ring is still showing yesterday\'s value because the <code>/sleep</code> endpoint hasn\'t finished processing tonight\'s data (a common 12–48h lag), the card now shows "as of Apr 24" so the value reads honestly instead of looking fresh while sync says "synced 2 minutes ago." Hover for an explanation. The hint only appears when one metric on a source lags the others — fully-fresh sources read clean.',
+    ]
+  },
+  {
     version: '1.30.2', date: '2026-04-26', title: 'Wearables — easier to discover',
     items: [
       '<b>Welcome screen now mentions wearables.</b> First-time visitors see a one-line "got an Oura / Withings / Fitbit / Polar / Apple Watch? Connect it" hint right under the import drop zone, so the feature isn\'t hidden until you scroll.',
