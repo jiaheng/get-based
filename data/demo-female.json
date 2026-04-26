@@ -2265,5 +2265,64 @@
     }
   },
   "changeHistory": [],
-  "markerNotes": {}
+  "markerNotes": {},
+  "wearableSummary": {
+    "sources": {
+      "oura": {
+        "connectedSince": "2025-12-15",
+        "lastSyncAt": 1745510400000,
+        "coverageDays": 90
+      }
+    },
+    "metrics": {
+      "hrv_rmssd": {
+        "primarySource": "oura",
+        "latest": 36, "latestDate": "2026-04-22",
+        "baseline": 51, "baselineP25": 42, "baselineP75": 62,
+        "rolling": { "d7": 36, "d30": 44, "d90": 51 },
+        "trend30d": "declining",
+        "weekly": [54, 53, 55, 52, 53, 51, 49, 47, 44, 41, 38, 36]
+      },
+      "rhr": {
+        "primarySource": "oura",
+        "latest": 64, "latestDate": "2026-04-22",
+        "baseline": 58, "baselineP25": 56, "baselineP75": 61,
+        "rolling": { "d7": 64, "d30": 60, "d90": 58 },
+        "trend30d": "rising",
+        "weekly": [57, 58, 57, 58, 58, 59, 60, 61, 62, 63, 63, 64]
+      },
+      "sleep_score": {
+        "primarySource": "oura",
+        "latest": 72, "latestDate": "2026-04-22",
+        "baseline": 81, "baselineP25": 75, "baselineP75": 86,
+        "rolling": { "d7": 72, "d30": 78, "d90": 81 },
+        "trend30d": "declining",
+        "weekly": [83, 84, 82, 85, 83, 82, 80, 78, 76, 74, 73, 72]
+      },
+      "readiness_score": {
+        "primarySource": "oura",
+        "latest": 68, "latestDate": "2026-04-22",
+        "baseline": 80, "baselineP25": 75, "baselineP75": 87,
+        "rolling": { "d7": 68, "d30": 76, "d90": 80 },
+        "trend30d": "declining",
+        "weekly": [82, 84, 81, 83, 82, 81, 79, 76, 73, 71, 69, 68]
+      },
+      "body_temp_delta": {
+        "primarySource": "oura",
+        "latest": 0.5, "latestDate": "2026-04-22",
+        "baseline": -0.05, "baselineP25": -0.2, "baselineP75": 0.15,
+        "rolling": { "d7": 0.4, "d30": 0.1, "d90": -0.05 },
+        "trend30d": "rising",
+        "weekly": [-0.1, 0, -0.1, 0.1, 0, 0.1, 0.2, 0.3, 0.4, 0.4, 0.5, 0.5]
+      },
+      "steps": {
+        "primarySource": "oura",
+        "latest": 4200, "latestDate": "2026-04-22",
+        "baseline": 7800, "baselineP25": 6200, "baselineP75": 9400,
+        "rolling": { "d7": 4500, "d30": 6900, "d90": 7800 },
+        "trend30d": "declining",
+        "weekly": [8200, 8500, 7900, 8800, 8100, 7600, 7000, 6400, 5500, 4800, 4400, 4200]
+      }
+    }
+  }
 }

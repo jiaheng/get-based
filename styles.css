@@ -3145,6 +3145,13 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
 .welcome-sex-btn:hover { border-color: var(--accent); color: var(--text-primary); }
 .welcome-sex-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 .welcome-hero .drop-zone { margin-bottom: 0; }
+.welcome-wearable-hint {
+  margin-top: 14px; padding: 10px 14px; font-size: 13px; line-height: 1.5;
+  color: var(--text-secondary); background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); text-align: left;
+}
+.welcome-wearable-hint a { color: var(--accent); text-decoration: none; font-weight: 500; }
+.welcome-wearable-hint a:hover { text-decoration: underline; }
 .welcome-context-details { margin-top: 20px; }
 .welcome-context-summary {
   display: block; padding: 14px 18px; font-size: 14px; color: var(--text-secondary);

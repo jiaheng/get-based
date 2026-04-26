@@ -55,12 +55,15 @@ export function showDashboard(data) {
   if (!hasData) {
     let html = `<div class="welcome-hero">
       <h2>Welcome to getbased</h2>
-      <p class="welcome-hero-subtitle">Track your biomarkers, understand your health</p>
+      <p class="welcome-hero-subtitle">Lab work + wearables, in one dashboard</p>
       <div class="drop-zone" id="drop-zone">
         <div class="drop-zone-icon">\uD83D\uDCC4</div>
         <div class="drop-zone-text">Drop PDF, image, JSON, or DNA raw data file here, or click to browse</div>
         <div class="drop-zone-hint">AI-powered — works with any lab report (PDF, photo, screenshot) or getbased JSON export</div>
         ${!hasAIProvider() ? `<div class="drop-zone-api-hint">${isAIPaused() ? 'AI features are paused — <a href="#" onclick="event.preventDefault();event.stopPropagation();window.openSettingsModal(\'ai\')">re-enable in Settings</a>' : 'Requires an AI connection — <a href="#" onclick="event.preventDefault();event.stopPropagation();closeChatPanel();window.openSettingsModal(\'ai\')">set up in 30 seconds</a>'}</div>` : ''}</div>
+      <div class="welcome-wearable-hint">
+        ⧬ Got an Oura, Withings, Fitbit, Polar, or Apple Watch? <a href="#" onclick="event.preventDefault();window.openSettingsModal('wearables')">Connect it</a> to see HRV, sleep, recovery, and body composition trends alongside your blood work.
+      </div>
       <div class="onboarding-divider">
         <span class="onboarding-divider-line"></span>
         <span class="onboarding-divider-text">or explore with demo data</span>
@@ -70,12 +73,12 @@ export function showDashboard(data) {
         <button class="demo-card" onclick="loadDemoData('female')">
           <span class="demo-card-avatar">\uD83D\uDC69</span>
           <span class="demo-card-name">Sarah, 34</span>
-          <span class="demo-card-desc">Iron & hormones story</span>
+          <span class="demo-card-desc">Iron + Oura: overtraining clues</span>
         </button>
         <button class="demo-card" onclick="loadDemoData('male')">
           <span class="demo-card-avatar">\uD83D\uDC68</span>
           <span class="demo-card-name">Alex, 38</span>
-          <span class="demo-card-desc">Metabolic health journey</span>
+          <span class="demo-card-desc">Metabolic + Withings body comp</span>
         </button>
       </div>
     </div>`;

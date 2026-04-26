@@ -5,6 +5,14 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.30.2', date: '2026-04-26', title: 'Wearables — easier to discover',
+    items: [
+      '<b>Welcome screen now mentions wearables.</b> First-time visitors see a one-line "got an Oura / Withings / Fitbit / Polar / Apple Watch? Connect it" hint right under the import drop zone, so the feature isn\'t hidden until you scroll.',
+      '<b>Demo profiles connect a wearable.</b> Sarah loads with 90 days of Oura data telling an iron-deficiency / overtraining story (declining HRV, rising RHR, dropping steps, slight body-temp uptick); Alex loads with 90 days of Withings Body Scan showing a successful recomposition story (weight ↓, body fat ↓, muscle mass ↑, vascular age ↓, BP normalising). Click a demo card and the strip is live, not mocked.',
+      '<b>Chat onboarding asks about wearables.</b> The "extras" stage (alongside cycle / supplements / DNA) now asks if you wear a smartwatch and offers a one-click jump to Settings → Wearables.',
+    ]
+  },
+  {
     version: '1.30.1', date: '2026-04-26', title: 'Withings — manually-entered readings now picked up',
     items: [
       '<b>Manual BP, weight, etc. now sync.</b> If you type a reading into the Withings app — including backfills from days past — it now shows up on the dashboard on the next sync. The fetcher switched to Withings\'s recommended <code>lastupdate</code> incremental query (anything modified since last sync), instead of a fixed time window that would miss retroactive entries.',
