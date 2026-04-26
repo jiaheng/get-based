@@ -292,7 +292,7 @@ async function callWithRefresh(adapter, fetcher) {
   }
 }
 
-async function fetchRange(adapter, startDate, endDate) {
+async function fetchRange(adapter, startDate, endDate, opts = {}) {
   if (adapter.id === 'oura') {
     return callWithRefresh(adapter, (token) => fetchOuraDailyRange(token, startDate, endDate));
   }
@@ -300,7 +300,7 @@ async function fetchRange(adapter, startDate, endDate) {
     return callWithRefresh(adapter, (token) => fetchWhoopDailyRange(token, startDate, endDate));
   }
   if (adapter.id === 'withings') {
-    return callWithRefresh(adapter, (token) => fetchWithingsDailyRange(token, startDate, endDate));
+    return callWithRefresh(adapter, (token) => fetchWithingsDailyRange(token, startDate, endDate, opts.lastSyncUnix ?? null));
   }
   if (adapter.id === 'ultrahuman') {
     return callWithRefresh(adapter, (token) => fetchUltrahumanDailyRange(token, startDate, endDate));
@@ -378,7 +378,10 @@ export async function incrementalSyncWearable(adapterId) {
   const endDate = isoDay();
 
   const adapter = adapterById(adapterId);
-  const rows = await fetchRange(adapter, startDate, endDate);
+  // Pass `lastSyncUnix` so adapters that support incremental fetch (Withings)
+  // can ask the API for "anything modified since" instead of a fixed window —
+  // catches retroactive manual entries (BP backfilled a week later, etc.).
+  const rows = await fetchRange(adapter, startDate, endDate, { lastSyncUnix: lastSync?.at || conn.lastSyncAt || null });
   if (rows.length > 0) await upsertDailyBatch(profileId, rows);
   // Snapshot connection (see backfillWearable) — profile-swap mid-flight
   // safety.

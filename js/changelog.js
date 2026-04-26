@@ -5,6 +5,13 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.30.1', date: '2026-04-26', title: 'Withings — manually-entered readings now picked up',
+    items: [
+      '<b>Manual BP, weight, etc. now sync.</b> If you type a reading into the Withings app — including backfills from days past — it now shows up on the dashboard on the next sync. The fetcher switched to Withings\'s recommended <code>lastupdate</code> incremental query (anything modified since last sync), instead of a fixed time window that would miss retroactive entries.',
+      '<b>Forward-compatible measure types.</b> Dropped the per-measureType allowlist on the Withings request — any new metric your hardware emits flows through to the dashboard automatically (auto-hidden if no data), instead of being silently ignored until we update a constant. Thanks to <a href="https://github.com/marian001">@marian001</a> for the analysis (#144).',
+    ]
+  },
+  {
     version: '1.30.0', date: '2026-04-25', title: 'Wearables — connect your devices, share with AI agents',
     items: [
       '<b>Five wearables.</b> Connect Oura, Fitbit, Withings, Polar, or Apple Health (file import). Or log weight / BP / resting HR by hand. HRV, sleep, recovery, biometrics show up in a single dashboard strip alongside your blood work. Withings users get full hardware coverage: every signal a Body Scan / ScanWatch / BPM produces — body composition, vascular age, PWV, SpO₂, body and skin temperature, sleep architecture (deep / light / REM / awake / breathing rate / snoring / apnea-class), and nerve health — surfaces automatically; cards stay hidden when your device doesn\'t measure that signal. (WHOOP and Ultrahuman support is built but private-beta only while we validate partner credentials.)',

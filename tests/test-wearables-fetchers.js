@@ -36,7 +36,7 @@ return (async function() {
     }
     let body = {};
     try { body = JSON.parse(init?.body || '{}'); } catch {}
-    calls.push({ url: body.url, method: body.method, headers: body.headers });
+    calls.push({ url: body.url, method: body.method, headers: body.headers, body: body.body });
     for (const r of routes) {
       const ok = (typeof r.matcher === 'string') ? body.url?.includes(r.matcher) : r.matcher.test(body.url || '');
       if (ok) {
@@ -206,13 +206,12 @@ return (async function() {
         body: {
           measuregrps: [{
             date: 1776902400, // 2026-04-23 UTC (Date.UTC(2026, 3, 23) / 1000)
+            attrib: 0,        // 0 = device-uploaded
             measures: [
               { type: 1, value: 723, unit: -1 },   // 72.3 kg weight
               { type: 5, value: 590, unit: -1 },   // 59.0 kg lean (fat-free) mass
               { type: 6, value: 184, unit: -1 },   // 18.4% body fat
               { type: 8, value: 133, unit: -1 },   // 13.3 kg fat mass (#143 follow-up)
-              { type: 9, value: 78, unit: 0 },     // BP dia 78
-              { type: 10, value: 122, unit: 0 },   // BP sys 122
               { type: 11, value: 71, unit: 0 },    // pulse 71 → hr_day
               { type: 54, value: 96, unit: 0 },    // SpO2 96%
               { type: 71, value: 365, unit: -1 },  // 36.5 °C body temp
@@ -225,6 +224,19 @@ return (async function() {
               { type: 167, value: 8, unit: 0 },    // visceral fat index 8
               { type: 168, value: 71, unit: 0 },   // nerve health score 71
               { type: 169, value: 47, unit: 0 },   // cardio fitness 47
+              { type: 78, value: 999, unit: 0 },   // unknown measType — must be silently ignored, not crash (#144)
+            ],
+          }, {
+            // Manually-entered BP from the Withings app — `attrib: 2`. Withings
+            // returns these in the same `category=1` response as device uploads;
+            // the parser must NOT filter on attrib. Same date as the group above
+            // so both write to the same row. (Issue #144 / Marian's PR #118
+            // analysis: this is the regression we're guarding against.)
+            date: 1776902400,
+            attrib: 2,
+            measures: [
+              { type: 9, value: 78, unit: 0 },    // BP dia 78 — manually entered
+              { type: 10, value: 122, unit: 0 },  // BP sys 122 — manually entered
             ],
           }],
         },
@@ -254,8 +266,9 @@ return (async function() {
     const r = rows.find(x => x.date === '2026-04-23');
     assert('Withings row tagged source: withings', r?.source === 'withings');
     assert('Withings weight decoded with unit-shift (723 × 10^-1 = 72.3 kg)', r?.weight === 72.3);
-    assert('Withings BP systolic from measType 10', r?.bp_systolic === 122);
-    assert('Withings BP diastolic from measType 9', r?.bp_diastolic === 78);
+    assert('Withings BP systolic from measType 10 (manually-entered, attrib=2)', r?.bp_systolic === 122);
+    assert('Withings BP diastolic from measType 9 (manually-entered, attrib=2)', r?.bp_diastolic === 78);
+    assert('Withings unknown measType 78 silently dropped (no crash, no leak — #144)', !('type_78' in (r || {})));
     assert('Withings hr_day from scale pulse (measType 11) — NOT rhr', r?.hr_day === 71);
     assert('Withings rhr from sleep summary hr_min (true overnight RHR)', r?.rhr === 55);
     assert('Withings sleep_score from sleep summary', r?.sleep_score === 76);
@@ -300,6 +313,44 @@ return (async function() {
     assert('Withings status:100 (token invalid) handled without crashing the whole fetch',
       err === null || /token|expired|reconnect/i.test(err.message || ''),
       err ? `error: ${err.message}` : `rows: ${rows.length}`);
+  } finally { restoreFetch(); }
+
+  // Incremental sync: when lastSyncUnix is provided, /measure must be called
+  // with `lastupdate=<sec>` (Withings's recommended approach for catching
+  // retroactive manual entries — issue #144), and the `meastypes` allowlist
+  // must NOT be sent (we filter client-side via MEAS_TYPES instead).
+  try {
+    installMocks([
+      { matcher: /\/measure$/, body: { status: 0, body: { measuregrps: [] } }},
+      { matcher: /\/v2\/sleep$/, body: { status: 0, body: { series: [] } }},
+    ]);
+    const lastSyncMs = Date.UTC(2026, 3, 22, 12, 0, 0); // 2026-04-22T12:00Z
+    await withings.fetchWithingsDailyRange('test-token', '2026-04-23', '2026-04-23', lastSyncMs);
+    const measCall = calls.find(c => /\/measure$/.test(c.url || ''));
+    const params = new URLSearchParams(measCall?.body || '');
+    assert('Withings incremental: /measure called with lastupdate (seconds)',
+      params.get('lastupdate') === String(Math.floor(lastSyncMs / 1000)),
+      `lastupdate=${params.get('lastupdate')}`);
+    assert('Withings incremental: startdate/enddate NOT sent when lastupdate is',
+      !params.has('startdate') && !params.has('enddate'));
+    assert('Withings incremental: meastypes allowlist dropped (client-side filter via MEAS_TYPES)',
+      !params.has('meastypes'));
+    assert('Withings incremental: category=1 still sent (excludes user goals/objectives)',
+      params.get('category') === '1');
+  } finally { restoreFetch(); }
+
+  // First-sync (no lastSyncUnix): falls back to startdate/enddate window.
+  try {
+    installMocks([
+      { matcher: /\/measure$/, body: { status: 0, body: { measuregrps: [] } }},
+      { matcher: /\/v2\/sleep$/, body: { status: 0, body: { series: [] } }},
+    ]);
+    await withings.fetchWithingsDailyRange('test-token', '2026-04-23', '2026-04-23');
+    const measCall = calls.find(c => /\/measure$/.test(c.url || ''));
+    const params = new URLSearchParams(measCall?.body || '');
+    assert('Withings first-sync: startdate/enddate window used (no lastSyncUnix)',
+      params.has('startdate') && params.has('enddate'));
+    assert('Withings first-sync: lastupdate NOT sent', !params.has('lastupdate'));
   } finally { restoreFetch(); }
 
   // ═══════════════════════════════════════

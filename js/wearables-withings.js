@@ -200,18 +200,29 @@ export async function fetchWithingsPersonalInfo(accessToken) {
   }
 }
 
-export async function fetchWithingsDailyRange(accessToken, startDate, endDate) {
+export async function fetchWithingsDailyRange(accessToken, startDate, endDate, lastSyncUnix = null) {
   const startUnix = Math.floor(new Date(startDate + 'T00:00:00Z').getTime() / 1000);
   const endUnix   = Math.floor(new Date(endDate + 'T23:59:59Z').getTime() / 1000);
+
+  // /measure params:
+  //   - lastupdate: anything modified since this epoch (incremental; catches
+  //     retroactive manual entries — Withings stamps `date` = when the
+  //     reading happened, but bumps the modify-time when typed). Withings's
+  //     own integration guide flags this as the recommended approach.
+  //   - startdate/enddate: fixed window, used for first-sync backfill only.
+  // We drop `meastypes` deliberately: the MEAS_TYPES lookup below already
+  // filters client-side, and omitting the param makes us forward-compatible
+  // with new Withings measTypes (instead of silently dropping them until
+  // the constant is updated).
+  const measParams = lastSyncUnix
+    ? { lastupdate: String(Math.floor(lastSyncUnix / 1000)), category: '1' }
+    : { startdate: String(startUnix), enddate: String(endUnix), category: '1' };
 
   // Fetch in parallel: body measures (weight, BP, pulse), sleep summary.
   // Heartrate list is per-device and noisy; deferring to a follow-up.
   const [meas, sleep] = await Promise.all([
-    withingsPOST('getmeas', accessToken, {
-      startdate: String(startUnix), enddate: String(endUnix),
-      meastypes: Object.keys(MEAS_TYPES).join(','),
-      category: '1', // 1 = real measures (not user objectives)
-    }).catch(e => { logDebug('getmeas', e); return {}; }),
+    withingsPOST('getmeas', accessToken, measParams)
+      .catch(e => { logDebug('getmeas', e); return {}; }),
     withingsPOST('getsleepsummary', accessToken, {
       startdateymd: startDate, enddateymd: endDate,
       data_fields: SLEEP_DATA_FIELDS,
