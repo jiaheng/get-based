@@ -23,7 +23,7 @@ If you have more than one source for a metric, tap the small *via {vendor}* badg
 
 ## How to connect
 
-Settings → Integrations → click **Connect** on a vendor row.
+Settings → Wearables → click **Connect** on a vendor row.
 
 The OAuth-based vendors open the vendor's authorise page. After you approve, you're redirected back and the integration syncs the last 90 days. Your raw daily rows live in your browser's IndexedDB (per-profile, source-tagged); a compact summary feeds the dashboard cards.
 
@@ -31,7 +31,7 @@ The OAuth-based vendors open the vendor's authorise page. After you approve, you
 
 1. iPhone → **Health** app → tap your profile photo (top right) → **Export All Health Data**
 2. AirDrop or email the `export.zip` to your computer
-3. Drop the zip onto the Apple Health row in Settings → Integrations
+3. Drop the zip onto the Apple Health row in Settings → Wearables
 
 Parsing runs entirely in your browser — no server contact.
 
@@ -41,14 +41,14 @@ Weight, blood pressure, and resting heart rate can be logged without any wearabl
 
 **To log a reading:**
 
-1. Tap the empty card (e.g. the `Weight –` card with a `+ log` affordance at the bottom)
+1. Tap the empty card (e.g. the `Weight –` card with a `+ Log` affordance at the bottom)
 2. Type the number into the inline input (weight in kg, BP as sys/dia/optional pulse, RHR in bpm)
 3. Optionally tap one of the **context chips** — `resting`, `morning-fasted`, `post-workout`, `stress`. These help the AI interpret the number correctly (a BP of 140/90 resting is very different from 140/90 post-workout).
 4. Hit **Enter** or tap **Save**. The card populates; the reading appears with a *via Manual* badge.
 
 **To manage past readings:** tap any card to open its detail modal. Scroll down past the chart + stats — you'll see a **Manual entries** list showing every reading you've logged for that metric, with a **×** delete button on each row and a **+ Add reading** button at the top that accepts backfilled dates. Fix a typo by deleting the old reading and logging the correct value — edits are "delete + re-add" rather than in-place for simplicity.
 
-**To delete everything:** Settings → Integrations → expand the **Manual** row → **Delete all manual entries**. Wearable data from Oura / Withings / etc. is untouched.
+**To delete everything:** Settings → Wearables → expand the **Manual** row → **Delete all manual entries**. Wearable data from Oura / Withings / etc. is untouched.
 
 Manual entries sync to your other devices via the same Evolu CRDT summary layer as wearable data — the raw readings stay local, only a compact summary propagates.
 
@@ -58,7 +58,7 @@ Manual entries sync to your other devices via the same Evolu CRDT summary layer 
 - **Compact summary** (the L2 dashboard data) syncs to your other devices via Evolu CRDT (E2E encrypted, mnemonic-based identity).
 - **OAuth refresh tokens stay local.** They are *not* synced — you re-connect on each device.
 - **AI chat context** includes a ~200-token wearable summary by default. Toggle it off in Settings → AI → AI Context.
-- **Personal Agent (MCP)** does NOT currently expose wearable data.
+- **Personal Agent (MCP)** receives the same compact summary by default. Optionally enable a 30-day pivoted daily series in Settings → Agent Access → "Push 30-day wearable series" for time-series reasoning ("did HRV drop the week before I got sick?"). See [Agent Access](agent-access.md).
 
 ## Multi-vendor metric ownership
 
@@ -70,9 +70,20 @@ When two vendors expose the same metric (Oura HRV vs Fitbit HRV vs WHOOP HRV), t
 
 Vendors that uniquely provide a metric (only Withings does weight) don't show a badge.
 
+## Sync controls
+
+Each connected vendor row in Settings → Wearables has two sync buttons:
+
+- **Sync now (catches today)** — fast, refetches the last 7 days. Use this when you've added a new reading on your wearable and want it on the dashboard now. Bypasses the L2 write-minimization gate so the strip never appears stuck.
+- **Backfill 90 days (slower, fills gaps)** — refetches the full 90-day window. Use this if you've been away from a device for a while, switched devices, or notice a gap in the chart. Slower (subject to vendor rate limits — 30s+ for some vendors).
+
+Background sync runs every 6 hours when the tab is open and uses the same 7-day window — your dashboard typically catches up automatically; the manual buttons are for impatient cases.
+
+For the "as of {date}" hint that sometimes appears on a card: it means that metric's most recent reading is older than other metrics from the same source — usually the vendor's processing pipeline hasn't finished writing the latest value yet (Oura's HRV often lags their sleep score by hours). Hover for the explanation; the value is honest, not stale-from-our-side.
+
 ## Troubleshooting
 
-- **"Polar connected — waiting on first device sync"** — your Polar account exists and the OAuth handshake worked, but no device has uploaded data to Polar Flow yet (or all available data has been synced + committed already). Open the Polar app on your phone and sync your watch, then try Re-sync.
+- **"Polar connected — waiting on first device sync"** — your Polar account exists and the OAuth handshake worked, but no device has uploaded data to Polar Flow yet (or all available data has been synced + committed already). Open the Polar app on your phone and sync your watch, then click **Sync now**.
 - **"needs reconnection" pill** — refresh token expired or revoked. Click Reconnect.
 - **Wearable not in the dropdown when picking a metric source** — the vendor doesn't expose that canonical metric (e.g. WHOOP doesn't do `weight`, Withings doesn't do `hrv_rmssd`).
 - **Apple Health import is slow** — the XML can be 100 MB+ for multi-year history. Parsing happens in-browser; expect 30–60 seconds for large exports.

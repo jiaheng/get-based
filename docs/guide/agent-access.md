@@ -116,7 +116,7 @@ getbased_section('wearables', profile='Main')
 
 #### 30-day daily series (opt-in, ~400 tokens)
 
-For time-series reasoning ("did HRV drop the week before I got sick?"), the always-on summary isn't enough. Open **Settings → Integrations → Agent Access** and turn on **"Push 30-day wearable series"**. The browser then writes a pivoted matrix into a separate section:
+For time-series reasoning ("did HRV drop the week before I got sick?"), the always-on summary isn't enough. Open **Settings → Agent Access** and turn on **"Push 30-day wearable series"**. The browser then writes a pivoted matrix into a separate section:
 
 ```
 getbased_section('wearables-series-30d', profile='Main')

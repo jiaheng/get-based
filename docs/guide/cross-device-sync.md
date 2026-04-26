@@ -60,6 +60,14 @@ Wearables follow a deliberate split:
 
 Profile delete drops the per-device wearable IndexedDB along with the localStorage data. Auto-backup and folder-backup capture the full wearable IDB so a restore round-trips your raw history.
 
+## Profile deletion across devices
+
+When you delete a profile, getbased tombstones the corresponding row on the relay (`isDeleted: 1`). On the next pull, every other paired device sees the tombstone and wipes its local copy automatically — single-profile deletes propagate without prompting.
+
+For batched deletes (≥ 2 profiles tombstoned at once), the receiving device quarantines the wipe and surfaces a confirm UI in **Settings → Sync**. You'll see a row per pending tombstone with **Apply delete** and **Restore** buttons. This is a defence against a leaked mnemonic — an attacker publishing tombstones for every profileId would otherwise silently wipe all paired devices on next pull. The threshold (2) is conservative; bump it in `js/sync.js:TOMBSTONE_BATCH_THRESHOLD` if your workflow legitimately involves frequent multi-profile cleanup.
+
+**To reject a quarantined tombstone**, click **Restore** — getbased re-publishes the local profile data, which beats the tombstone in CRDT last-write-wins on the next pull. To accept, click **Apply delete** — the local wipe runs (localStorage + wearable IDB) and the entry clears.
+
 ## Mnemonic Security
 
 Your mnemonic is your encryption key. getbased takes several precautions:
