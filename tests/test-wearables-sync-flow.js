@@ -172,6 +172,41 @@ return (async function() {
       `observed start_date=${observedStart}`);
   } finally { restore(); }
 
+  // 3b. Force-mode incrementalSync — when the user clicks "Sync now" we
+  // pass force:true so the window is at least 7 days back. Without this,
+  // a same-day re-sync collapsed to [today, today] and Oura's /sleep
+  // sometimes returned no rows (observed bug: strip "Sync now" did
+  // nothing while Settings → "Re-sync 90 days" caught the missing data).
+  try {
+    let observedStartForce = null;
+    installRoutes([
+      { matcher: 'usercollection/sleep', body: { data: [], next_token: null }},
+      { matcher: /heartrate.*start_datetime/, body: { data: [], next_token: null }},
+      { matcher: /usercollection\//, body: { data: [], next_token: null }},
+    ]);
+    // Pretend user already synced today — lastSync.endDate is today, so
+    // the non-force window would be [today, today].
+    const todayIso = new Date().toISOString().slice(0, 10);
+    await store.setMeta(TEST_PROFILE_ID, 'last-sync:oura', { at: Date.now(), rows: 5, startDate: todayIso, endDate: todayIso });
+    const origMockFetch2 = window.fetch;
+    window.fetch = (input, init) => {
+      if (input === '/api/proxy' && observedStartForce === null) {
+        try {
+          const body = JSON.parse(init.body);
+          const m = body.url?.match(/start_date=(\d{4}-\d{2}-\d{2})/);
+          if (m) observedStartForce = m[1];
+        } catch {}
+      }
+      return origMockFetch2.call(window, input, init);
+    };
+    await connect.incrementalSyncWearable('oura', { force: true });
+    // 7 days back from today (UTC). Allow a 1-day fudge for runs spanning midnight.
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    assert('Force-mode expands start_date to ≥ 7 days back even when lastSync.endDate is today',
+      observedStartForce !== null && observedStartForce <= sevenDaysAgo,
+      `observed start_date=${observedStartForce}, expected ≤ ${sevenDaysAgo}`);
+  } finally { restore(); }
+
   // ═══════════════════════════════════════
   // 4. backfill error recovery — rows write even when one endpoint 500s
   // ═══════════════════════════════════════

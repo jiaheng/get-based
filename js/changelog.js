@@ -5,6 +5,12 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.30.7', date: '2026-04-26', title: 'Wearables — Sync now button now refetches a 7-day window',
+    items: [
+      '<b>The strip\'s "Sync now" button now actually fetches fresh data</b> when you click it twice on the same day. The bug was a too-aggressive incremental window: <code>lastSync.endDate</code> was set to today by the first sync, so the second sync requested a <code>[today, today]</code> window from Oura\'s <code>/sleep</code>, which (for reasons internal to Oura) sometimes returned no rows. The Settings → "Re-sync last 90 days" path always worked because it re-fetches a wide window. Now the manual <i>Sync now</i> button forces a 7-day window even when <code>lastSync.endDate</code> is today, overlapping with already-synced data so any session Oura is willing to return is captured. Background scheduler still uses the narrow window — the Evolu write budget stays small.',
+    ]
+  },
+  {
     version: '1.30.6', date: '2026-04-26', title: 'Wearables — manual sync always refreshes the strip',
     items: [
       '<b>Manual "sync now" now bypasses the L2 write gate</b> so the strip can\'t appear stuck on a stale snapshot. Background scheduled syncs still go through the gate (preserves the few-writes-per-month Evolu sync budget); only user-initiated clicks force a refresh. Closes the loop on the v1.30.x "HRV/RHR show 2-day-old data" report — pairs with the v1.30.5 latest-advanced gate trigger and the v1.30.4 Oura time-series fallback. After this build, click <i>sync now</i> once and the strip will catch up to whatever is in your Oura cloud (HRV/RHR included).',

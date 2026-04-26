@@ -367,14 +367,29 @@ async function commitAfterWriteIfAny(adapterId, rows, connSnapshot) {
 
 // Incremental sync — pull from the last successful sync day (or 7d back,
 // whichever is earlier, so a missed day gets backfilled).
-export async function incrementalSyncWearable(adapterId) {
+export async function incrementalSyncWearable(adapterId, { force = false } = {}) {
   const conn = getConnection(adapterId);
   if (!conn?.accessToken) return { skipped: true, reason: 'not-connected' };
   const profileId = getActiveProfileId();
 
   const lastSync = await getMeta(profileId, `last-sync:${adapterId}`);
   const fallbackStart = daysAgoIso(7);
-  const startDate = (lastSync?.endDate && lastSync.endDate < fallbackStart) ? fallbackStart : (lastSync?.endDate || daysAgoIso(BACKFILL_DAYS));
+  // Manual sync clicks pass force:true → always use at least a 7-day
+  // window. When `lastSync.endDate` is already today (because the user
+  // synced earlier the same day), the previous `[today, today]` window
+  // sometimes returns no rows from Oura's /sleep — observed bug where
+  // strip's "Sync now" did nothing while Settings → "Re-sync last 90
+  // days" caught the missing HRV/RHR. The wider window overlaps with
+  // already-synced data; upsertDailyBatch is idempotent so the cost is
+  // a few extra rows fetched once per click.
+  let startDate;
+  if (force) {
+    startDate = fallbackStart;
+  } else if (lastSync?.endDate && lastSync.endDate < fallbackStart) {
+    startDate = fallbackStart;
+  } else {
+    startDate = lastSync?.endDate || daysAgoIso(BACKFILL_DAYS);
+  }
   const endDate = isoDay();
 
   const adapter = adapterById(adapterId);
@@ -428,7 +443,7 @@ export async function disconnectWearable(adapterId, { deleteData = true } = {}) 
 export async function syncNow(adapterId, { force = false } = {}) {
   const profileId = getActiveProfileId();
   try {
-    const res = await incrementalSyncWearable(adapterId);
+    const res = await incrementalSyncWearable(adapterId, { force });
     if (res.skipped) return res;
     // Manual user-driven syncs pass `force: true` so the L2 gate (which
     // skips writes when the d7 mean / trend / weekly delta haven't moved
