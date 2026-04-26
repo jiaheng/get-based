@@ -186,7 +186,26 @@ body {
 .app-footer-version { font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); opacity: 0.6; }
 .app-footer-version a { color: var(--text-muted); text-decoration: none; }
 .app-footer-version a:hover { color: var(--accent); text-decoration: underline; }
-.app-footer-disclaimer { font-size: 11px; color: var(--text-muted); text-align: center; max-width: 1200px; margin: 12px auto 0; line-height: 1.5; }
+.app-footer-fineprint {
+  max-width: 1200px; margin: 16px auto 0;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  text-align: center;
+}
+.app-footer-disclaimer {
+  font-size: 11px; color: var(--text-muted); line-height: 1.55; margin: 0;
+}
+.app-footer-trademarks {
+  font-size: 10.5px; color: var(--text-muted); opacity: 0.75;
+  line-height: 1.55; margin: 0; max-width: 760px; letter-spacing: 0.01em;
+}
+.app-footer-legal {
+  font-size: 11px; color: var(--text-muted); margin: 0;
+  display: flex; flex-wrap: wrap; gap: 8px 12px;
+  justify-content: center; align-items: center;
+}
+.app-footer-legal a { color: var(--text-muted); text-decoration: none; transition: color 0.15s; }
+.app-footer-legal a:hover { color: var(--accent); }
+.app-footer-sep { opacity: 0.5; }
 .category-header { margin-bottom: 24px; }
 .category-header h2 {
   font-family: var(--font-display); font-size: 24px; font-weight: 700; letter-spacing: -0.3px;
