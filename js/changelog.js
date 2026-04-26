@@ -821,14 +821,31 @@ function markChangelogSeen() {
 
 // Changelog items are authored in source code (CHANGELOG above) — trusted.
 // We escape everything by default and then re-allow a small whitelist of
-// inline emphasis tags so <b>/<i>/<em>/<strong>/<code> render as styling
-// instead of literal text. Anything else (script, img, links, etc.) stays
-// escaped — defense-in-depth in case an entry ever incorporates user content.
+// inline emphasis tags + safe-href anchors. Anything else (script, img,
+// arbitrary attributes, javascript: URLs, etc.) stays escaped — defense-
+// in-depth in case an entry ever incorporates user content.
 function renderChangelogItem(item) {
-  return escapeHTML(item).replace(
-    /&lt;(\/?)(b|i|em|strong|code)&gt;/g,
-    '<$1$2>'
+  let out = escapeHTML(item);
+  // Inline emphasis: <b>/<i>/<em>/<strong>/<code> render as styling.
+  out = out.replace(/&lt;(\/?)(b|i|em|strong|code)&gt;/g, '<$1$2>');
+  // Anchors: <a href="…">text</a>. Validate the protocol — only http,
+  // https, and mailto pass; anything else (javascript:, data:, etc.)
+  // strips back to plain text. External links open in a new tab with
+  // noopener/noreferrer so the opener can't be navigated.
+  out = out.replace(
+    /&lt;a href=&quot;(.+?)&quot;&gt;(.+?)&lt;\/a&gt;/g,
+    (match, escapedUrl, inner) => {
+      // The captured URL is HTML-escaped (& → &amp; etc.). Decode for the
+      // protocol check, but emit the escaped form back into the href so
+      // ampersand-bearing URLs (?foo=1&bar=2) round-trip correctly.
+      const decoded = escapedUrl.replace(/&amp;/g, '&');
+      if (!/^(https?:|mailto:)/i.test(decoded)) return inner; // unsafe → drop the wrapper, keep text
+      const isExternal = /^https?:/i.test(decoded);
+      const attrs = isExternal ? ' target="_blank" rel="noopener noreferrer"' : '';
+      return `<a href="${escapedUrl}"${attrs}>${inner}</a>`;
+    }
   );
+  return out;
 }
 
 export function openChangelog(showAll) {
