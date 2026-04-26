@@ -190,11 +190,22 @@ return (async function() {
     /<b>5 new SNPs<\/b>/.test(itemsHTML));
   assert('changelog renders <code> as code (not literal text)',
     !itemsHTML.includes('&lt;code&gt;'));
-  // Defense: source-code regex limits the whitelist. A wildcard or a
-  // direct innerHTML on the raw item would be a security regression.
+  // Defense: source-code regex limits the inline-tag whitelist. A wildcard
+  // or a direct innerHTML on the raw item would be a security regression.
   const renderSrc = await fetch('js/changelog.js').then(r => r.text());
-  assert('renderChangelogItem whitelist limited to b/i/em/strong/code',
+  assert('renderChangelogItem inline-tag whitelist limited to b/i/em/strong/code',
     /\(b\|i\|em\|strong\|code\)/.test(renderSrc));
+  // Anchor tags also pass through with safe-protocol enforcement. Inject a
+  // few synthetic items into the live module via window.CHANGELOG isn't
+  // safe (module-private const) — instead drive the renderer indirectly
+  // via the whitelisted v1.3.0 entry which carries an https://getbased link.
+  assert('changelog renders safe https <a> as a real link',
+    /<a href="https:\/\/getbased\.health[^"]*" target="_blank" rel="noopener noreferrer">[^<]+<\/a>/.test(itemsHTML));
+  // Source-code regex defenses: protocol allowlist + target/rel.
+  assert('renderChangelogItem rejects non-http(s)/mailto hrefs',
+    /\^\(https\?:\|mailto:\)/.test(renderSrc));
+  assert('renderChangelogItem adds target="_blank" rel="noopener noreferrer" to external links',
+    /target="_blank" rel="noopener noreferrer"/.test(renderSrc));
   window.closeChangelog();
 
   // Clean up

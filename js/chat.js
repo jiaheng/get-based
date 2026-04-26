@@ -1293,12 +1293,24 @@ export function renderChatMessages() {
             <div style="font-size:11px;color:var(--text-muted);line-height:1.5">Processed locally \u2014 your DNA files never leave your device.</div>`;
       }
       dnaSection += `</div>`;
+      const wearableConns = state.importedData?.wearableConnections || {};
+      const hasWearable = Object.values(wearableConns).some(c => c?.accessToken || c?.connectedSince);
+      const wearableSection = hasWearable ? '' : `<div class="chat-onboard-wearable" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+            <p style="margin:0 0 6px">⧬ Do you wear a smartwatch or fitness tracker? HRV, sleep, recovery and body composition give me a much richer picture alongside your blood work.</p>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0">
+              <button class="ctx-btn-option" onclick="event.stopPropagation();closeChatPanel();window.openSettingsModal('wearables')">Connect a wearable</button>
+              <button class="ctx-btn-option" onclick="event.stopPropagation();this.closest('.chat-onboard-wearable').style.display='none'">I don't wear one</button>
+              <span style="font-size:12px;color:var(--text-muted);align-self:center">Oura · Withings · Fitbit · Polar · Apple Health</span>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);line-height:1.5">Raw daily samples stay on your device. Sync only carries a compact encrypted summary.</div>
+          </div>`;
       container.innerHTML = `<div class="chat-persona-label">${personality.icon} ${escapeHTML(personality.name)}</div>
         <div class="chat-msg chat-ai" style="width:88%">
           <p>${hasAIProvider() ? 'Great, we\'re connected! 🎉' : 'Nice!'} A couple of quick things that help me give better advice:</p>
           ${cycleSection}
           ${suppSection}
           ${dnaSection}
+          ${wearableSection}
           <div class="chat-onboard-actions">
             <button class="chat-onboard-cta" onclick="window.skipOnboardingExtras()">Continue →</button>
           </div>

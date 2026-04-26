@@ -22,7 +22,7 @@ Only enter the markers you have results for. Leave the rest blank. getbased uses
 
 ## Finding Markers
 
-The marker list is organized by the same 18 categories used throughout the app (biochemistry, hormones, lipids, body composition, bone density, etc.). You can scroll through a category or use the search box to find a marker by name.
+The marker list is organized by the same 17 categories used throughout the app (biochemistry, hormones, lipids, body composition, bone density, etc.). You can scroll through a category or use the search box to find a marker by name.
 
 If a marker you're looking for doesn't appear in the list, you can create it. Click the **+** button next to "Categories" in the sidebar to [create a custom marker](./custom-markers.md#creating-custom-markers-manually) — define the name, unit, category, and reference range, then add values to it.
 

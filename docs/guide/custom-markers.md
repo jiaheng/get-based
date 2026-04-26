@@ -1,6 +1,6 @@
 # Custom Markers
 
-getbased has a built-in schema of 300+ biomarkers across 18 categories. When you import a PDF that contains a result the app doesn't recognize — a specialty marker, a newer test, or one with an unusual name — it's automatically created as a **custom marker** rather than being discarded.
+getbased has a built-in schema of 300+ biomarkers across 17 categories. When you import a PDF that contains a result the app doesn't recognize — a specialty marker, a newer test, or one with an unusual name — it's automatically created as a **custom marker** rather than being discarded.
 
 ## Creating Custom Markers Manually
 

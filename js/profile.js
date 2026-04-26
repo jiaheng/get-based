@@ -306,6 +306,27 @@ export async function loadProfile(profileId) {
   window.updateHeaderDates();
   window.updateHeaderRangeToggle();
   window.renderProfileButton();
+  // Refresh wearable summary for the freshly-loaded profile so the strip
+  // reflects THIS profile's L1 IDB rather than carrying over stale state
+  // from the boot profile. Both modules dynamic-imported to avoid circular
+  // deps (profile.js → wearables-* → profile.js for getActiveProfileId).
+  // Migration runs first (idempotent — it self-flag-gates after one run per
+  // profile), then summary recomputes from this profile's IDB.
+  Promise.all([
+    import('./wearables-manual.js'),
+    import('./wearables-summary.js'),
+    import('./wearables-connect.js'),
+  ]).then(async ([manualMod, summaryMod, connectMod]) => {
+    try { await manualMod.migrateBiometricsToManual(profileId, state.importedData?.biometrics); } catch {}
+    // Profile-switch race guard: the user can swap profile A→B during the
+    // ~100ms cold-cache IDB read window. If that happens, abort BEFORE
+    // syncWearableSummary persists A's metrics into B's wearableSummary
+    // and saves them under B's localStorage key. Same shape as the
+    // v1.24.1 OAuth-callback profile-swap guard.
+    if (state.currentProfile !== profileId) return;
+    try { await summaryMod.syncWearableSummary(profileId, connectMod.listConnectedSources()); } catch {}
+    if (state.currentProfile !== profileId) return; // re-check post-await — sync also takes IDB time
+  }).catch(() => {});
 }
 
 export function createProfile(name, opts = {}) {
@@ -396,6 +417,16 @@ export function deleteProfile(profileId, onComplete) {
     localStorage.removeItem(`labcharts-${profileId}-tour`);
     localStorage.removeItem(`labcharts-${profileId}-cycleTour`);
     localStorage.removeItem(`labcharts-${profileId}-phaseOverlay`);
+    // Wearable per-profile IDB (`labcharts-wearables-${profileId}`) lives
+    // outside localStorage. Drop it too so deleted profiles don't leak 90d
+    // of HRV/sleep/RHR + manual entries onto disk indefinitely.
+    import('./wearables-store.js').then(m => m.deleteWearablesDB(profileId)).catch(() => {});
+    // Propagate the delete to the relay so other devices stop seeing this
+    // profile. Without this, a paired device pulling later would resurrect
+    // the profile (the Evolu row's dataJson outlives our local wipe).
+    // Soft-delete via Evolu's isDeleted column — the query filter drops
+    // tombstoned rows; CRDT LWW handles cross-device conflict resolution.
+    import('./sync.js').then(m => m.deleteProfileFromRelay(profileId)).catch(() => {});
     if (state.currentProfile === profileId) {
       loadProfile(updated[0].id);
     } else {

@@ -470,6 +470,63 @@ export function detectSupplementSlots(text) {
   return found.slice(0, hasDNA ? 2 : 1);
 }
 
+// Wearable-trend-driven suggestion hooks. Pure detector — returns the slot
+// keys the catalog should consider, plus a reason string. Callers decide
+// whether to surface them. Conservative thresholds: only fire when the
+// trend is BOTH against the user's own baseline AND outside the IQR.
+//
+// Returns [{ slotKey, reason }, ...]. Slot keys must exist in the catalog
+// or callers will skip them.
+export function detectWearableTrendSlots(summary) {
+  if (!summary?.metrics) return [];
+  const out = [];
+  const m = summary.metrics;
+
+  // HRV (overnight) ≪ baseline AND below P25 → low recovery / stress signal.
+  // Magnesium glycinate is the most-evidenced sleep + autonomic-recovery
+  // supplement; map to the catalog's 'magnesium' slot.
+  if (m.hrv_rmssd && typeof m.hrv_rmssd.rolling?.d7 === 'number' &&
+      typeof m.hrv_rmssd.baselineP25 === 'number' &&
+      m.hrv_rmssd.rolling.d7 < m.hrv_rmssd.baselineP25) {
+    out.push({
+      slotKey: 'magnesium',
+      reason: `7-day overnight HRV (${m.hrv_rmssd.rolling.d7} ms) is below your own P25 (${m.hrv_rmssd.baselineP25} ms) — autonomic recovery is suppressed.`,
+    });
+  }
+
+  // RHR (overnight) ≫ baseline AND above P75 → cardiovascular stress /
+  // overtraining / illness coming on.
+  if (m.rhr && typeof m.rhr.rolling?.d7 === 'number' &&
+      typeof m.rhr.baselineP75 === 'number' &&
+      m.rhr.rolling.d7 > m.rhr.baselineP75) {
+    out.push({
+      slotKey: 'magnesium',
+      reason: `7-day resting HR (${m.rhr.rolling.d7} bpm) is above your own P75 (${m.rhr.baselineP75} bpm) — possible overtraining or coming illness.`,
+    });
+  }
+
+  // Sleep score chronically below 70 → sleep-quality intervention worth
+  // considering. Catalog has 'melatonin' for circadian, plus 'magnesium'
+  // for muscle relaxation.
+  if (m.sleep_score && typeof m.sleep_score.rolling?.d7 === 'number' &&
+      m.sleep_score.rolling.d7 < 70 &&
+      typeof m.sleep_score.baseline === 'number' &&
+      m.sleep_score.rolling.d7 < m.sleep_score.baseline) {
+    out.push({
+      slotKey: 'melatonin',
+      reason: `7-day sleep score (${m.sleep_score.rolling.d7}) is below 70 and below your own baseline (${m.sleep_score.baseline}).`,
+    });
+  }
+
+  // De-dupe by slotKey, keep first reason.
+  const seen = new Set();
+  return out.filter(o => {
+    if (seen.has(o.slotKey)) return false;
+    seen.add(o.slotKey);
+    return true;
+  });
+}
+
 // ═══════════════════════════════════════════════
 // WINDOW EXPORTS
 // ═══════════════════════════════════════════════

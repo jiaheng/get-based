@@ -5,6 +5,18 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.3.0', date: '2026-04-26', title: 'Wearables — connect your devices, share with AI agents',
+    items: [
+      '<b>Five wearables, one dashboard.</b> Connect Oura, Fitbit, Withings, Polar, or Apple Health (file import). Or log weight / BP / resting HR by hand. HRV, sleep, recovery, body composition, blood pressure, steps — every signal your hardware produces surfaces in a single strip alongside your blood work. Withings users get the full Body Scan / ScanWatch / BPM picture: body fat %, muscle / bone / water mass, vascular age, PWV, SpO₂, body and skin temperature, sleep architecture (deep / light / REM / awake / breathing rate / snoring / apnea-class), nerve health — cards auto-hide when your device doesn\'t measure that signal. (WHOOP and Ultrahuman support is built but private-beta only while we validate partner credentials.)',
+      '<b>Tap any card for detail.</b> 90-day chart, baselines, rolling averages, every individual reading, manual-entry CRUD. Multiple devices? Tap the <i>via Oura</i> / <i>via Fitbit</i> source badge to switch which one drives the card. Reorder the strip via the ⇄ button — hold per profile, sync across devices.',
+      '<b>Overnight and daytime, separately.</b> HRV and heart rate split into recovery (overnight) and reactivity (daytime) so the AI can reason about both.',
+      '<b>AI chat sees a compact summary</b> by default. External agents (Hermes, OpenClaw, Claude Code, anything MCP) connect via the new Agent Access tab — token, push controls, optional 7 / 30 / 90-day series for time-series reasoning.',
+      '<b>Honest "as of {date}" dates.</b> If a metric\'s latest reading is older than its source\'s freshest reading (e.g. HRV from Oura\'s <code>/sleep</code> often lags daily_sleep by hours while the night\'s analysis finishes), the card surfaces the actual date so the value reads honestly. Hover for the explanation.',
+      '<b>Privacy.</b> Raw daily samples never leave your device. Sync carries only the compact summary, encrypted end-to-end. OAuth tokens never sync — re-connect each device independently. Wearable storage is wrapped in AES-GCM when encryption-at-rest is enabled.',
+      '<b>Settings reorganised.</b> Old Integrations tab split into <b>Wearables</b> (your devices) and <b>Agent Access</b> (read permission for AI). See the <a href="https://getbased.health/docs/guide/wearables">user guide</a> for the full setup walkthrough.',
+    ]
+  },
+  {
     version: '1.23.0', date: '2026-04-24', title: 'DNA + mtDNA overhaul: 5 new SNPs, 11 sub-haplogroups, valence-aware UI',
     items: [
       '<b>5 new SNPs</b> across three new categories: ALDH2 (alcohol flush + cancer risk), CYP1A2 (caffeine metabolism), MTNR1B (late-eating glucose impact), FTO (obesity, exercise-attenuated), and CETP I405V (longevity variant). Curated set: 42 → 47.',
@@ -809,14 +821,31 @@ function markChangelogSeen() {
 
 // Changelog items are authored in source code (CHANGELOG above) — trusted.
 // We escape everything by default and then re-allow a small whitelist of
-// inline emphasis tags so <b>/<i>/<em>/<strong>/<code> render as styling
-// instead of literal text. Anything else (script, img, links, etc.) stays
-// escaped — defense-in-depth in case an entry ever incorporates user content.
+// inline emphasis tags + safe-href anchors. Anything else (script, img,
+// arbitrary attributes, javascript: URLs, etc.) stays escaped — defense-
+// in-depth in case an entry ever incorporates user content.
 function renderChangelogItem(item) {
-  return escapeHTML(item).replace(
-    /&lt;(\/?)(b|i|em|strong|code)&gt;/g,
-    '<$1$2>'
+  let out = escapeHTML(item);
+  // Inline emphasis: <b>/<i>/<em>/<strong>/<code> render as styling.
+  out = out.replace(/&lt;(\/?)(b|i|em|strong|code)&gt;/g, '<$1$2>');
+  // Anchors: <a href="…">text</a>. Validate the protocol — only http,
+  // https, and mailto pass; anything else (javascript:, data:, etc.)
+  // strips back to plain text. External links open in a new tab with
+  // noopener/noreferrer so the opener can't be navigated.
+  out = out.replace(
+    /&lt;a href=&quot;(.+?)&quot;&gt;(.+?)&lt;\/a&gt;/g,
+    (match, escapedUrl, inner) => {
+      // The captured URL is HTML-escaped (& → &amp; etc.). Decode for the
+      // protocol check, but emit the escaped form back into the href so
+      // ampersand-bearing URLs (?foo=1&bar=2) round-trip correctly.
+      const decoded = escapedUrl.replace(/&amp;/g, '&');
+      if (!/^(https?:|mailto:)/i.test(decoded)) return inner; // unsafe → drop the wrapper, keep text
+      const isExternal = /^https?:/i.test(decoded);
+      const attrs = isExternal ? ' target="_blank" rel="noopener noreferrer"' : '';
+      return `<a href="${escapedUrl}"${attrs}>${inner}</a>`;
+    }
   );
+  return out;
 }
 
 export function openChangelog(showAll) {

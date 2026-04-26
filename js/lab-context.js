@@ -10,6 +10,7 @@ import { getBloodDrawPhases, getNextBestDrawDate, detectPerimenopausePattern, de
 import { scanSupplementsForWarnings, humanizeEffect } from './supplement-warnings.js';
 import { scanDietForContaminants } from './food-contaminants.js';
 import { ingredientDailyTotal, effectiveTimesPerDay } from './supplements.js';
+import { CANONICAL_METRICS, DEFAULT_METRIC_ORDER } from './wearable-adapters.js';
 
 // ═══════════════════════════════════════════════
 // LAB CONTEXT MEMOIZATION
@@ -273,7 +274,7 @@ function _buildLabContextInner({ skipGroupFilter } = {}) {
   }
 
   // ── 5. User Notes ──
-  const notes = (state.importedData.notes || []).slice().sort((a, b) => a.date.localeCompare(b.date));
+  const notes = (state.importedData.notes || []).slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
   if (notes.length > 0) {
     ctx += `[section:userNotes]\n## User Notes\n`;
     for (const n of notes) {
@@ -352,7 +353,7 @@ function _buildLabContextInner({ skipGroupFilter } = {}) {
       ctx += `Height: ${htLabel}\n`;
     }
     if (bio?.weight?.length) {
-      const sorted = [...bio.weight].sort((a, b) => b.date.localeCompare(a.date));
+      const sorted = [...bio.weight].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
       const latest = sorted[0];
       const latestKg = latest.unit === 'lbs' ? latest.value / 2.205 : latest.value;
       ctx += `Weight (latest ${latest.date}): ${latest.value} ${latest.unit}`;
@@ -369,7 +370,7 @@ function _buildLabContextInner({ skipGroupFilter } = {}) {
       }
     }
     if (bio?.bp?.length) {
-      const sorted = [...bio.bp].sort((a, b) => b.date.localeCompare(a.date));
+      const sorted = [...bio.bp].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
       const latest = sorted[0];
       ctx += `Blood Pressure (latest ${latest.date}): ${latest.sys}/${latest.dia} mmHg`;
       if (sorted.length > 1) {
@@ -381,7 +382,7 @@ function _buildLabContextInner({ skipGroupFilter } = {}) {
       ctx += '\n';
     }
     if (bio?.pulse?.length) {
-      const sorted = [...bio.pulse].sort((a, b) => b.date.localeCompare(a.date));
+      const sorted = [...bio.pulse].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
       const latest = sorted[0];
       ctx += `Resting Pulse (latest ${latest.date}): ${latest.value} bpm`;
       if (sorted.length > 1) {
@@ -407,6 +408,12 @@ function _buildLabContextInner({ skipGroupFilter } = {}) {
     }
   }
 
+  // ── 8b. Wearables ──
+  if (isWearableContextEnabled()) {
+    const wearableCtx = buildWearableContext(state.importedData);
+    if (wearableCtx) ctx += `[section:wearables]\n${wearableCtx}\n[/section:wearables]\n\n`;
+  }
+
   // ── 9. Menstrual Cycle (female only) ──
   const mc = state.importedData.menstrualCycle;
   if (mc && state.profileSex === 'female') {
@@ -425,7 +432,7 @@ function _buildLabContextInner({ skipGroupFilter } = {}) {
     }
     if (mc.conditions) ctx += ` Conditions: ${mc.conditions}.`;
     ctx += '\n';
-    const periods = (mc.periods || []).slice().sort((a, b) => b.startDate.localeCompare(a.startDate));
+    const periods = (mc.periods || []).slice().sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''));
     if (periods.length > 0) {
       const fmtD = d => new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
       ctx += `Recent periods: ${periods.slice(0, 6).map(p => {
@@ -611,7 +618,7 @@ function _buildLabContextInner({ skipGroupFilter } = {}) {
   const emf = state.importedData.emfAssessment;
   if (emf && emf.assessments && emf.assessments.length > 0) {
     ctx += `### EMF Assessment (Baubiologie SBM-2015)\n`;
-    const sorted = [...emf.assessments].sort((a, b) => b.date.localeCompare(a.date));
+    const sorted = [...emf.assessments].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
     const latest = sorted[0];
     ctx += `Assessment: ${fmtDate(latest.date)}${latest.label ? ' (' + latest.label + ')' : ''}${latest.consultant ? ' by ' + latest.consultant : ''}\n`;
     for (const room of latest.rooms) {
@@ -638,8 +645,10 @@ function _buildLabContextInner({ skipGroupFilter } = {}) {
   const changeHistory = state.importedData.changeHistory || [];
   if (changeHistory.length > 0) {
     const fieldLabels = { diet: 'Diet & Digestion', exercise: 'Exercise', sleepRest: 'Sleep & Rest', lightCircadian: 'Light & Circadian', stress: 'Stress', loveLife: 'Love Life', environment: 'Environment', diagnoses: 'Medical Conditions', healthGoals: 'Health Goals', interpretiveLens: 'Interpretive Lens', contextNotes: 'Context Notes', menstrualCycle: 'Menstrual Cycle' };
-    // Group by field, sorted by date
-    const sorted = [...changeHistory].sort((a, b) => a.date.localeCompare(b.date));
+    // Group by field, sorted by date. Defensive against legacy entries that
+    // somehow missed the date field — sorting on undefined throws and takes
+    // down the whole context push (which is called on every saveImportedData).
+    const sorted = [...changeHistory].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
     // Build timeline with diffs between consecutive snapshots per field
     const lines = [];
     const byField = {};
@@ -742,11 +751,280 @@ function _formatLensChunks(result) {
   return lines.join('\n');
 }
 
+// ═══════════════════════════════════════════════
+// WEARABLE CONTEXT (L2 summary + recent anomalies)
+// ═══════════════════════════════════════════════
+
+// Default ON when wearables are connected — opposite of the group-filter default
+// (which is OFF). Users turn OFF via Settings → AI → "Include wearable data".
+// Per-profile so each profile keeps its own preference (e.g. "Test" profile
+// excludes wearables from AI context, your "main" profile includes them).
+function _wearableCtxKey() {
+  const pid = localStorage.getItem('labcharts-active-profile') || 'default';
+  return `labcharts-${pid}-ai-ctx-wearables`;
+}
+export function isWearableContextEnabled() {
+  const v = localStorage.getItem(_wearableCtxKey());
+  // Migrate legacy global key (set in v1.21.x) — read once, write per-profile,
+  // delete the global. Idempotent: subsequent calls go straight to per-profile.
+  if (v === null) {
+    const legacy = localStorage.getItem('labcharts-ai-ctx-wearables');
+    if (legacy !== null) {
+      localStorage.setItem(_wearableCtxKey(), legacy);
+      localStorage.removeItem('labcharts-ai-ctx-wearables');
+      return legacy !== 'off';
+    }
+  }
+  return v !== 'off';
+}
+export function setWearableContextEnabled(on) {
+  localStorage.setItem(_wearableCtxKey(), on ? 'on' : 'off');
+}
+
+// Metric labels + units are derived from the canonical registry (single source
+// of truth in wearable-adapters.js). Adding a new canonical metric automatically
+// flows into the AI context — no duplicated tables to drift out of sync.
+function metricLabel(mid) {
+  const c = CANONICAL_METRICS[mid];
+  if (!c) return mid;
+  return c.sub ? `${c.label} (${c.sub})` : c.label;
+}
+function metricUnit(mid) {
+  return CANONICAL_METRICS[mid]?.unit || '';
+}
+
+// Builds ~200-token summary of wearable state. Shape is deliberately terse so
+// it can be included in every prompt without blowing context budget.
+export function buildWearableContext(importedData) {
+  const summary = importedData?.wearableSummary;
+  if (!summary || !summary.sources || Object.keys(summary.sources).length === 0) return '';
+  if (!summary.metrics || Object.keys(summary.metrics).length === 0) return '';
+
+  const sourceNames = Object.keys(summary.sources);
+  const maxCov = Math.max(0, ...sourceNames.map(s => summary.sources[s].coverageDays || 0));
+  const lines = [`## Wearables (${sourceNames.join(' + ')}, ${maxCov}d coverage)`];
+
+  // Cluster roll-ups (#143 + Withings full-coverage). Body composition
+  // and sleep architecture each collapse into a single line — eight
+  // body-comp + nine sleep metrics × ~50 bytes per line would balloon the
+  // wearable section by ~400 bytes / ~100 tokens. The detail modal still
+  // drills each metric individually; rolling up just keeps the AI prompt
+  // budget honest.
+  const BODY_COMP_KEYS = ['body_fat_pct', 'fat_mass_kg', 'muscle_mass_kg', 'lean_mass_kg', 'bone_mass_kg', 'water_mass_kg', 'visceral_fat', 'nerve_health_score'];
+  const SLEEP_ARCH_KEYS = ['sleep_total_min', 'sleep_deep_min', 'sleep_light_min', 'sleep_rem_min', 'sleep_awake_min', 'sleep_hr_avg', 'sleep_breathing_rate', 'sleep_snoring_min', 'sleep_breath_disturb'];
+  const ROLLED_UP = new Set([...BODY_COMP_KEYS, ...SLEEP_ARCH_KEYS]);
+  const bodyCompPresent = BODY_COMP_KEYS.filter(k => summary.metrics[k]);
+  const sleepArchPresent = SLEEP_ARCH_KEYS.filter(k => summary.metrics[k]);
+
+  for (const [mid, m] of Object.entries(summary.metrics)) {
+    if (ROLLED_UP.has(mid)) continue; // rolled up below
+    const label = metricLabel(mid);
+    const unit = metricUnit(mid);
+    const deltaPct = m.baseline ? ((m.latest - m.baseline) / m.baseline * 100) : 0;
+    const arrow = deltaPct > 0.5 ? '↑' : deltaPct < -0.5 ? '↓' : '→';
+    const deltaLabel = `${arrow}${Math.abs(deltaPct).toFixed(0)}%`;
+    const unitStr = unit ? ' ' + unit : '';
+    lines.push(`${label}: ${m.latest}${unitStr} latest · baseline ${m.baseline} · ${deltaLabel} · ${m.trend30d} 30d`);
+  }
+
+  // Body composition roll-up.
+  if (bodyCompPresent.length) {
+    const shortLabels = {
+      body_fat_pct: 'fat', fat_mass_kg: 'fatkg', muscle_mass_kg: 'muscle', lean_mass_kg: 'lean',
+      bone_mass_kg: 'bone', water_mass_kg: 'water', visceral_fat: 'visceral', nerve_health_score: 'nerve',
+    };
+    const parts = bodyCompPresent.map(k => {
+      const m = summary.metrics[k];
+      const unit = metricUnit(k);
+      const v = unit === '%' ? `${m.latest}%`
+              : unit === 'kg' ? `${m.latest}kg`
+              : `${m.latest}`;
+      return `${shortLabels[k] || k} ${v}`;
+    });
+    lines.push(`Body comp: ${parts.join(' / ')}`);
+  }
+
+  // Sleep architecture roll-up — Withings nightly stages + breathing.
+  if (sleepArchPresent.length) {
+    const shortLabels = {
+      sleep_total_min: 'total', sleep_deep_min: 'deep', sleep_light_min: 'light',
+      sleep_rem_min: 'REM', sleep_awake_min: 'awake', sleep_hr_avg: 'HR',
+      sleep_breathing_rate: 'br', sleep_snoring_min: 'snore', sleep_breath_disturb: 'apnea',
+    };
+    const parts = sleepArchPresent.map(k => {
+      const m = summary.metrics[k];
+      const unit = metricUnit(k);
+      const v = unit === 'min' ? `${m.latest}m`
+              : unit === 'bpm' ? `${m.latest}bpm`
+              : unit === 'rpm' ? `${m.latest}rpm`
+              : `${m.latest}`;
+      return `${shortLabels[k] || k} ${v}`;
+    });
+    lines.push(`Sleep arch: ${parts.join(' / ')}`);
+  }
+
+  // Compact weekly series for every default-order metric that has data — lets
+  // the AI see shape without per-day noise. Walks the registry order so new
+  // canonical metrics get included automatically.
+  const weeklySeriesLines = [];
+  for (const mid of DEFAULT_METRIC_ORDER) {
+    const w = summary.metrics[mid]?.weekly;
+    if (w && w.length >= 2) weeklySeriesLines.push(`  ${metricLabel(mid)}: ${w.slice(-6).join('→')}`);
+  }
+  if (weeklySeriesLines.length > 0) {
+    lines.push('Weekly trend (last 6w):');
+    lines.push(...weeklySeriesLines);
+  }
+
+  // Recent wearable anomalies from changeHistory (last 5, most recent first).
+  const hist = importedData?.changeHistory || [];
+  const wearableEvents = hist.filter(e => e?.type === 'wearable').slice(-5).reverse();
+  if (wearableEvents.length > 0) {
+    lines.push('Recent anomalies:');
+    for (const e of wearableEvents) {
+      const when = e.ts ? new Date(e.ts).toISOString().slice(0, 10) : '';
+      lines.push(`  - ${when}: ${e.message || (e.kind + ' ' + (e.metricId || ''))}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// AGENT-FACING WEARABLE DAILY-SERIES SECTION
+// ═════════════════════════════════════════════════════════════════════════
+// The L2 summary is great for the in-app chat (~200 tokens, every prompt) but
+// agents doing time-series reasoning need the actual daily values. This async
+// builder reads L1 IDB rows and emits a pivoted matrix:
+//
+//   [section:wearables-series-30d]
+//   ## Wearables — 30-day series (newest last; — = no reading)
+//   HRV ms (oura): 33→35→32→...→39  (30 values)
+//   Resting HR bpm (manual): —→—→103→...→103
+//   ...
+//   [/section:wearables-series-30d]
+//
+// Lives in browser only — L1 IDB never syncs. The browser pushes the rendered
+// section to the gateway via pushContextToGateway whenever the agent series
+// preference is on.
+//
+// Per-profile preference; default off (it adds ~1500 tokens to every agent
+// prompt vs the always-on ~200-token summary).
+
+const AGENT_SERIES_DEFAULT_DAYS = 30;
+const AGENT_SERIES_VALID = new Set(['off', '7', '30', '90']);
+function _agentSeriesKey() {
+  const pid = localStorage.getItem('labcharts-active-profile') || 'default';
+  return `labcharts-${pid}-agent-wearable-series`;
+}
+// Tri-state preference: 'off' | '7' | '30' | '90'. Legacy 'on' migrates to
+// '30' (the v1.27.0 default). Anything else defaults to 'off'.
+export function getAgentWearableSeriesDays() {
+  const v = localStorage.getItem(_agentSeriesKey());
+  if (v === 'on') return AGENT_SERIES_DEFAULT_DAYS;
+  if (v === 'off' || v === null) return 0;
+  if (AGENT_SERIES_VALID.has(v)) return v === 'off' ? 0 : Number(v);
+  return 0;
+}
+export function setAgentWearableSeriesDays(days) {
+  // Accept 0 / 7 / 30 / 90 numerically, plus 'off' string for clarity.
+  const v = (days === 0 || days === 'off') ? 'off' : String(days);
+  if (!AGENT_SERIES_VALID.has(v)) return;
+  localStorage.setItem(_agentSeriesKey(), v);
+}
+// Back-compat shims — the boolean API is what Settings used in v1.27. The
+// new tri-state replaces it; keep these around so a stale page.html with
+// the old toggle markup doesn't crash.
+export function isAgentWearableSeriesEnabled() { return getAgentWearableSeriesDays() > 0; }
+export function setAgentWearableSeriesEnabled(on) { setAgentWearableSeriesDays(on ? AGENT_SERIES_DEFAULT_DAYS : 0); }
+
+export async function buildWearableSeriesSection(days) {
+  if (!isWearableContextEnabled()) return '';
+  // If `days` not provided, read user preference. 0/off = no section.
+  const N = (days != null) ? days : getAgentWearableSeriesDays();
+  if (!N || N <= 0) return '';
+  days = N;
+  const summary = state.importedData?.wearableSummary;
+  if (!summary?.metrics || Object.keys(summary.metrics).length === 0) return '';
+
+  let getDailyRange, getActiveProfileId;
+  try {
+    ({ getDailyRange } = await import('./wearables-store.js'));
+    ({ getActiveProfileId } = await import('./profile.js'));
+  } catch { return ''; }
+  const profileId = getActiveProfileId();
+  if (!profileId) return '';
+
+  const today = new Date().toISOString().slice(0, 10);
+  const startD = new Date();
+  startD.setUTCDate(startD.getUTCDate() - (days - 1));
+  const startStr = startD.toISOString().slice(0, 10);
+
+  // Build the date axis once (chronological, oldest → newest).
+  const dates = [];
+  const cursor = new Date(startStr + 'T00:00:00Z');
+  const endDate = new Date(today + 'T00:00:00Z');
+  while (cursor <= endDate) {
+    dates.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+
+  // Each metric reads from its primary source (per the L2 picker / override).
+  // Group sources so we don't pull the same IDB cursor twice.
+  const sourcesNeeded = new Set();
+  for (const m of Object.values(summary.metrics)) {
+    if (m.primarySource) sourcesNeeded.add(m.primarySource);
+  }
+  const rowsBySource = {};
+  for (const sid of sourcesNeeded) {
+    try { rowsBySource[sid] = await getDailyRange(profileId, sid, startStr, today); }
+    catch { rowsBySource[sid] = []; }
+  }
+
+  // Pivot: one line per metric, chronological values separated by → (no-data = —).
+  // Values rounded to 1dp to keep tokens tight without losing meaningful precision
+  // for HRV (often 30-50 ms range, ~30 % is noise) or RHR.
+  const lines = [];
+  for (const mid of DEFAULT_METRIC_ORDER) {
+    const m = summary.metrics[mid];
+    if (!m) continue;
+    const rows = rowsBySource[m.primarySource] || [];
+    if (rows.length === 0) continue;
+    const byDate = new Map(rows.map(r => [r.date, r[mid]]));
+    let nonNullCount = 0;
+    const series = dates.map(d => {
+      const v = byDate.get(d);
+      if (typeof v !== 'number' || !isFinite(v)) return '—';
+      nonNullCount++;
+      const r = Math.round(v * 10) / 10;
+      return Number.isInteger(r) ? String(r) : r.toFixed(1);
+    });
+    if (nonNullCount === 0) continue; // metric has no daily data in window
+    const label = metricLabel(mid);
+    const unit = metricUnit(mid);
+    const labelStr = `${label}${unit ? ' ' + unit : ''} (${m.primarySource})`;
+    lines.push(`${labelStr}: ${series.join('→')}`);
+  }
+
+  if (lines.length === 0) return '';
+
+  const tag = `wearables-series-${days}d`;
+  return `[section:${tag}]\n## Wearables — ${days}-day daily series (oldest→newest, "—" = no reading)\n${lines.join('\n')}\n[/section:${tag}]`;
+}
+
 Object.assign(window, {
   buildLabContext,
   invalidateLabContextCache,
   getContextSummary,
   isGroupInAIContext,
   setGroupInAIContext,
+  isWearableContextEnabled,
+  setWearableContextEnabled,
+  isAgentWearableSeriesEnabled,
+  setAgentWearableSeriesEnabled,
+  getAgentWearableSeriesDays,
+  setAgentWearableSeriesDays,
+  buildWearableContext,
+  buildWearableSeriesSection,
   injectLensChunks,
 });

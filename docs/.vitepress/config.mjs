@@ -41,6 +41,7 @@ export default defineConfig({
             { text: 'Custom Markers', link: '/guide/custom-markers' },
             { text: 'Specialty Labs', link: '/guide/specialty-labs' },
             { text: 'DNA Import', link: '/guide/dna-import' },
+            { text: 'Wearables', link: '/guide/wearables' },
             { text: 'PII Obfuscation', link: '/guide/pii-obfuscation' }
           ]
         },

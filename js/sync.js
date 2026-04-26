@@ -4,13 +4,14 @@
 
 import { state } from './state.js';
 import { showNotification, isDebugMode, escapeHTML } from './utils.js';
-import { profileStorageKey, getProfiles, saveProfiles, migrateProfileData } from './profile.js';
+import { profileStorageKey, getProfiles, saveProfiles, migrateProfileData, loadProfile } from './profile.js';
 import { getEncryptionEnabled, encryptedSetItem, encryptedGetItem } from './crypto.js';
 
 function dbg(...args) { if (isDebugMode()) console.log('[sync]', ...args); }
 
 let evolu = null;
 let profileQuery = null;
+let tombstoneQuery = null;
 let _syncEnabled = false;
 let _syncing = false;
 let _pulling = false;
@@ -165,6 +166,16 @@ export async function initSync() {
         .where("isDeleted", "is not", 1)
     );
 
+    // Companion query that returns ONLY tombstoned rows. Used during pull
+    // to apply remote deletes locally — when device A tombstones profile X,
+    // device B sees X here and wipes its local copy. Without this, B's
+    // local profiles list keeps showing X even though A "deleted" it.
+    tombstoneQuery = evolu.createQuery((db) =>
+      db.selectFrom("profileData")
+        .selectAll()
+        .where("isDeleted", "=", 1)
+    );
+
     // Subscribe to sync updates
     evolu.subscribeQuery(profileQuery)(() => {
       _subscriptionFireCount++;
@@ -173,8 +184,11 @@ export async function initSync() {
     });
 
     // Load initial data — store promise for enableSync to await
-    _queryLoaded = evolu.loadQuery(profileQuery).then(() => {
-      dbg('Initial query loaded');
+    _queryLoaded = Promise.all([
+      evolu.loadQuery(profileQuery),
+      evolu.loadQuery(tombstoneQuery),
+    ]).then(() => {
+      dbg('Initial queries loaded');
     }).catch(e => {
       console.warn('[sync] Query load failed:', e);
     });
@@ -193,12 +207,19 @@ export async function initSync() {
       console.warn('[sync] Owner resolution failed:', e);
     });
 
-    // Always expose debug helper (sync needs visibility)
-    window._syncDebug = {
-      getRows: () => evolu.getQueryRows(profileQuery),
-      getOwner: () => _appOwner,
-      evolu,
-    };
+    // Debug helper. Gated on isDebugMode() — earlier versions exposed this
+    // unconditionally, which leaked the BIP-39 mnemonic to anyone with
+    // console access (screen-share, malicious extension, MCP evaluate_script
+    // capability). The mnemonic decrypts every Evolu blob ever pushed to
+    // the relay, so this had to be opt-in. Toggle Settings → Privacy →
+    // Debug mode to expose.
+    if (isDebugMode?.()) {
+      window._syncDebug = {
+        getRows: () => evolu.getQueryRows(profileQuery),
+        getOwner: () => _appOwner,
+        evolu,
+      };
+    }
 
     // Poll every 30s as safety net — subscribeQuery may miss remote changes
     _pollInterval = setInterval(() => {
@@ -293,8 +314,8 @@ export async function disableSync() {
 
   // Stop background timers + reset status (UI feedback before the reload)
   if (_relayProbeInterval) { clearInterval(_relayProbeInterval); _relayProbeInterval = null; }
-  clearTimeout(_debounceTimer);
-  clearInterval(_pollInterval);
+  if (_debounceTimer) { clearTimeout(_debounceTimer); _debounceTimer = null; }
+  if (_pollInterval) { clearInterval(_pollInterval); _pollInterval = null; }
   Object.assign(_syncStatus, { relay: 'unknown', relayCheckedAt: null, push: 'idle', pushStartedAt: null, pushConfirmedAt: null, pull: 'idle', pullReceivedAt: null, lastError: null });
   for (const fn of _syncStatusListeners) fn(_syncStatus);
   renderSyncIndicator();
@@ -341,7 +362,7 @@ function _syncDiag() {
     enabled: _syncEnabled,
     evoluReady: !!evolu,
     relay: getSyncRelay(),
-    mnemonic: _appOwner?.mnemonic ? _appOwner.mnemonic.split(' ').slice(0, 4).join(' ') + ' …' : null,
+    mnemonic: _appOwner?.mnemonic ? '<set>' : null,
     subscriptionFires: _subscriptionFireCount,
     syncing: _syncing,
     pulling: _pulling,
@@ -556,9 +577,15 @@ async function buildSyncPayload(profileId, importedData) {
   const aiSettings = await collectAISettings();
   const chatData = await collectChatData(profileId);
   const displayPrefs = collectDisplayPrefs(profileId);
+  // Strip wearable OAuth credentials before sync. Per-row LWW would let a stale
+  // device resurrect a disconnected vendor or overwrite a freshly-rotated
+  // refresh token. Wearable summary (the L2 dashboard data) still syncs; the
+  // tokens stay local. Users connect each wearable per-device — see the note
+  // in the Settings → Integrations panel.
+  const safeImported = stripWearableCredentials(importedData);
   return JSON.stringify({
     _v: 3,
-    importedData,
+    importedData: safeImported,
     profile: profile || null,
     aiSettings: Object.keys(aiSettings).length > 0 ? aiSettings : undefined,
     chatData: chatData || undefined,
@@ -566,24 +593,55 @@ async function buildSyncPayload(profileId, importedData) {
   });
 }
 
+function stripWearableCredentials(importedData) {
+  if (!importedData?.wearableConnections) return importedData;
+  const { wearableConnections, ...rest } = importedData;
+  return rest;
+}
+
+// 5 MB cap. Pre-cap was 50 MB which let a pathological deeply-nested JSON
+// OOM the tab on parse — a normal payload is well under 1 MB, so 5 MB is
+// already 5× anticipated headroom. Unilateral lower bound on a malicious
+// relay's blast radius.
+const MAX_SYNC_PAYLOAD_BYTES = 5_000_000;
+
 function parseSyncPayload(dataJson) {
-  if (typeof dataJson !== 'string' || dataJson.length > 50_000_000) {
+  if (typeof dataJson !== 'string' || dataJson.length > MAX_SYNC_PAYLOAD_BYTES) {
     throw new Error('Invalid sync payload: bad type or too large');
   }
   const parsed = JSON.parse(dataJson);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('Invalid sync payload');
   }
+  // Defence-in-depth: strip `wearableConnections` from any incoming blob,
+  // regardless of producer version. Push side already strips this via
+  // stripWearableCredentials(), but a compromised relay could inject it
+  // back. With this strip an injected access_token never reaches the
+  // adapter dispatch — `wearableConnections` lives only in local state.
+  function safe(imp) {
+    if (!imp || typeof imp !== 'object') return imp;
+    if ('wearableConnections' in imp) {
+      const { wearableConnections: _drop, ...rest } = imp;
+      return rest;
+    }
+    return imp;
+  }
   // v3: includes chat data + display prefs
   if (parsed._v === 3) {
-    return { importedData: parsed.importedData, profile: parsed.profile, aiSettings: parsed.aiSettings, chatData: parsed.chatData, displayPrefs: parsed.displayPrefs };
+    return { importedData: safe(parsed.importedData), profile: parsed.profile, aiSettings: parsed.aiSettings, chatData: parsed.chatData, displayPrefs: parsed.displayPrefs };
   }
   // v2 compat: no chat data
   if (parsed._v === 2) {
-    return { importedData: parsed.importedData, profile: parsed.profile, aiSettings: parsed.aiSettings, chatData: null, displayPrefs: null };
+    return { importedData: safe(parsed.importedData), profile: parsed.profile, aiSettings: parsed.aiSettings, chatData: null, displayPrefs: null };
   }
-  // v1 compat: raw importedData only
-  return { importedData: parsed, profile: null, aiSettings: null, chatData: null, displayPrefs: null };
+  // v1 compat: raw importedData only. Reject if it doesn't look like an
+  // importedData shape at all — drops the catch-all "anything goes" branch
+  // that earlier let a malformed/malicious row land an arbitrary object
+  // into state.importedData wholesale.
+  if (parsed.entries || parsed.notes || parsed.supplements) {
+    return { importedData: safe(parsed), profile: null, aiSettings: null, chatData: null, displayPrefs: null };
+  }
+  throw new Error('Invalid sync payload: unknown shape');
 }
 
 // Allowed fields when merging a synced profile into the local profiles list
@@ -641,6 +699,33 @@ export async function pushCurrentProfile() {
   pushContextToGateway();
 }
 
+// Soft-delete a profile's row on the relay so other devices stop seeing it.
+// Local wipe alone is insufficient — without this, the Evolu row keeps its
+// full dataJson and any device that pulls (or any device the user re-syncs
+// to later) resurrects the profile. Idempotent: missing row → no-op.
+export async function deleteProfileFromRelay(profileId) {
+  if (!evolu || !_syncEnabled) return { skipped: true, reason: 'sync-off' };
+  if (!profileId || typeof profileId !== 'string') return { skipped: true, reason: 'bad-id' };
+  try {
+    const rows = evolu.getQueryRows(profileQuery);
+    const row = rows?.find(r => r.profileId === profileId);
+    if (!row) return { skipped: true, reason: 'no-row' };
+    // Evolu's soft-delete idiom: set isDeleted=1; the local query filters
+    // these out (see profileQuery's .where clause), and the row replicates
+    // to peers carrying the tombstone — they apply the same filter and
+    // stop seeing the profile. CRDT LWW means a stale device that hasn't
+    // pulled yet won't accidentally resurrect the row, because its newer
+    // tombstone wins on next pull-merge.
+    evolu.update('profileData', { id: row.id, isDeleted: 1, syncedAt: new Date().toISOString() });
+    localStorage.removeItem(`labcharts-${profileId}-sync-ts`);
+    dbg('Soft-deleted on relay:', profileId);
+    return { ok: true };
+  } catch (e) {
+    console.error('[sync] Profile delete propagation failed:', e);
+    return { ok: false, error: e.message };
+  }
+}
+
 // Push all profiles on first enable
 async function pushAllProfiles() {
   const profiles = getProfiles();
@@ -668,6 +753,169 @@ async function pushAllProfiles() {
 // PULL — Evolu → localStorage
 // ═══════════════════════════════════════════════
 
+// Wipe local copies of any profiles that were tombstoned on the relay (by
+// this or another device). Mirrors the local-wipe steps in
+// profile.js:deleteProfile so a tombstoned profile is fully gone — not just
+// hidden by the active-rows query. The user's local profiles list is the
+// source of truth for "what shows in the UI"; without this loop a remote
+// delete would leave the entry there indefinitely.
+// localStorage key for the per-profile "tombstone seen" marker. Used to
+// decide whether a tombstone is auto-applied (we already saw it once and
+// the user dismissed the confirm dialog by accepting) vs queued for review.
+const TOMBSTONE_QUARANTINE_KEY = (profileId) => `labcharts-tombstone-pending-${profileId}`;
+const TOMBSTONE_BATCH_THRESHOLD = 2; // ≥2 tombstones at once = require confirm
+
+async function applyRemoteTombstones() {
+  if (!tombstoneQuery) return;
+  const tombs = evolu.getQueryRows(tombstoneQuery) || [];
+  if (tombs.length === 0) return;
+  const profiles = getProfiles();
+  const tombIds = new Set(tombs.map(t => t.profileId).filter(Boolean));
+  const survivors = profiles.filter(p => !tombIds.has(p.id));
+  if (survivors.length === profiles.length) return; // nothing local to wipe
+
+  // CRDT safety: never wipe the last profile out from under the user. If
+  // every local profile is tombstoned (mass-delete from another device),
+  // keep the active one as a safety landing pad — the user can finish
+  // deleting it themselves once they confirm.
+  if (survivors.length === 0) {
+    dbg('All profiles tombstoned remotely — keeping active profile as safety');
+    return;
+  }
+
+  // Quarantine: a remote-driven mass-delete (≥ TOMBSTONE_BATCH_THRESHOLD
+  // local profiles tombstoned at once) is auth'd only by the BIP-39
+  // mnemonic. If the mnemonic leaks, an attacker could publish tombstones
+  // for every profileId and silently wipe paired devices. For a single
+  // tombstone, auto-apply (most common: user just deleted on another
+  // device). For batches, require the user to confirm before wiping.
+  const localToWipe = profiles.filter(p => tombIds.has(p.id)).map(p => p.id);
+  if (localToWipe.length >= TOMBSTONE_BATCH_THRESHOLD) {
+    // Mark each as pending; surface a confirm UI in Settings → Sync (the
+    // user's next visit there will offer to apply or reject).
+    const pending = localToWipe.filter(id => !localStorage.getItem(TOMBSTONE_QUARANTINE_KEY(id)));
+    for (const id of pending) {
+      localStorage.setItem(TOMBSTONE_QUARANTINE_KEY(id), JSON.stringify({ at: Date.now(), source: 'remote' }));
+    }
+    dbg(`Quarantined ${pending.length} tombstone(s) — require user confirm before wipe:`, pending.join(','));
+    showNotification?.(
+      `${localToWipe.length} profiles deleted on another device — open Settings → Sync to confirm`,
+      'info', 6000
+    );
+    return;
+  }
+
+  const wipedIds = [];
+  for (const tombId of tombIds) {
+    if (!profiles.find(p => p.id === tombId)) continue; // not local — nothing to wipe
+    // Mirror profile.js:deleteProfile's local cleanup. Doing it inline here
+    // (instead of calling deleteProfile) avoids the confirm dialog and the
+    // recursive deleteProfileFromRelay call — the tombstone is already on
+    // the relay, that's how we got here.
+    localStorage.removeItem(profileStorageKey(tombId, 'imported'));
+    localStorage.removeItem(profileStorageKey(tombId, 'units'));
+    localStorage.removeItem(profileStorageKey(tombId, 'suppOverlay'));
+    localStorage.removeItem(profileStorageKey(tombId, 'noteOverlay'));
+    localStorage.removeItem(profileStorageKey(tombId, 'rangeMode'));
+    localStorage.removeItem(profileStorageKey(tombId, 'suppImpact'));
+    localStorage.removeItem(`labcharts-${tombId}-chat`);
+    localStorage.removeItem(`labcharts-${tombId}-chat-threads`);
+    localStorage.removeItem(`labcharts-${tombId}-chatRailOpen`);
+    localStorage.removeItem(`labcharts-${tombId}-chatPersonality`);
+    localStorage.removeItem(`labcharts-${tombId}-chatPersonalityCustom`);
+    localStorage.removeItem(`labcharts-${tombId}-focusCard`);
+    localStorage.removeItem(`labcharts-${tombId}-contextHealth`);
+    localStorage.removeItem(`labcharts-${tombId}-onboarded`);
+    localStorage.removeItem(`labcharts-${tombId}-tour`);
+    localStorage.removeItem(`labcharts-${tombId}-cycleTour`);
+    localStorage.removeItem(`labcharts-${tombId}-phaseOverlay`);
+    localStorage.removeItem(`labcharts-${tombId}-sync-ts`);
+    try {
+      const wsMod = await import('./wearables-store.js');
+      await wsMod.deleteWearablesDB(tombId).catch(() => {});
+    } catch { /* wearables-store optional */ }
+    wipedIds.push(tombId);
+  }
+
+  if (wipedIds.length === 0) return;
+  await saveProfiles(survivors);
+  // Clear any pending quarantine markers for ids we just wiped so the
+  // confirm UI doesn't keep re-prompting on the next sync.
+  for (const id of wipedIds) localStorage.removeItem(TOMBSTONE_QUARANTINE_KEY(id));
+  dbg(`Applied ${wipedIds.length} remote tombstone(s):`, wipedIds.join(', '));
+
+  // If the active profile got tombstoned remotely, swap to a survivor so
+  // the UI doesn't dereference a wiped profile. loadProfile rehydrates
+  // state.importedData from localStorage of the new id.
+  if (wipedIds.includes(state.currentProfile)) {
+    showNotification?.(`Profile was deleted on another device — switching to "${survivors[0].name || 'next'}"`, 'info', 3500);
+    loadProfile(survivors[0].id);
+  }
+}
+
+// Returns the list of profileIds with pending remote tombstones the user
+// hasn't confirmed yet. Settings → Sync surfaces these with Apply / Reject
+// buttons so the user can authorise the wipe out-of-band.
+export function listPendingTombstones() {
+  const out = [];
+  const profiles = getProfiles();
+  for (const p of profiles) {
+    const raw = localStorage.getItem(TOMBSTONE_QUARANTINE_KEY(p.id));
+    if (!raw) continue;
+    try { out.push({ id: p.id, name: p.name || p.id, ...(JSON.parse(raw) || {}) }); }
+    catch { out.push({ id: p.id, name: p.name || p.id }); }
+  }
+  return out;
+}
+
+// User confirmed: apply the wipe locally and clear the marker. The relay
+// row is already isDeleted=1; we just propagate the consequence.
+export async function applyPendingTombstone(profileId) {
+  const profiles = getProfiles();
+  const survivors = profiles.filter(p => p.id !== profileId);
+  if (survivors.length === 0) return { ok: false, reason: 'last-profile' };
+  // Mirror the inline cleanup from applyRemoteTombstones.
+  localStorage.removeItem(profileStorageKey(profileId, 'imported'));
+  for (const k of ['units','suppOverlay','noteOverlay','rangeMode','suppImpact']) {
+    localStorage.removeItem(profileStorageKey(profileId, k));
+  }
+  for (const k of ['chat','chat-threads','chatRailOpen','chatPersonality','chatPersonalityCustom','focusCard','contextHealth','onboarded','tour','cycleTour','phaseOverlay','sync-ts']) {
+    localStorage.removeItem(`labcharts-${profileId}-${k}`);
+  }
+  try {
+    const wsMod = await import('./wearables-store.js');
+    await wsMod.deleteWearablesDB(profileId).catch(() => {});
+  } catch {}
+  await saveProfiles(survivors);
+  localStorage.removeItem(TOMBSTONE_QUARANTINE_KEY(profileId));
+  if (state.currentProfile === profileId) loadProfile(survivors[0].id);
+  return { ok: true };
+}
+
+// User rejected the tombstone (suspicious mass-delete). Re-publishes the
+// profile to the relay using the existing local data — the next pull on
+// any device will resurrect the profile via the live-row branch. The
+// previous tombstone row stays isDeleted=1 but loses to the new live row
+// because Evolu LWW. Returns ok if the re-push succeeded.
+export async function rejectPendingTombstone(profileId) {
+  if (!evolu || !_syncEnabled) return { ok: false, reason: 'sync-off' };
+  const localKey = profileStorageKey(profileId, 'imported');
+  const raw = getEncryptionEnabled()
+    ? await encryptedGetItem(localKey)
+    : localStorage.getItem(localKey);
+  if (!raw) {
+    localStorage.removeItem(TOMBSTONE_QUARANTINE_KEY(profileId));
+    return { ok: false, reason: 'no-local-data' };
+  }
+  let data;
+  try { data = JSON.parse(raw); } catch { return { ok: false, reason: 'bad-local-json' }; }
+  // Re-insert as a new row (don't reuse the tombstoned row id) so the
+  // live record cleanly replaces the tombstone in the local query view.
+  await pushProfile(profileId, data);
+  localStorage.removeItem(TOMBSTONE_QUARANTINE_KEY(profileId));
+  return { ok: true };
+}
+
 async function onSyncReceived() {
   if (!evolu || !profileQuery || _pulling) {
     dbg('onSyncReceived skipped:', !evolu ? 'no evolu' : !profileQuery ? 'no query' : 'already pulling');
@@ -676,9 +924,38 @@ async function onSyncReceived() {
   _pulling = true;
   updateSyncStatus({ pull: 'pulling' });
   try {
-    const rows = evolu.getQueryRows(profileQuery);
-    dbg(`onSyncReceived: ${rows?.length ?? 0} rows`);
-    if (!rows || rows.length === 0) return;
+    // Apply remote tombstones FIRST — when another device deleted a profile,
+    // wipe our local copy before processing live rows. Skipping this leaves
+    // orphan profiles in the local list that the active query no longer
+    // returns, and the user sees ghost entries that resync never explains.
+    await applyRemoteTombstones();
+
+    const rawRows = evolu.getQueryRows(profileQuery);
+    dbg(`onSyncReceived: ${rawRows?.length ?? 0} rows`);
+    if (!rawRows || rawRows.length === 0) return;
+
+    // Dedupe by profileId, keeping the row with the highest syncedAt.
+    // Evolu can return multiple rows per profileId after a tombstone +
+    // recreate or a restore-from-mnemonic race; iterating in CRDT order
+    // could let an older row land last and overwrite the newer pull
+    // (because the per-profile localStorage timestamp is bumped only at
+    // the bottom of the loop). Sort descending so the freshest row is
+    // processed first, then the older row's `remoteUpdated <= localUpdated`
+    // guard short-circuits as intended.
+    const byProfile = new Map();
+    for (const row of rawRows) {
+      if (!row?.profileId) continue;
+      const ts = row.syncedAt ? new Date(row.syncedAt).getTime() : 0;
+      const prev = byProfile.get(row.profileId);
+      if (!prev || ts > (prev.syncedAt ? new Date(prev.syncedAt).getTime() : 0)) {
+        byProfile.set(row.profileId, row);
+      }
+    }
+    const rows = Array.from(byProfile.values()).sort((a, b) => {
+      const ta = a.syncedAt ? new Date(a.syncedAt).getTime() : 0;
+      const tb = b.syncedAt ? new Date(b.syncedAt).getTime() : 0;
+      return tb - ta;
+    });
 
     let profilesChanged = false;
     let latestAiSettings = null;
@@ -712,6 +989,30 @@ async function onSyncReceived() {
 
         // Validate importedData shape
         if (!importedData || typeof importedData !== 'object') continue;
+
+        // Preserve local wearableConnections — they're stripped from the push
+        // payload (tokens stay per-device), so the remote blob never carries
+        // them. Without this merge the pull would wipe this device's OAuth
+        // tokens and silently disconnect every connected vendor.
+        let localWearableConnections = null;
+        if (profileId === state.currentProfile) {
+          localWearableConnections = state.importedData?.wearableConnections || null;
+        } else {
+          try {
+            const rawLocal = getEncryptionEnabled()
+              ? await encryptedGetItem(localKey)
+              : localStorage.getItem(localKey);
+            if (rawLocal) {
+              const parsed = JSON.parse(rawLocal);
+              localWearableConnections = parsed?.wearableConnections || null;
+            }
+          } catch (e) {
+            dbg('Could not read local wearableConnections for preserve:', e.message);
+          }
+        }
+        if (localWearableConnections) {
+          importedData.wearableConnections = localWearableConnections;
+        }
 
         // Update importedData in localStorage
         const importedJson = JSON.stringify(importedData);
@@ -797,6 +1098,13 @@ export function onDataSaved() {
   if (_syncEnabled && evolu) {
     const profileId = state.currentProfile;
     const data = state.importedData;
+    // Bump sync-ts immediately so a pull firing during the debounce window
+    // sees local as newer and skips — otherwise it would clobber the fresh
+    // local write (e.g. wearableConnections from OAuth callback) with the
+    // pre-write relay snapshot. pushProfile bumps sync-ts again on success.
+    if (profileId) {
+      localStorage.setItem(`labcharts-${profileId}-sync-ts`, String(Date.now()));
+    }
     clearTimeout(_debounceTimer);
     _debounceTimer = setTimeout(() => {
       if (_syncing) {
@@ -863,10 +1171,22 @@ export function pushContextToGateway() {
   clearTimeout(_contextPushTimer);
   _contextPushTimer = setTimeout(async () => {
     try {
-      const { buildLabContext } = await import('./lab-context.js');
-      const context = buildLabContext({ skipGroupFilter: true });
+      const { buildLabContext, buildWearableSeriesSection, getAgentWearableSeriesDays } = await import('./lab-context.js');
+      const baseContext = buildLabContext({ skipGroupFilter: true });
+      // Optional wearable daily-series section — user picks 0 (off) / 7 /
+      // 30 / 90 days in Settings → Integrations → Agent Access. Reads L1
+      // IDB on the browser; the gateway only ever sees the rendered string.
+      // Append AFTER the rest so the section parser treats it as a sibling.
+      const seriesDays = getAgentWearableSeriesDays();
+      const seriesBlock = seriesDays > 0
+        ? await buildWearableSeriesSection(seriesDays).catch(() => '')
+        : '';
+      const context = seriesBlock ? `${baseContext}\n${seriesBlock}\n` : baseContext;
       const profileId = state.currentProfile || 'default';
-      const profiles = getProfiles().map(p => ({ id: p.id, name: p.name }));
+      // The gateway only needs the active profileId — DON'T leak the full
+      // profile-name list. Profile names can include real names; the relay
+      // is unencrypted (the rest of the agent payload is by design too,
+      // but profile names are gratuitous PII for the agent's needs).
       const relay = getSyncRelay().replace(/^wss:\/\//, 'https://').replace(/^ws:\/\//, 'http://');
 
       await fetch(`${relay}/api/context`, {
@@ -875,9 +1195,9 @@ export function pushContextToGateway() {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ context, profileId, profiles }),
+        body: JSON.stringify({ context, profileId }),
       });
-      dbg(`Context pushed to gateway (profile: ${profileId})`);
+      dbg(`Context pushed to gateway (profile: ${profileId}, series: ${seriesBlock ? 'yes' : 'no'})`);
     } catch (e) {
       console.warn('[sync] Context push failed:', e);
     }
@@ -965,11 +1285,16 @@ Object.assign(window, {
   restoreFromMnemonic,
   isSyncEnabled,
   pushCurrentProfile,
+  deleteProfileFromRelay,
+  listPendingTombstones,
+  applyPendingTombstone,
+  rejectPendingTombstone,
   checkRelayConnection,
   isMessengerEnabled,
   getMessengerToken,
   generateMessengerToken,
   revokeMessengerToken,
+  pushContextToGateway,
   _syncDiag,
   _forcePull,
   renderSyncIndicator,

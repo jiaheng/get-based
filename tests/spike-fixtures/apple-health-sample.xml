@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE HealthData [
+  <!ELEMENT HealthData (Record*)>
+]>
+<HealthData locale="en_US">
+ <Record type="HKQuantityTypeIdentifierRestingHeartRate" sourceName="Apple Watch" unit="count/min" creationDate="2026-04-20 08:32:15 +0200" startDate="2026-04-20 08:30:00 +0200" endDate="2026-04-20 08:32:15 +0200" value="58"/>
+ <Record type="HKQuantityTypeIdentifierRestingHeartRate" sourceName="Third Party App" unit="count/min" creationDate="2026-04-20 12:00:00 +0200" startDate="2026-04-20 12:00:00 +0200" endDate="2026-04-20 12:00:00 +0200" value="85"/>
+ <Record type="HKQuantityTypeIdentifierHeartRateVariabilitySDNN" sourceName="Apple Watch" unit="ms" creationDate="2026-04-20 02:15:00 +0200" startDate="2026-04-20 02:15:00 +0200" endDate="2026-04-20 02:15:00 +0200" value="42.5"/>
+ <Record type="HKQuantityTypeIdentifierHeartRateVariabilitySDNN" sourceName="Apple Watch" unit="ms" creationDate="2026-04-20 03:20:00 +0200" startDate="2026-04-20 03:20:00 +0200" endDate="2026-04-20 03:20:00 +0200" value="48.5"/>
+ <Record type="HKQuantityTypeIdentifierStepCount" sourceName="iPhone" unit="count" creationDate="2026-04-20 09:00:00 +0200" startDate="2026-04-20 08:55:00 +0200" endDate="2026-04-20 09:00:00 +0200" value="320"/>
+ <Record type="HKQuantityTypeIdentifierStepCount" sourceName="iPhone" unit="count" creationDate="2026-04-20 14:10:00 +0200" startDate="2026-04-20 14:05:00 +0200" endDate="2026-04-20 14:10:00 +0200" value="2100"/>
+ <Record type="HKQuantityTypeIdentifierStepCount" sourceName="Apple Watch" unit="count" creationDate="2026-04-20 19:30:00 +0200" startDate="2026-04-20 19:25:00 +0200" endDate="2026-04-20 19:30:00 +0200" value="5430"/>
+ <Record type="HKQuantityTypeIdentifierOxygenSaturation" sourceName="Apple Watch" unit="%" creationDate="2026-04-20 02:30:00 +0200" startDate="2026-04-20 02:30:00 +0200" endDate="2026-04-20 02:30:00 +0200" value="97"/>
+ <Record type="HKQuantityTypeIdentifierOxygenSaturation" sourceName="Apple Watch" unit="%" creationDate="2026-04-20 04:30:00 +0200" startDate="2026-04-20 04:30:00 +0200" endDate="2026-04-20 04:30:00 +0200" value="95"/>
+ <Record type="HKQuantityTypeIdentifierBodyTemperature" sourceName="Apple Watch" unit="degC" creationDate="2026-04-20 03:00:00 +0200" startDate="2026-04-20 03:00:00 +0200" endDate="2026-04-20 03:00:00 +0200" value="36.4"/>
+ <Record type="HKQuantityTypeIdentifierRestingHeartRate" sourceName="Apple Watch" unit="count/min" creationDate="2026-04-21 08:45:00 +0200" startDate="2026-04-21 08:40:00 +0200" endDate="2026-04-21 08:45:00 +0200" value="56"/>
+ <Record type="HKQuantityTypeIdentifierHeartRateVariabilitySDNN" sourceName="Apple Watch" unit="ms" creationDate="2026-04-21 02:10:00 +0200" startDate="2026-04-21 02:10:00 +0200" endDate="2026-04-21 02:10:00 +0200" value="51"/>
+ <Record type="HKQuantityTypeIdentifierStepCount" sourceName="iPhone" unit="count" creationDate="2026-04-21 11:00:00 +0200" startDate="2026-04-21 10:55:00 +0200" endDate="2026-04-21 11:00:00 +0200" value="8200"/>
+ <Record type="HKQuantityTypeIdentifierOxygenSaturation" sourceName="Apple Watch" unit="%" creationDate="2026-04-21 03:30:00 +0200" startDate="2026-04-21 03:30:00 +0200" endDate="2026-04-21 03:30:00 +0200" value="98"/>
+ <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Apple Watch" unit="count/min" creationDate="2026-04-20 10:00:00 +0200" startDate="2026-04-20 10:00:00 +0200" endDate="2026-04-20 10:00:00 +0200" value="72"/>
+ <Record type="HKQuantityTypeIdentifierActiveEnergyBurned" sourceName="Apple Watch" unit="kcal" creationDate="2026-04-20 11:00:00 +0200" startDate="2026-04-20 10:55:00 +0200" endDate="2026-04-20 11:00:00 +0200" value="45"/>
+ <Record type="HKQuantityTypeIdentifierBodyMass" sourceName="Withings Scale" unit="kg" creationDate="2026-04-21 07:00:00 +0200" startDate="2026-04-21 07:00:00 +0200" endDate="2026-04-21 07:00:00 +0200" value="72.5"/>
+</HealthData>

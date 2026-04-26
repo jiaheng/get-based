@@ -70,6 +70,7 @@ When encryption is enabled, the following are encrypted:
 - All imported lab data (entries, notes, supplements, cycle data, context cards)
 - Chat conversation history
 - Custom personality settings
+- **Wearable IndexedDB rows** (per-profile L1 daily values: HRV, sleep, RHR, manual entries — added v1.29.0). The compound key (`source`, `date`) stays plaintext so range queries still work; every other field is wrapped in an AES-GCM envelope. New writes encrypt automatically; existing plaintext rows pass through reads untouched until they're rewritten.
 
 Settings such as your chosen AI provider and theme are stored in plaintext (they contain no health data).
 

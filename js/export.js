@@ -62,20 +62,30 @@ export function exportPDFReport() {
   }
   const pBio = state.importedData.biometrics;
   const pHeight = window.getProfileHeight ? window.getProfileHeight(state.currentProfile) : { height: null };
-  if (pBio || pHeight?.height) {
+  // Fallback to the wearable summary when legacy biometrics arrays are empty —
+  // wearable-only users (manual via Edit Client retired in Phase 4 + OAuth
+  // sources) carry weight/BP/pulse only inside wearableSummary.metrics.
+  const wm = state.importedData?.wearableSummary?.metrics;
+  if (pBio || pHeight?.height || wm) {
     let bioText = '';
     if (pHeight?.height) bioText += `Height: ${pHeight.height} cm\n`;
     if (pBio?.weight?.length) {
       const latest = [...pBio.weight].sort((a, b) => b.date.localeCompare(a.date))[0];
       bioText += `Latest weight: ${latest.value} ${latest.unit} (${latest.date})\n`;
+    } else if (typeof wm?.weight?.latest === 'number') {
+      bioText += `Latest weight: ${wm.weight.latest} kg (${wm.weight.latestDate || '—'})\n`;
     }
     if (pBio?.bp?.length) {
       const latest = [...pBio.bp].sort((a, b) => b.date.localeCompare(a.date))[0];
       bioText += `Latest BP: ${latest.sys}/${latest.dia} mmHg (${latest.date})\n`;
+    } else if (typeof wm?.bp_systolic?.latest === 'number' && typeof wm?.bp_diastolic?.latest === 'number') {
+      bioText += `Latest BP: ${wm.bp_systolic.latest}/${wm.bp_diastolic.latest} mmHg (${wm.bp_systolic.latestDate || '—'})\n`;
     }
     if (pBio?.pulse?.length) {
       const latest = [...pBio.pulse].sort((a, b) => b.date.localeCompare(a.date))[0];
       bioText += `Latest pulse: ${latest.value} bpm (${latest.date})\n`;
+    } else if (typeof wm?.rhr?.latest === 'number') {
+      bioText += `Latest resting HR: ${wm.rhr.latest} bpm (${wm.rhr.latestDate || '—'})\n`;
     }
     if (bioText) contextSections.push({ title: 'Biometrics', text: bioText.trim() });
   }
@@ -422,7 +432,14 @@ export async function exportClientJSON(profileId, includeChat = false) {
     markerNotes: data.markerNotes || {},
     manualValues: data.manualValues || {},
     changeHistory: data.changeHistory || [],
-    chatSummaries: data.chatSummaries || []
+    chatSummaries: data.chatSummaries || [],
+    // Wearable layer (added v1.27.1). Only the synced surfaces — L2 summary
+    // + user preferences. Raw L1 IDB rows are deliberately excluded; they
+    // stay per-device. OAuth tokens are stripped via the same path the
+    // Evolu sync uses (wearableConnections wholesale exclude).
+    wearableSummary: data.wearableSummary || null,
+    wearableCardOrder: data.wearableCardOrder || null,
+    wearablePrimaryOverride: data.wearablePrimaryOverride || null
   };
   if (includeChat) {
     const chat = await _exportChatData(profileId);
@@ -699,6 +716,32 @@ export function importDataJSON(file) {
         }
         state.importedData.changeHistory.sort((a, b) => a.date.localeCompare(b.date));
         while (state.importedData.changeHistory.length > 200) state.importedData.changeHistory.shift();
+      }
+      // Import wearable layer (added v1.27.1). The summary, card order, and
+      // per-metric override flow in; raw L1 IDB rows do not (they're never
+      // exported). On the destination device the strip will render with the
+      // imported summary numbers, but the detail-modal chart will be empty
+      // until the user re-OAuths each vendor — same shape as Evolu sync.
+      if (json.wearableSummary && typeof json.wearableSummary === 'object') {
+        state.importedData.wearableSummary = json.wearableSummary;
+      }
+      if (Array.isArray(json.wearableCardOrder)) {
+        state.importedData.wearableCardOrder = json.wearableCardOrder;
+      }
+      if (json.wearablePrimaryOverride && typeof json.wearablePrimaryOverride === 'object') {
+        // Prune entries pointing at sources that don't exist on this device
+        // (no IDB rows yet, no connection record). The L2 picker would fall
+        // through to auto anyway, but a stale override produces a misleading
+        // ✓ in the source picker until the user re-OAuths the missing vendor.
+        const liveSources = new Set([
+          ...Object.keys(state.importedData?.wearableConnections || {}),
+          ...Object.keys(json.wearableSummary?.sources || {}),
+        ]);
+        const pruned = {};
+        for (const [metricId, sourceId] of Object.entries(json.wearablePrimaryOverride)) {
+          if (liveSources.has(sourceId)) pruned[metricId] = sourceId;
+        }
+        state.importedData.wearablePrimaryOverride = pruned;
       }
       // Import chat summaries (merge by threadId)
       if (Array.isArray(json.chatSummaries)) {

@@ -1,5 +1,25 @@
 importScripts('/version.js');
-const CACHE_NAME = `labcharts-v${self.APP_VERSION}`;
+
+// Cache key strategy:
+//   Production (getbased.health) → labcharts-v${APP_VERSION}
+//   Anywhere else (Vercel previews, local dev) → labcharts-v${APP_VERSION}-${sha8}
+// This way feature-branch deploys auto-bust the SW cache on every commit
+// without burning patch versions, while production stays clean.
+const PROD_HOSTS = new Set(['getbased.health', 'www.getbased.health']);
+const IS_PROD = PROD_HOSTS.has(self.location.hostname);
+
+let _cacheNamePromise = null;
+async function resolveCacheName() {
+  const base = `labcharts-v${self.APP_VERSION}`;
+  if (IS_PROD) return base;
+  if (!_cacheNamePromise) {
+    _cacheNamePromise = fetch('/api/commit', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => (j && j.sha ? `${base}-${j.sha.slice(0, 8)}` : base))
+      .catch(() => base);
+  }
+  return _cacheNamePromise;
+}
 
 // Local app shell — pre-cached on install
 const APP_SHELL = [
@@ -48,6 +68,27 @@ const APP_SHELL = [
   '/js/food-contaminants.js',
   '/js/cashu-wallet.js',
   '/js/nostr-discovery.js',
+  // Wearables (added v1.22.0)
+  '/js/wearable-adapters.js',
+  '/js/wearables.js',
+  '/js/wearables-store.js',
+  '/js/wearables-summary.js',
+  '/js/wearables-connect.js',
+  '/js/wearables-oura.js',
+  '/js/wearables-oura-auth.js',
+  '/js/wearables-withings.js',
+  '/js/wearables-withings-auth.js',
+  '/js/wearables-ultrahuman.js',
+  '/js/wearables-ultrahuman-auth.js',
+  '/js/wearables-whoop.js',
+  '/js/wearables-whoop-auth.js',
+  '/js/wearables-fitbit.js',
+  '/js/wearables-fitbit-auth.js',
+  '/js/wearables-polar.js',
+  '/js/wearables-polar-auth.js',
+  '/js/wearables-apple-health.js',
+  '/js/wearables-manual.js',
+  '/js/brand-assets.js',
   '/icon.svg',
   '/icon-192.png',
   '/icon-512.png',
@@ -65,16 +106,20 @@ const APP_SHELL = [
 // Install: pre-cache app shell
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL))
+    resolveCacheName().then((name) =>
+      caches.open(name).then((cache) => cache.addAll(APP_SHELL))
+    )
   );
   self.skipWaiting();
 });
 
-// Activate: delete old caches
+// Activate: delete old caches (any key that isn't this build's)
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+    resolveCacheName().then((name) =>
+      caches.keys().then((keys) =>
+        Promise.all(keys.filter((k) => k !== name).map((k) => caches.delete(k)))
+      )
     )
   );
   self.clients.claim();
@@ -100,7 +145,7 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(event.request).then((response) => {
         const clone = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        resolveCacheName().then((name) => caches.open(name)).then((cache) => cache.put(event.request, clone));
         return response;
       }).catch(() => caches.match(event.request))
     );
@@ -118,7 +163,7 @@ self.addEventListener('fetch', (event) => {
     caches.match(event.request).then((cached) => {
       const fetched = fetch(event.request).then((response) => {
         const clone = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        resolveCacheName().then((name) => caches.open(name)).then((cache) => cache.put(event.request, clone));
         return response;
       }).catch(() => cached);
       return cached || fetched;

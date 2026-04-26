@@ -8,6 +8,7 @@ import { getActiveData, filterDatesByRange, destroyAllCharts, getEffectiveRange,
 import { profileStorageKey } from './profile.js';
 import { createLineChart, getMarkerDescription, getNotesForChart, getSupplementsForChart, refBandPlugin, noteAnnotationPlugin, supplementBarPlugin } from './charts.js';
 import { renderSupplementsSection } from './supplements.js';
+import { renderWearableStrip } from './wearables.js';
 import { renderGeneticsSection } from './dna.js';
 import { renderMenstrualCycleSection } from './cycle.js';
 import { renderProfileContextCards, renderInterpretiveLensSection, loadContextHealthDots, closeSuggestionsOnClickOutside } from './context-cards.js';
@@ -54,12 +55,15 @@ export function showDashboard(data) {
   if (!hasData) {
     let html = `<div class="welcome-hero">
       <h2>Welcome to getbased</h2>
-      <p class="welcome-hero-subtitle">Track your biomarkers, understand your health</p>
+      <p class="welcome-hero-subtitle">Lab work + wearables, in one dashboard</p>
       <div class="drop-zone" id="drop-zone">
         <div class="drop-zone-icon">\uD83D\uDCC4</div>
         <div class="drop-zone-text">Drop PDF, image, JSON, or DNA raw data file here, or click to browse</div>
         <div class="drop-zone-hint">AI-powered — works with any lab report (PDF, photo, screenshot) or getbased JSON export</div>
         ${!hasAIProvider() ? `<div class="drop-zone-api-hint">${isAIPaused() ? 'AI features are paused — <a href="#" onclick="event.preventDefault();event.stopPropagation();window.openSettingsModal(\'ai\')">re-enable in Settings</a>' : 'Requires an AI connection — <a href="#" onclick="event.preventDefault();event.stopPropagation();closeChatPanel();window.openSettingsModal(\'ai\')">set up in 30 seconds</a>'}</div>` : ''}</div>
+      <div class="welcome-wearable-hint">
+        ⧬ Got an Oura, Withings, Fitbit, Polar, or Apple Health export? <a href="#" onclick="event.preventDefault();window.openSettingsModal('wearables')">Connect it</a> to see HRV, sleep, recovery, and body composition trends alongside your blood work.
+      </div>
       <div class="onboarding-divider">
         <span class="onboarding-divider-line"></span>
         <span class="onboarding-divider-text">or explore with demo data</span>
@@ -69,15 +73,20 @@ export function showDashboard(data) {
         <button class="demo-card" onclick="loadDemoData('female')">
           <span class="demo-card-avatar">\uD83D\uDC69</span>
           <span class="demo-card-name">Sarah, 34</span>
-          <span class="demo-card-desc">Iron & hormones story</span>
+          <span class="demo-card-desc">Iron + Oura: overtraining clues</span>
         </button>
         <button class="demo-card" onclick="loadDemoData('male')">
           <span class="demo-card-avatar">\uD83D\uDC68</span>
           <span class="demo-card-name">Alex, 38</span>
-          <span class="demo-card-desc">Metabolic health journey</span>
+          <span class="demo-card-desc">Metabolic + Withings body comp</span>
         </button>
       </div>
     </div>`;
+    // Wearable strip renders even without lab data \u2014 users who connect Oura
+    // etc. before importing any PDFs should still see their HRV / sleep /
+    // RHR trends. renderWearableStrip() returns '' when no wearables are
+    // connected, so it's safe to always call.
+    html += renderWearableStrip();
     const detailsOpen = sessionStorage.getItem('welcome-details-open') === '1';
     html += `<details class="welcome-context-details"${detailsOpen ? ' open' : ''}>
       <summary class="welcome-context-summary" onclick="setTimeout(()=>sessionStorage.setItem('welcome-details-open',document.querySelector('.welcome-context-details')?.open?'1':'0'),0)">Don\u2019t have labs yet? Tell the AI about yourself</summary>`;
@@ -108,6 +117,9 @@ export function showDashboard(data) {
 
   // ── 3b. Focus Card (always render if data exists — shows cached insight even when AI is paused) ──
   html += renderFocusCard();
+
+  // ── 3c. Wearable strip (Oura · Withings · Ultrahuman · WHOOP · Fitbit · Apple Health) ──
+  html += renderWearableStrip();
 
   // ── 4. Profile Context Cards ──
   html += renderProfileContextCards();
@@ -248,6 +260,21 @@ export function showDashboard(data) {
 // ── Commit Hash ──
 
 let _cachedCommitHash = null;
+
+// Remembered focus before a detail modal opens, so closeModal() can return
+// focus to the trigger. Keyboard users otherwise land on <body> after close
+// and lose their place in the page.
+let _modalLastTrigger = null;
+export function rememberModalTrigger() {
+  const el = document.activeElement;
+  _modalLastTrigger = (el && el !== document.body && typeof el.focus === 'function') ? el : null;
+}
+function restoreModalTrigger() {
+  const el = _modalLastTrigger;
+  _modalLastTrigger = null;
+  if (!el || !document.contains(el)) return;
+  try { el.focus(); } catch { /* element may have been replaced */ }
+}
 function loadCommitHash() {
   const vEl = document.getElementById('app-version-text');
   if (vEl && !vEl.textContent) vEl.textContent = window.APP_VERSION || '';
@@ -1058,6 +1085,7 @@ export function showDetailModal(id, opts = {}) {
   let marker = data.categories[catKey]?.markers[mKey];
   if (marker) state.markerRegistry[id] = marker;
   if (!marker) return;
+  rememberModalTrigger();
   const modal = document.getElementById("detail-modal");
   const overlay = document.getElementById("modal-overlay");
   const dates = marker.singlePoint ? [marker.singleDateLabel || "N/A"] : data.dateLabels;
@@ -1694,6 +1722,10 @@ export function closeModal() {
   if (state.chartInstances["modal"]) { state.chartInstances["modal"].destroy(); delete state.chartInstances["modal"]; }
   document.removeEventListener('click', closeSuggestionsOnClickOutside);
   if (window.closeEMFInterpretation) window.closeEMFInterpretation();
+  // Detail-modal Tab focus trap (wearables) — uninstall explicitly so the
+  // global keydown handler doesn't outlive the modal it scoped to.
+  if (window._uninstallWearableModalFocusTrap) window._uninstallWearableModalFocusTrap();
+  restoreModalTrigger();
 }
 
 
@@ -2177,6 +2209,7 @@ Object.assign(window, {
   saveMarkerNote,
   deleteMarkerNote,
   closeModal,
+  rememberModalTrigger,
   showCompare,
   setCompareDate1,
   setCompareDate2,

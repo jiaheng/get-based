@@ -345,6 +345,10 @@ return (async function() {
   console.log('%c 5. Free Water Deficit ', 'font-weight:bold;color:#f59e0b');
 
   state.profileSex = 'male';
+  // Clear any wearableSummary inherited from a previously loaded demo profile
+  // — wearableSummary.metrics.weight.latest takes precedence over biometrics
+  // in the FWD calc, and we're explicitly testing the legacy-biometrics path.
+  state.importedData.wearableSummary = null;
   state.importedData.biometrics = { weight: [{ date: '2025-06-01', value: 80, unit: 'kg' }], bp: [], pulse: [] };
 
   // FWD = TBW × (Na/140 - 1), TBW = weight × 0.6 (male)

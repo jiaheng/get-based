@@ -20,3 +20,5 @@ tools/
 dev-chrome.sh
 test-screenshots/
 .mcp.json
+.env.local
+.env.*.local

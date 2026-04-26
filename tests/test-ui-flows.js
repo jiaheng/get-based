@@ -12,6 +12,7 @@ return (async function() {
   const main = document.getElementById('main-content');
   const S = window._labState;
 
+
   // Dismiss any open dialogs/modals from prior tests
   document.getElementById('confirm-dialog-overlay')?.classList.remove('show');
   document.getElementById('modal-overlay')?.classList.remove('show');
@@ -35,6 +36,24 @@ return (async function() {
   }
   const data = window.getActiveData();
   assert('Setup: demo data loaded', data.dates.length > 0, `${data.dates.length} dates`);
+
+  // ═══════════════════════════════════════════════
+  // 0. MODAL FOCUS-RETURN WIRING (source-check)
+  // ═══════════════════════════════════════════════
+  // Detail modal closing must return focus to the triggering element so
+  // keyboard users don't land on <body> and lose their place. The wiring
+  // is: rememberModalTrigger() captures activeElement on open,
+  // closeModal() restores it. Exposed on window for wearables.js to call.
+  const viewsSrc = await fetch('js/views.js').then(r => r.text());
+  const wearablesSrc = await fetch('js/wearables.js').then(r => r.text());
+  assert('views.js defines rememberModalTrigger', /function rememberModalTrigger\s*\(/.test(viewsSrc));
+  assert('views.js defines restoreModalTrigger', /function restoreModalTrigger\s*\(/.test(viewsSrc));
+  assert('showDetailModal captures trigger before opening', /showDetailModal[\s\S]*?rememberModalTrigger\(\)/.test(viewsSrc));
+  assert('closeModal restores trigger on close', /function closeModal\(\)[\s\S]*?restoreModalTrigger\(\)/.test(viewsSrc));
+  assert('rememberModalTrigger exported', viewsSrc.includes('export function rememberModalTrigger'));
+  assert('rememberModalTrigger on window', /window\s*,\s*\{[\s\S]*?rememberModalTrigger/.test(viewsSrc));
+  assert('wearable detail modal captures trigger', wearablesSrc.includes('window.rememberModalTrigger?.()'));
+  assert('restoreModalTrigger guards against detached elements', /document\.contains\(el\)/.test(viewsSrc));
 
   // ═══════════════════════════════════════════════
   // 1. DASHBOARD — renders all key sections

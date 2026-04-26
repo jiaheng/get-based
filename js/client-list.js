@@ -266,8 +266,6 @@ export function openClientForm(profileId) {
   const heightData = p ? getProfileHeight(p.id) : { height: null, unit: 'cm' };
   const heightUnit = heightData.unit || 'cm';
   const heightDisplay = heightData.height ? (heightUnit === 'in' ? (heightData.height / 2.54).toFixed(1) : heightData.height) : '';
-  const _bio = state.importedData?.biometrics;
-  const hasBioData = heightData.height || (_bio && (_bio.weight?.length || _bio.bp?.length || _bio.pulse?.length));
 
   const avatarColor = getAvatarColor(p ? p.id : 'new');
   const avatarInitial = (name || '?')[0].toUpperCase();
@@ -321,25 +319,19 @@ export function openClientForm(profileId) {
       <div id="cl-lat-display" style="font-size:11px;margin-top:4px"></div>
     </div>
     <div class="cl-form-row" style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px">
-      <label class="cl-form-label cl-bio-toggle" onclick="window._clToggleBio()" style="cursor:pointer;user-select:none">
-        <span class="cl-bio-arrow" id="cl-bio-arrow">${hasBioData ? '&#9660;' : '&#9654;'}</span> Biometrics
-        <span id="cl-bio-summary" style="font-weight:400;color:var(--text-muted);font-size:11px;margin-left:6px"></span>
-      </label>
-      <div id="cl-bio-body" style="${hasBioData ? '' : 'display:none'}">
-        <div class="cl-form-row-split" style="margin-bottom:8px">
-          <div class="cl-form-col">
-            <label style="font-size:11px;color:var(--text-muted)">Height <a href="#" class="cl-bio-unit-toggle" id="cl-height-unit-toggle" data-unit="${heightUnit}" onclick="window._clHeightUnitChanged();return false">${heightUnit}</a></label>
-            <input type="number" class="cl-form-input" id="cl-height" value="${escapeHTML(String(heightDisplay))}" step="0.1" placeholder="${heightUnit === 'in' ? 'inches' : 'cm'}" oninput="window._clUpdateBMI()">
-            <input type="hidden" id="cl-height-unit" value="${heightUnit}">
-          </div>
-          <div class="cl-form-col">
-            <label style="font-size:11px;color:var(--text-muted)">BMI</label>
-            <div class="mc-auto-value" id="cl-bmi-display"></div>
-          </div>
+      <div class="cl-form-row-split" style="margin-bottom:4px">
+        <div class="cl-form-col">
+          <label style="font-size:11px;color:var(--text-muted)">Height <a href="#" class="cl-bio-unit-toggle" id="cl-height-unit-toggle" data-unit="${heightUnit}" onclick="window._clHeightUnitChanged();return false">${heightUnit}</a></label>
+          <input type="number" class="cl-form-input" id="cl-height" value="${escapeHTML(String(heightDisplay))}" step="0.1" placeholder="${heightUnit === 'in' ? 'inches' : 'cm'}" oninput="window._clUpdateBMI()">
+          <input type="hidden" id="cl-height-unit" value="${heightUnit}">
         </div>
-        <div id="cl-bio-weight"></div>
-        <div id="cl-bio-bp"></div>
-        <div id="cl-bio-pulse"></div>
+        <div class="cl-form-col">
+          <label style="font-size:11px;color:var(--text-muted)">BMI</label>
+          <div class="mc-auto-value" id="cl-bmi-display"></div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:2px">
+        <a href="#" onclick="window._clGoToHealthMetrics(event)" style="color:var(--text-muted);text-decoration:underline">Log weight, blood pressure &amp; pulse on the dashboard &rarr;</a>
       </div>
     </div>
     <div class="cl-form-row">
@@ -378,11 +370,19 @@ export function openClientForm(profileId) {
   </form>`;
   requestAnimationFrame(() => {
     _clUpdateLat();
-    _clRenderBioField('weight');
-    _clRenderBioField('bp');
-    _clRenderBioField('pulse');
     _clUpdateBMI();
-    _clUpdateBioSummary();
+  });
+}
+
+// Close the Edit Client modal and navigate to the dashboard — the anchor in
+// the Height & BMI row tells the user weight/BP/pulse live there now.
+function _clGoToHealthMetrics(event) {
+  if (event) event.preventDefault();
+  if (window.closeClientList) window.closeClientList();
+  if (window.navigate) window.navigate('dashboard');
+  // Scroll to the wearable strip so the user lands on the metric cards.
+  requestAnimationFrame(() => {
+    document.getElementById('wearable-strip')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 }
 
@@ -690,199 +690,6 @@ document.addEventListener('click', (e) => {
   if (!e.target.closest('.cl-row-menu-btn')) _closeMenus();
 });
 
-// ═══════════════════════════════════════════════
-// BIOMETRICS HELPERS
-// ═══════════════════════════════════════════════
-
-function _getBio() {
-  if (!state.importedData) return { weight: [], bp: [], pulse: [] };
-  if (!state.importedData.biometrics) state.importedData.biometrics = { weight: [], bp: [], pulse: [] };
-  const b = state.importedData.biometrics;
-  if (!b.weight) b.weight = [];
-  if (!b.bp) b.bp = [];
-  if (!b.pulse) b.pulse = [];
-  return b;
-}
-
-function _fmtBioDate(dateStr) {
-  if (!dateStr) return '';
-  const d = new Date(dateStr + 'T00:00:00');
-  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-}
-
-function _clRenderBioField(type) {
-  const container = document.getElementById(`cl-bio-${type}`);
-  if (!container) return;
-  const bio = _getBio();
-  const today = new Date().toISOString().slice(0, 10);
-
-  if (type === 'weight') {
-    const entries = [...(bio.weight || [])].sort((a, b) => b.date.localeCompare(a.date));
-    const avgKg = _clBioAvg(entries.map(e => e.unit === 'lbs' ? e.value / 2.205 : e.value));
-    const displayUnit = entries.length ? entries[0].unit : 'kg';
-    const avgText = avgKg !== null
-      ? `avg ${(displayUnit === 'lbs' ? (avgKg * 2.205).toFixed(1) : avgKg.toFixed(1))} ${displayUnit}`
-      : '';
-    const countLink = entries.length ? `<a href="#" class="cl-bio-history-link" onclick="window._clToggleBioHistory('weight');return false">${entries.length} entr${entries.length === 1 ? 'y' : 'ies'}</a>` : '';
-    const hint = [avgText, countLink].filter(Boolean).join(' · ');
-    const wUnit = entries.length ? entries[0].unit : 'kg';
-    container.innerHTML = `
-      <div class="cl-form-row" style="margin-bottom:0">
-        <label class="cl-form-label" style="font-size:12px">Weight <a href="#" class="cl-bio-unit-toggle" id="cl-bio-weight-unit-toggle" onclick="window._clWeightUnitChanged();return false">${wUnit}</a></label>
-        <div style="display:flex;gap:6px;align-items:center">
-          <input type="number" class="cl-form-input" id="cl-bio-weight-val" step="0.1" placeholder="value" style="flex:1">
-          <input type="hidden" id="cl-bio-weight-unit" value="${wUnit}">
-          <input type="date" class="cl-form-input cl-form-date" id="cl-bio-weight-date" value="${today}" style="flex:0 0 auto">
-          <button type="button" class="cl-bio-add" onclick="window._clAddBioEntry('weight')">Add</button>
-        </div>
-        ${hint ? `<div class="cl-bio-hint">${hint}</div>` : ''}
-      </div>
-      ${_clBioHistory(entries, 'weight')}`;
-  } else if (type === 'bp') {
-    const entries = [...(bio.bp || [])].sort((a, b) => b.date.localeCompare(a.date));
-    const avgSys = _clBioAvg(entries.map(e => e.sys));
-    const avgDia = _clBioAvg(entries.map(e => e.dia));
-    const avgText = avgSys !== null ? `avg ${Math.round(avgSys)}/${Math.round(avgDia)} mmHg` : '';
-    const countLink = entries.length ? `<a href="#" class="cl-bio-history-link" onclick="window._clToggleBioHistory('bp');return false">${entries.length} entr${entries.length === 1 ? 'y' : 'ies'}</a>` : '';
-    const hint = [avgText, countLink].filter(Boolean).join(' · ');
-    container.innerHTML = `
-      <div class="cl-form-row" style="margin-bottom:0">
-        <label class="cl-form-label" style="font-size:12px">Blood Pressure</label>
-        <div style="display:flex;gap:6px;align-items:center">
-          <input type="number" class="cl-form-input" id="cl-bio-bp-sys" placeholder="sys" style="flex:1">
-          <span style="color:var(--text-muted)">/</span>
-          <input type="number" class="cl-form-input" id="cl-bio-bp-dia" placeholder="dia" style="flex:1">
-          <input type="date" class="cl-form-input cl-form-date" id="cl-bio-bp-date" value="${today}" style="flex:0 0 auto">
-          <button type="button" class="cl-bio-add" onclick="window._clAddBioEntry('bp')">Add</button>
-        </div>
-        ${hint ? `<div class="cl-bio-hint">${hint}</div>` : ''}
-      </div>
-      ${_clBioHistory(entries, 'bp')}`;
-  } else if (type === 'pulse') {
-    const entries = [...(bio.pulse || [])].sort((a, b) => b.date.localeCompare(a.date));
-    const avg = _clBioAvg(entries.map(e => e.value));
-    const avgText = avg !== null ? `avg ${Math.round(avg)} bpm` : '';
-    const countLink = entries.length ? `<a href="#" class="cl-bio-history-link" onclick="window._clToggleBioHistory('pulse');return false">${entries.length} entr${entries.length === 1 ? 'y' : 'ies'}</a>` : '';
-    const hint = [avgText, countLink].filter(Boolean).join(' · ');
-    container.innerHTML = `
-      <div class="cl-form-row" style="margin-bottom:0">
-        <label class="cl-form-label" style="font-size:12px">Resting Pulse</label>
-        <div style="display:flex;gap:6px;align-items:center">
-          <input type="number" class="cl-form-input" id="cl-bio-pulse-val" placeholder="bpm" style="flex:1">
-          <input type="date" class="cl-form-input cl-form-date" id="cl-bio-pulse-date" value="${today}" style="flex:0 0 auto">
-          <button type="button" class="cl-bio-add" onclick="window._clAddBioEntry('pulse')">Add</button>
-        </div>
-        ${hint ? `<div class="cl-bio-hint">${hint}</div>` : ''}
-      </div>
-      ${_clBioHistory(entries, 'pulse')}`;
-  }
-}
-
-function _clBioAvg(values) {
-  const nums = values.filter(v => v != null && !isNaN(v));
-  if (nums.length === 0) return null;
-  return nums.reduce((s, v) => s + v, 0) / nums.length;
-}
-
-function _clBioHistory(entries, type) {
-  if (!entries.length) return '';
-  const show = entries.slice(0, 5);
-  let items = '';
-  for (const e of show) {
-    let display = '';
-    if (type === 'weight') display = `${e.value} ${e.unit}`;
-    else if (type === 'bp') display = `${e.sys}/${e.dia} mmHg`;
-    else if (type === 'pulse') display = `${e.value} bpm`;
-    items += `<div class="supp-list-item">
-      <div class="supp-list-info">
-        <div class="supp-list-name">${escapeHTML(_fmtBioDate(e.date))}</div>
-        <div class="supp-list-meta">${escapeHTML(display)}</div>
-      </div>
-      <div class="supp-list-actions">
-        <button class="delete" onclick="window._clDeleteBioEntry('${type}','${escapeAttr(e.date)}')">&times;</button>
-      </div>
-    </div>`;
-  }
-  if (entries.length > 5) {
-    items += `<button type="button" class="cl-bio-show-all" onclick="window._clBioShowAll('${type}')">Show all (${entries.length})</button>`;
-  }
-  return `<div class="supp-list cl-bio-history" id="cl-bio-history-${type}" style="display:none;margin-top:4px">${items}</div>`;
-}
-
-function _clAddBioEntry(type) {
-  const bio = _getBio();
-  if (type === 'weight') {
-    const val = parseFloat(document.getElementById('cl-bio-weight-val')?.value);
-    const unit = document.getElementById('cl-bio-weight-unit')?.value || 'kg';
-    const date = document.getElementById('cl-bio-weight-date')?.value;
-    if (!val || val <= 0 || !date) { window.showNotification('Enter a valid weight and date', 'error'); return; }
-    const maxW = unit === 'lbs' ? 1100 : 500;
-    if (val > maxW) { window.showNotification(`Weight over ${maxW} ${unit} seems unlikely`, 'error'); return; }
-    bio.weight = bio.weight.filter(e => e.date !== date);
-    bio.weight.push({ date, value: val, unit, source: 'manual' });
-    bio.weight.sort((a, b) => a.date.localeCompare(b.date));
-  } else if (type === 'bp') {
-    const sys = parseInt(document.getElementById('cl-bio-bp-sys')?.value);
-    const dia = parseInt(document.getElementById('cl-bio-bp-dia')?.value);
-    const date = document.getElementById('cl-bio-bp-date')?.value;
-    if (!sys || !dia || sys <= 0 || dia <= 0 || !date) { window.showNotification('Enter valid systolic, diastolic and date', 'error'); return; }
-    if (sys > 300 || dia > 200) { window.showNotification('BP values seem too high', 'error'); return; }
-    if (dia >= sys) { window.showNotification('Diastolic should be lower than systolic', 'error'); return; }
-    bio.bp = bio.bp.filter(e => e.date !== date);
-    bio.bp.push({ date, sys, dia, source: 'manual' });
-    bio.bp.sort((a, b) => a.date.localeCompare(b.date));
-  } else if (type === 'pulse') {
-    const val = parseInt(document.getElementById('cl-bio-pulse-val')?.value);
-    const date = document.getElementById('cl-bio-pulse-date')?.value;
-    if (!val || val <= 0 || !date) { window.showNotification('Enter a valid pulse and date', 'error'); return; }
-    if (val > 250) { window.showNotification('Pulse over 250 bpm seems unlikely', 'error'); return; }
-    bio.pulse = bio.pulse.filter(e => e.date !== date);
-    bio.pulse.push({ date, value: val, source: 'manual' });
-    bio.pulse.sort((a, b) => a.date.localeCompare(b.date));
-  }
-  if (window.recordChange) window.recordChange('biometrics');
-  window.saveImportedData();
-  _clRenderBioField(type);
-  _clUpdateBMI();
-  _clUpdateBioSummary();
-}
-
-function _clDeleteBioEntry(type, date) {
-  const bio = _getBio();
-  if (bio[type]) {
-    bio[type] = bio[type].filter(e => e.date !== date);
-    if (window.recordChange) window.recordChange('biometrics');
-    window.saveImportedData();
-    _clRenderBioField(type);
-    _clUpdateBMI();
-    _clUpdateBioSummary();
-  }
-}
-
-function _clBioShowAll(type) {
-  const bio = _getBio();
-  const entries = [...(bio[type] || [])].sort((a, b) => b.date.localeCompare(a.date));
-  const container = document.querySelector(`#cl-bio-${type} .supp-list`);
-  if (!container) return;
-  let html = '';
-  for (const e of entries) {
-    let display = '';
-    if (type === 'weight') display = `${e.value} ${e.unit}`;
-    else if (type === 'bp') display = `${e.sys}/${e.dia} mmHg`;
-    else if (type === 'pulse') display = `${e.value} bpm`;
-    html += `<div class="supp-list-item">
-      <div class="supp-list-info">
-        <div class="supp-list-name">${escapeHTML(_fmtBioDate(e.date))}</div>
-        <div class="supp-list-meta">${escapeHTML(display)}</div>
-      </div>
-      <div class="supp-list-actions">
-        <button class="delete" onclick="window._clDeleteBioEntry('${type}','${escapeAttr(e.date)}')">&times;</button>
-      </div>
-    </div>`;
-  }
-  container.innerHTML = html;
-}
-
 function _clUpdateBMI() {
   const el = document.getElementById('cl-bmi-display');
   if (!el) return;
@@ -890,11 +697,10 @@ function _clUpdateBMI() {
   const heightUnit = document.getElementById('cl-height-unit')?.value || 'cm';
   const heightCm = heightRaw ? (heightUnit === 'in' ? heightRaw * 2.54 : heightRaw) : null;
 
-  // Get latest weight
-  const bio = _getBio();
-  const weights = bio.weight || [];
-  const latest = weights.length ? [...weights].sort((a, b) => b.date.localeCompare(a.date))[0] : null;
-  const weightKg = latest ? (latest.unit === 'lbs' ? latest.value / 2.205 : latest.value) : null;
+  // Weight now lives in the wearables summary (single source of truth after
+  // the Health Metrics unification). Any manual entry is canonicalized to kg
+  // on write, so no unit conversion needed here.
+  const weightKg = state.importedData?.wearableSummary?.metrics?.weight?.latest ?? null;
 
   if (heightCm && weightKg) {
     const htM = heightCm / 100;
@@ -909,53 +715,6 @@ function _clUpdateBMI() {
     el.className = 'mc-auto-value mc-auto-pending';
     el.textContent = heightCm ? 'add weight' : weightKg ? 'add height' : '--';
   }
-  _clUpdateBioSummary();
-}
-
-function _clToggleBioHistory(type) {
-  const el = document.getElementById(`cl-bio-history-${type}`);
-  if (!el) return;
-  el.style.display = el.style.display === 'none' ? '' : 'none';
-}
-
-function _clToggleBio() {
-  const body = document.getElementById('cl-bio-body');
-  const arrow = document.getElementById('cl-bio-arrow');
-  if (!body) return;
-  const open = body.style.display !== 'none';
-  body.style.display = open ? 'none' : '';
-  if (arrow) arrow.innerHTML = open ? '&#9654;' : '&#9660;';
-}
-
-function _clUpdateBioSummary() {
-  const el = document.getElementById('cl-bio-summary');
-  if (!el) return;
-  const bio = _getBio();
-  const h = parseFloat(document.getElementById('cl-height')?.value);
-  const parts = [];
-  if (h) parts.push(`${document.getElementById('cl-height')?.value} ${document.getElementById('cl-height-unit')?.value || 'cm'}`);
-  if (bio.weight?.length) {
-    const latest = [...bio.weight].sort((a, b) => b.date.localeCompare(a.date))[0];
-    parts.push(`${latest.value} ${latest.unit}`);
-  }
-  if (bio.bp?.length) {
-    const latest = [...bio.bp].sort((a, b) => b.date.localeCompare(a.date))[0];
-    parts.push(`${latest.sys}/${latest.dia}`);
-  }
-  if (bio.pulse?.length) {
-    const latest = [...bio.pulse].sort((a, b) => b.date.localeCompare(a.date))[0];
-    parts.push(`${latest.value} bpm`);
-  }
-  el.textContent = parts.length ? parts.join(' · ') : '';
-}
-
-function _clWeightUnitChanged() {
-  const hidden = document.getElementById('cl-bio-weight-unit');
-  const toggle = document.getElementById('cl-bio-weight-unit-toggle');
-  if (!hidden || !toggle) return;
-  const next = hidden.value === 'kg' ? 'lbs' : 'kg';
-  hidden.value = next;
-  toggle.textContent = next;
 }
 
 function _clHeightUnitChanged() {
@@ -982,5 +741,5 @@ Object.assign(window, {
   _clSaveForm, _clSetSex, _clUpdateLat, _clTagKeydown, _clRemoveTag, _clBackToList,
   _clAvatarChanged, _clRemoveAvatar, _clHaplogroupChanged,
   _clToggleMenu, _clPin, _clUnpin, _clFlag, _clUnflag, _clArchive, _clUnarchive, _clExport, _clExportChat, _clDelete,
-  _clAddBioEntry, _clDeleteBioEntry, _clBioShowAll, _clUpdateBMI, _clHeightUnitChanged, _clWeightUnitChanged, _clToggleBio, _clToggleBioHistory,
+  _clUpdateBMI, _clHeightUnitChanged, _clGoToHealthMetrics,
 });

@@ -23,6 +23,9 @@ for (const fn of _emfFns) {
 }
 import './pdf-import.js';
 import { ensureSNPTable, ensureHaplogroupTable } from './dna.js';
+import './wearables.js';
+import { initWearableScheduler, handleOAuthCallbackOnLoad } from './wearables-connect.js';
+import { migrateBiometricsToManual, hasManualData } from './wearables-manual.js';
 import './export.js';
 import './chat.js';
 import './image-utils.js';
@@ -51,22 +54,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Initialize folder backup (restore persisted handle, check permission)
   await initFolderBackup();
 
-  // Handle OpenRouter OAuth callback (?code=...)
-  const urlParams = new URLSearchParams(window.location.search);
-  const oauthCode = urlParams.get('code');
-  if (oauthCode) {
-    history.replaceState(null, '', window.location.pathname);
-    try {
-      const key = await exchangeOpenRouterCode(oauthCode);
-      await saveOpenRouterKey(key);
-      setAIProvider('openrouter');
-      fetchOpenRouterModels(key);
-      window._openChatAfterInit = true;
-      window.showNotification('Connected to OpenRouter successfully!', 'success');
-    } catch (e) {
-      window.showNotification('OpenRouter connection failed: ' + e.message, 'error', 6000);
-    }
-  }
+  // Scheduled wearable sync (only fires when a source is connected)
+  initWearableScheduler();
 
   // Migrate legacy data to profile system on first load
   if (!localStorage.getItem('labcharts-profiles')) {
@@ -86,10 +75,57 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
   // Populate profiles cache from (possibly encrypted) storage
   await initProfilesCache();
-  // Load active profile
+  // Load active profile BEFORE any OAuth callback handling — the callback
+  // writes into state.importedData (wearableConnections for Oura) and
+  // persists via saveImportedData, which keys off state.currentProfile. If
+  // the callback runs first, saves land in the wrong profile's localStorage
+  // and get orphaned the moment we swap profiles here.
   state.currentProfile = getActiveProfileId();
   const savedImported = await encryptedGetItem(profileStorageKey(state.currentProfile, 'imported'));
   if (savedImported) { try { state.importedData = JSON.parse(savedImported); if (!state.importedData.notes) state.importedData.notes = []; migrateProfileData(state.importedData); } catch(e) {} }
+
+  // Health Metrics unification (Commit 1/5): walk legacy importedData.biometrics
+  // into the wearables IndexedDB with source: 'manual'. Idempotent — tagged in
+  // the wearables meta store so it only runs once per profile. Old biometrics
+  // data is preserved; the Edit Client modal keeps writing there during the
+  // dual-write transition (cleanup lands in Commit 4).
+  migrateBiometricsToManual(state.currentProfile, state.importedData?.biometrics)
+    .then(async () => {
+      // Rebuild the L2 summary on every load that has manual data — covers
+      // both the first-run migration AND catching up a stale cached summary
+      // after a DEFAULT_METRIC_ORDER change or bug fix. The L2 change-gate
+      // (shouldWriteL2) prevents redundant writes when nothing has shifted.
+      if (await hasManualData(state.currentProfile)) {
+        const { syncWearableSummary } = await import('./wearables-summary.js');
+        const { listConnectedSources } = await import('./wearables-connect.js');
+        await syncWearableSummary(state.currentProfile, listConnectedSources());
+      }
+    })
+    .catch(() => { /* non-fatal; Safari can refuse IDB in some contexts */ });
+
+  // Handle wearable OAuth2 callback (Oura / Withings / Ultrahuman / WHOOP / Fitbit) — must run
+  // AFTER profile load so saveConnection writes to the active profile's state + localStorage.
+  // Distinguishable by presence of a pending state entry in sessionStorage; if handled we skip
+  // the OpenRouter path below so the same code isn't double-processed.
+  const ouraHandled = await handleOAuthCallbackOnLoad();
+
+  // Handle OpenRouter OAuth callback (?code=...)
+  const urlParams = new URLSearchParams(window.location.search);
+  const oauthCode = urlParams.get('code');
+  if (!ouraHandled && oauthCode) {
+    history.replaceState(null, '', window.location.pathname);
+    try {
+      const key = await exchangeOpenRouterCode(oauthCode);
+      await saveOpenRouterKey(key);
+      setAIProvider('openrouter');
+      fetchOpenRouterModels(key);
+      window._openChatAfterInit = true;
+      window.showNotification('Connected to OpenRouter successfully!', 'success');
+    } catch (e) {
+      window.showNotification('OpenRouter connection failed: ' + e.message, 'error', 6000);
+    }
+  }
+
   // Initialize Evolu sync after profile is loaded (needs state.currentProfile)
   await initSync();
   renderSyncIndicator();

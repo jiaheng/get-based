@@ -20,6 +20,114 @@ const SITE_DIR = process.env.SITE_DIR || path.join(ROOT, '..', 'get-based-site')
 const SITE_INDEX = path.join(SITE_DIR, 'index.html');
 const hasSite = fs.existsSync(SITE_INDEX);
 
+// Auto-load .env.local (gitignored) before anything else reads process.env.
+// Keeps OAuth client secrets out of shell history and out of git. Values
+// already set in the shell environment take precedence — env still wins.
+export function parseEnvLocal(text) {
+  // Returns {[name]: value} for well-formed KEY=VALUE lines. Supports:
+  //   - leading/trailing whitespace around KEY, =, and VALUE
+  //   - full-line comments (line starts with # after whitespace stripping)
+  //   - inline quoting: "foo" or 'foo' (quotes stripped verbatim)
+  // Intentionally does NOT support:
+  //   - unquoted inline `# comment` (we keep it — quote the value if unwanted)
+  //   - escape sequences inside quotes (no \n unescaping)
+  // Keys must match /^[A-Z_][A-Z0-9_]*$/ — lowercase or numeric-leading keys
+  // are treated as malformed and ignored. Return order = insertion order.
+  const out = Object.create(null);
+  for (const raw of text.split('\n')) {
+    if (raw.trim().startsWith('#')) continue;
+    const m = raw.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/);
+    if (!m) continue;
+    let val = m[2];
+    if ((val.startsWith('"') && val.endsWith('"') && val.length >= 2) ||
+        (val.startsWith("'") && val.endsWith("'") && val.length >= 2)) {
+      val = val.slice(1, -1);
+    }
+    out[m[1]] = val;
+  }
+  return out;
+}
+const ENV_LOCAL = path.join(ROOT, '.env.local');
+if (fs.existsSync(ENV_LOCAL)) {
+  const parsed = parseEnvLocal(fs.readFileSync(ENV_LOCAL, 'utf8'));
+  for (const [k, v] of Object.entries(parsed)) {
+    if (process.env[k]) continue; // shell export wins
+    process.env[k] = v;
+  }
+  console.log(`Loaded .env.local (${Object.keys(process.env).filter(k => k.endsWith('_CLIENT_SECRET')).length} secrets visible)`);
+}
+
+// ─── Proxy SSRF guard — mirrors api/proxy.js ALLOWED_ORIGINS + _isBlockedHost
+// Keep in sync with api/proxy.js when adding new vendor hosts.
+const _PROXY_ALLOWED_ORIGINS = [
+  'https://openrouter.ai/',
+  'https://api.venice.ai/',
+  'https://api.routstr.com/',
+  'https://api.ppq.ai/',
+  'https://api.ouraring.com/',
+  'https://api.prod.whoop.com/',
+  'https://partner.ultrahuman.com/',
+  'https://wbsapi.withings.net/',
+  'https://api.fitbit.com/',
+  'https://www.polaraccesslink.com/',
+  'https://polarremote.com/',
+];
+export function _proxyHostBlocked(host) {
+  if (!host) return true;
+  const h = host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
+  if (h === 'localhost' || h === '127.0.0.1' || h === '::1') return true;
+  if (h.endsWith('.local') || h.endsWith('.localhost')) return true;
+  if (h === '168.63.129.16') return true;
+  // IPv6 literal: same allowlist-only-2000::/3 strategy as api/proxy.js
+  if (h.includes(':')) {
+    const lower = h.toLowerCase();
+    if (lower === '::' || lower === '0:0:0:0:0:0:0:0') return true;
+    if (/^fc[0-9a-f]{2}:/.test(lower) || /^fd[0-9a-f]{2}:/.test(lower)) return true;
+    if (/^fe[89ab][0-9a-f]:/.test(lower)) return true;
+    const v4Embed = lower.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+    if (v4Embed) return _proxyHostBlocked(v4Embed[1]);
+    if (lower.startsWith('::ffff:')) {
+      const tail = lower.slice(7);
+      const hex = tail.replace(/:/g, '');
+      if (/^[0-9a-f]{1,8}$/.test(hex)) {
+        const padded = hex.padStart(8, '0');
+        const a = parseInt(padded.slice(0, 2), 16);
+        const b = parseInt(padded.slice(2, 4), 16);
+        const c = parseInt(padded.slice(4, 6), 16);
+        const d = parseInt(padded.slice(6, 8), 16);
+        return _proxyHostBlocked(`${a}.${b}.${c}.${d}`);
+      }
+    }
+    return !/^[23][0-9a-f]{3}:/.test(lower);
+  }
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  if (!m) return false;
+  for (let i = 1; i <= 4; i++) {
+    const octet = m[i];
+    if (octet.length > 1 && octet[0] === '0') return true;
+    const n = +octet;
+    if (n > 255) return true;
+  }
+  const a = +m[1], b = +m[2];
+  if (a === 10) return true;
+  if (a === 127) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;
+  if (a === 0) return true;
+  return false;
+}
+export function _isAllowedProxyUrl(url) {
+  if (_PROXY_ALLOWED_ORIGINS.some(o => url.startsWith(o))) return true;
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'https:') return false;
+    if (_proxyHostBlocked(u.hostname)) return false;
+    return true;
+  } catch { return false; }
+}
+
 const MIME = {
   '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript',
   '.mjs': 'text/javascript', '.json': 'application/json', '.svg': 'image/svg+xml',
@@ -65,6 +173,19 @@ const server = http.createServer((req, res) => {
   // Origin/Referer from browser tabs on malicious sites. See #119.
   if ((pathname.startsWith('/api/') || pathname === '/proxy') && !isSameOrigin(req)) {
     res.writeHead(403); res.end('Forbidden'); return;
+  }
+
+  // API: return current git HEAD + branch so Settings → Display shows the
+  // worktree's actual SHA in local dev (mirrors api/commit.js on Vercel).
+  if (pathname === '/api/commit') {
+    execFile('git', ['-C', ROOT, 'rev-parse', 'HEAD'], (e1, sha) => {
+      if (e1) { res.writeHead(404); res.end('not-a-git-checkout'); return; }
+      execFile('git', ['-C', ROOT, 'rev-parse', '--abbrev-ref', 'HEAD'], (e2, ref) => {
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify({ sha: sha.trim(), ref: e2 ? '' : ref.trim() }));
+      });
+    });
+    return;
   }
 
   // API: HEAD-check a URL and return the real status code (bypasses browser CORS)
@@ -177,13 +298,204 @@ const server = http.createServer((req, res) => {
     req.on('end', () => {
       try {
         const payload = JSON.parse(body);
+
+        // Oura OAuth2 token exchange/refresh — proxies secret-bearing request
+        // to api.ouraring.com/oauth/token with OURA_CLIENT_SECRET from env.
+        if (payload.oura_token_exchange || payload.oura_token_refresh) {
+          const secret = process.env.OURA_CLIENT_SECRET;
+          if (!secret) {
+            res.writeHead(500, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'OURA_CLIENT_SECRET not set — export it before `node dev-server.js`' }));
+            return;
+          }
+          let form;
+          if (payload.oura_token_exchange) {
+            const { code, redirect_uri, client_id } = payload.oura_token_exchange;
+            if (!code || !redirect_uri || !client_id) {
+              res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+              res.end('{"error":"oura_token_exchange requires code, redirect_uri, client_id"}'); return;
+            }
+            form = new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri, client_id, client_secret: secret });
+          } else {
+            const { refresh_token, client_id } = payload.oura_token_refresh;
+            if (!refresh_token || !client_id) {
+              res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+              res.end('{"error":"oura_token_refresh requires refresh_token, client_id"}'); return;
+            }
+            form = new URLSearchParams({ grant_type: 'refresh_token', refresh_token, client_id, client_secret: secret });
+          }
+          const tokenReq = https.request('https://api.ouraring.com/oauth/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          }, (tokenRes) => {
+            const ct = tokenRes.headers['content-type'] || 'application/json';
+            res.writeHead(tokenRes.statusCode, { 'Content-Type': ct, 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' });
+            tokenRes.pipe(res);
+          });
+          tokenReq.on('error', (e) => {
+            res.writeHead(502, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'Token endpoint unreachable: ' + e.message }));
+          });
+          tokenReq.write(form.toString());
+          tokenReq.end();
+          return;
+        }
+
+        // Ultrahuman OAuth2 token exchange/refresh — confidential client,
+        // token endpoint at partner.ultrahuman.com/api/partners/oauth/token.
+        if (payload.ultrahuman_token_exchange || payload.ultrahuman_token_refresh) {
+          const secret = process.env.ULTRAHUMAN_CLIENT_SECRET;
+          if (!secret) {
+            res.writeHead(500, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'ULTRAHUMAN_CLIENT_SECRET not set — add it to .env.local' }));
+            return;
+          }
+          let form;
+          if (payload.ultrahuman_token_exchange) {
+            const { code, redirect_uri, client_id } = payload.ultrahuman_token_exchange;
+            if (!code || !redirect_uri || !client_id) {
+              res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+              res.end('{"error":"ultrahuman_token_exchange requires code, redirect_uri, client_id"}'); return;
+            }
+            form = new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri, client_id, client_secret: secret });
+          } else {
+            const { refresh_token, client_id } = payload.ultrahuman_token_refresh;
+            if (!refresh_token || !client_id) {
+              res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+              res.end('{"error":"ultrahuman_token_refresh requires refresh_token, client_id"}'); return;
+            }
+            form = new URLSearchParams({ grant_type: 'refresh_token', refresh_token, client_id, client_secret: secret });
+          }
+          const tokenReq = https.request('https://partner.ultrahuman.com/api/partners/oauth/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          }, (tokenRes) => {
+            const ct = tokenRes.headers['content-type'] || 'application/json';
+            res.writeHead(tokenRes.statusCode, { 'Content-Type': ct, 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' });
+            tokenRes.pipe(res);
+          });
+          tokenReq.on('error', (e) => {
+            res.writeHead(502, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'Ultrahuman token endpoint unreachable: ' + e.message }));
+          });
+          tokenReq.write(form.toString());
+          tokenReq.end();
+          return;
+        }
+
+        // Withings OAuth2 token exchange/refresh — mirrors Oura pattern with
+        // Withings's non-standard action=requesttoken body field.
+        if (payload.withings_token_exchange || payload.withings_token_refresh) {
+          const secret = process.env.WITHINGS_CLIENT_SECRET;
+          if (!secret) {
+            res.writeHead(500, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'WITHINGS_CLIENT_SECRET not set — export it before `node dev-server.js`' }));
+            return;
+          }
+          let form;
+          if (payload.withings_token_exchange) {
+            const { code, redirect_uri, client_id } = payload.withings_token_exchange;
+            if (!code || !redirect_uri || !client_id) {
+              res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+              res.end('{"error":"withings_token_exchange requires code, redirect_uri, client_id"}'); return;
+            }
+            form = new URLSearchParams({
+              action: 'requesttoken', grant_type: 'authorization_code',
+              client_id, client_secret: secret, code, redirect_uri,
+            });
+          } else {
+            const { refresh_token, client_id } = payload.withings_token_refresh;
+            if (!refresh_token || !client_id) {
+              res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+              res.end('{"error":"withings_token_refresh requires refresh_token, client_id"}'); return;
+            }
+            form = new URLSearchParams({
+              action: 'requesttoken', grant_type: 'refresh_token',
+              client_id, client_secret: secret, refresh_token,
+            });
+          }
+          const tokenReq = https.request('https://wbsapi.withings.net/v2/oauth2', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          }, (tokenRes) => {
+            const ct = tokenRes.headers['content-type'] || 'application/json';
+            res.writeHead(tokenRes.statusCode, { 'Content-Type': ct, 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' });
+            tokenRes.pipe(res);
+          });
+          tokenReq.on('error', (e) => {
+            res.writeHead(502, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'Withings token endpoint unreachable: ' + e.message }));
+          });
+          tokenReq.write(form.toString());
+          tokenReq.end();
+          return;
+        }
+
+        // Polar AccessLink OAuth2 token exchange/refresh — Basic auth.
+        if (payload.polar_token_exchange || payload.polar_token_refresh) {
+          const secret = process.env.POLAR_CLIENT_SECRET;
+          if (!secret) {
+            res.writeHead(500, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'POLAR_CLIENT_SECRET not set — add it to .env.local before `node dev-server.js`' }));
+            return;
+          }
+          let form, clientId;
+          if (payload.polar_token_exchange) {
+            const { code, redirect_uri, client_id } = payload.polar_token_exchange;
+            if (!code || !redirect_uri || !client_id) {
+              res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+              res.end('{"error":"polar_token_exchange requires code, redirect_uri, client_id"}'); return;
+            }
+            clientId = client_id;
+            form = new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri });
+          } else {
+            const { refresh_token, client_id } = payload.polar_token_refresh;
+            if (!refresh_token || !client_id) {
+              res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+              res.end('{"error":"polar_token_refresh requires refresh_token, client_id"}'); return;
+            }
+            clientId = client_id;
+            form = new URLSearchParams({ grant_type: 'refresh_token', refresh_token });
+          }
+          const basicAuth = 'Basic ' + Buffer.from(`${clientId}:${secret}`).toString('base64');
+          const tokenReq = https.request('https://polarremote.com/v2/oauth2/token', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+              'Accept': 'application/json;charset=UTF-8',
+              'Authorization': basicAuth,
+            },
+          }, (tokenRes) => {
+            const ct = tokenRes.headers['content-type'] || 'application/json';
+            res.writeHead(tokenRes.statusCode, { 'Content-Type': ct, 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' });
+            tokenRes.pipe(res);
+          });
+          tokenReq.on('error', (e) => {
+            res.writeHead(502, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'Polar token endpoint unreachable: ' + e.message }));
+          });
+          tokenReq.write(form.toString());
+          tokenReq.end();
+          return;
+        }
+
         const { url: targetUrl, headers: fwdHeaders, body: fwdBody, method: upMethod } = payload;
         if (!targetUrl) { res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }); res.end('{"error":"missing url"}'); return; }
+        if (!_isAllowedProxyUrl(targetUrl)) {
+          res.writeHead(403, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+          res.end('{"error":"URL not allowed"}'); return;
+        }
         const parsedUrl = new URL(targetUrl);
         const mod = parsedUrl.protocol === 'https:' ? https : http;
         const fetchMethod = (upMethod || 'POST').toUpperCase();
+        // Caller-provided headers win. We fall back to application/json ONLY
+        // if the caller didn't supply a Content-Type — otherwise Fitbit / any
+        // form-urlencoded token endpoint breaks (it gets our form body tagged
+        // as JSON and can't parse the `client_id` out). Matches the spread
+        // order already used in api/proxy.js.
         const reqHeaders = { ...fwdHeaders };
-        if (fetchMethod !== 'GET') reqHeaders['Content-Type'] = 'application/json';
+        const hasCT = Object.keys(reqHeaders).some(k => k.toLowerCase() === 'content-type');
+        if (fetchMethod !== 'GET' && !hasCT) reqHeaders['Content-Type'] = 'application/json';
         const proxyReq = mod.request(targetUrl, { method: fetchMethod, headers: reqHeaders }, (proxyRes) => {
           const ct = proxyRes.headers['content-type'] || 'application/json';
           res.writeHead(proxyRes.statusCode, { 'Content-Type': ct, 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' });
@@ -300,7 +612,12 @@ const server = http.createServer((req, res) => {
   res.writeHead(404); res.end('Not found');
 });
 
-server.listen(PORT, '127.0.0.1', () => {
+// Only listen when run as a script, not when imported by tests. Compare the
+// fileURL of this module to the fileURL of the entrypoint — equal means
+// `node dev-server.js`, different means `import ... from './dev-server.js'`.
+const _entryUrl = process.argv[1] ? new URL(`file://${path.resolve(process.argv[1])}`).href : '';
+const _isDirectRun = import.meta.url === _entryUrl;
+if (_isDirectRun) server.listen(PORT, '127.0.0.1', () => {
   console.log(`Dev server running at http://127.0.0.1:${PORT}`);
   if (hasSite) {
     console.log(`  /        → landing page (${SITE_DIR})`);

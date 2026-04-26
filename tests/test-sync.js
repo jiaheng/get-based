@@ -20,10 +20,43 @@ return (async function() {
   // ═══════════════════════════════════════
   console.log('%c 1. Module Exports ', 'font-weight:bold;color:#f59e0b');
 
-  const requiredExports = ['isSyncEnabled', 'initSync', 'enableSync', 'disableSync', 'getMnemonic', 'restoreFromMnemonic', 'getSyncRelay', 'setSyncRelay', 'onDataSaved', 'pushCurrentProfile'];
+  const requiredExports = ['isSyncEnabled', 'initSync', 'enableSync', 'disableSync', 'getMnemonic', 'restoreFromMnemonic', 'getSyncRelay', 'setSyncRelay', 'onDataSaved', 'pushCurrentProfile', 'deleteProfileFromRelay'];
   for (const fn of requiredExports) {
     assert(`sync.js exports ${fn}`, syncSrc.includes(`export function ${fn}`) || syncSrc.includes(`export async function ${fn}`));
   }
+
+  // Profile-delete propagation (closes the bug where deleting a profile in
+  // getbased only wiped local state — the Evolu row stayed on the relay
+  // and other devices kept seeing the deleted profile).
+  assert('deleteProfileFromRelay sets isDeleted=1 via evolu.update',
+    /deleteProfileFromRelay[\s\S]{0,800}evolu\.update\([\s\S]{0,200}isDeleted:\s*1/.test(syncSrc));
+  assert('deleteProfileFromRelay is idempotent on missing rows (returns no-row reason)',
+    /deleteProfileFromRelay[\s\S]{0,500}reason:\s*'no-row'/.test(syncSrc));
+  const profileSrc = await fetch('/js/profile.js').then(r => r.text());
+  assert('deleteProfile in profile.js calls deleteProfileFromRelay',
+    /deleteProfile\([\s\S]+?deleteProfileFromRelay/.test(profileSrc));
+
+  // Tombstone-aware pull: a remote delete from another device wipes the
+  // local copy on next sync, so multi-device cleanup completes itself.
+  assert('sync.js declares a tombstoneQuery selecting isDeleted = 1 rows',
+    /tombstoneQuery\s*=\s*evolu\.createQuery[\s\S]{0,300}isDeleted[",\s]+=[",\s]+1/.test(syncSrc));
+  assert('applyRemoteTombstones wipes the local imported blob for tombstoned profiles',
+    /applyRemoteTombstones[\s\S]{0,4000}localStorage\.removeItem\(profileStorageKey\(tombId,\s*'imported'\)\)/.test(syncSrc));
+  // Quarantine: a remote-driven mass-delete (≥ 2 profiles tombstoned at
+  // once) is auth'd only by the BIP-39 mnemonic. If the mnemonic leaks,
+  // an attacker could publish tombstones for every profileId. Single-
+  // profile deletes auto-apply (most common: user just deleted on
+  // another device); batched deletes require user confirm.
+  assert('applyRemoteTombstones quarantines batches >= TOMBSTONE_BATCH_THRESHOLD',
+    syncSrc.includes('TOMBSTONE_BATCH_THRESHOLD') && syncSrc.includes('Quarantined'));
+  assert('Settings can apply / reject pending tombstones (out-of-band confirm)',
+    syncSrc.includes('export function listPendingTombstones')
+      && syncSrc.includes('export async function applyPendingTombstone')
+      && syncSrc.includes('export async function rejectPendingTombstone'));
+  assert('applyRemoteTombstones runs before the active-rows pass in onSyncReceived',
+    /async function onSyncReceived[\s\S]{0,800}await\s+applyRemoteTombstones[\s\S]{0,400}getQueryRows\(profileQuery\)/.test(syncSrc));
+  assert('applyRemoteTombstones keeps at least one survivor (mass-delete safety)',
+    /survivors\.length\s*===\s*0[\s\S]{0,200}return/.test(syncSrc));
 
   // ═══════════════════════════════════════
   // 2. SYNC PAYLOAD FORMAT
@@ -39,8 +72,13 @@ return (async function() {
 
   assert('parseSyncPayload handles v3 format', syncSrc.includes('parsed._v === 3'));
   assert('parseSyncPayload handles v2 compat', syncSrc.includes('parsed._v === 2'));
-  assert('parseSyncPayload has v1 backward compat', syncSrc.includes('importedData: parsed, profile: null'));
-  assert('parseSyncPayload validates payload size', syncSrc.includes('dataJson.length > 50_000_000'));
+  assert('parseSyncPayload has v1 backward compat (gated on importedData shape)',
+    syncSrc.includes('importedData: safe(parsed)'));
+  assert('parseSyncPayload validates payload size (5 MB cap)', syncSrc.includes('MAX_SYNC_PAYLOAD_BYTES'));
+  assert('parseSyncPayload strips wearableConnections from incoming blob (defence-in-depth)',
+    syncSrc.includes("'wearableConnections' in imp"));
+  assert('parseSyncPayload v1 compat rejects unknown shapes',
+    syncSrc.includes("Invalid sync payload: unknown shape"));
   assert('parseSyncPayload validates payload type', syncSrc.includes("typeof dataJson !== 'string'"));
 
   // ═══════════════════════════════════════
@@ -240,9 +278,34 @@ return (async function() {
   }
 
   // ═══════════════════════════════════════
-  // 14. VENDOR FILES
+  // 14. WEARABLE CONNECTIONS PRESERVE
   // ═══════════════════════════════════════
-  console.log('%c 14. Vendor Files ', 'font-weight:bold;color:#f59e0b');
+  console.log('%c 14. Wearable Connections Preserve ', 'font-weight:bold;color:#f59e0b');
+
+  // Push side: stripWearableCredentials removes wearableConnections from the payload
+  assert('buildSyncPayload strips wearableConnections', syncSrc.includes('stripWearableCredentials(importedData)'));
+  assert('stripWearableCredentials drops wearableConnections key', syncSrc.includes('{ wearableConnections, ...rest } = importedData'));
+
+  // Pull side: must re-inject local wearableConnections into incoming blob so it isn't clobbered.
+  // The stripped remote payload arrives with no wearableConnections; without this preserve step
+  // the overwrite at setItem(localKey, importedJson) would wipe every device's OAuth tokens.
+  assert('Pull preserves local wearableConnections (active profile)',
+    syncSrc.includes('state.importedData?.wearableConnections'));
+  assert('Pull preserves local wearableConnections (inactive profile)',
+    syncSrc.includes('parsed?.wearableConnections'));
+  assert('Pull re-injects preserved wearableConnections into pulled blob',
+    syncSrc.includes('importedData.wearableConnections = localWearableConnections'));
+
+  // Guard: preserve branch must run before the localStorage write (otherwise stale)
+  const preserveIdx = syncSrc.indexOf('importedData.wearableConnections = localWearableConnections');
+  const writeIdx = syncSrc.indexOf('setItem(localKey, importedJson)');
+  assert('Preserve runs before localStorage write', preserveIdx > 0 && preserveIdx < writeIdx,
+    `preserve at ${preserveIdx}, write at ${writeIdx}`);
+
+  // ═══════════════════════════════════════
+  // 15. VENDOR FILES
+  // ═══════════════════════════════════════
+  console.log('%c 15. Vendor Files ', 'font-weight:bold;color:#f59e0b');
 
   const vendorFiles = ['vendor/evolu/evolu-bundle.js', 'vendor/evolu/Db.worker.js', 'vendor/evolu/sqlite3.wasm'];
   for (const f of vendorFiles) {

@@ -8,6 +8,7 @@ import { getAIProvider, isAIPaused, getOllamaPIIUrl, getOllamaPIIModel } from '.
 import { isOllamaPIIEnabled, setOllamaPIIEnabled, getOllamaConfig, checkOpenAICompatible } from './pii.js';
 import { renderEncryptionSection, renderBackupSection, loadBackupSnapshots } from './crypto.js';
 import { isSyncEnabled, enableSync, disableSync, getMnemonic, getMnemonicResolutionError, getSyncBlocker, restoreFromMnemonic, getSyncRelay, setSyncRelay, checkRelayConnection, isMessengerEnabled, getMessengerToken, generateMessengerToken, revokeMessengerToken, pushContextToGateway } from './sync.js';
+import { renderWearablesSettingsSection } from './wearables.js';
 import './provider-panels.js';
 
 
@@ -22,6 +23,9 @@ export function openSettingsModal(tab) {
   const modal = document.getElementById('settings-modal');
   const currentTheme = getTheme();
   const provider = getAIProvider();
+  // Legacy v1.27 tab id 'integrations' — same redirect as switchSettingsTab.
+  // Older deep-links / tour steps / external links may still pass it.
+  if (tab === 'integrations') tab = 'wearables';
   if (tab) _activeSettingsTab = tab;
 
   modal.innerHTML = `
@@ -40,6 +44,14 @@ export function openSettingsModal(tab) {
       <button class="settings-tab-btn${_activeSettingsTab === 'data' ? ' active' : ''}" data-tab="data" onclick="switchSettingsTab('data')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
         Data
+      </button>
+      <button class="settings-tab-btn${_activeSettingsTab === 'wearables' ? ' active' : ''}" data-tab="wearables" onclick="switchSettingsTab('wearables')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="6"/><path d="M12 9v3l2 2"/><path d="M9 2h6M9 22h6"/></svg>
+        Wearables
+      </button>
+      <button class="settings-tab-btn${_activeSettingsTab === 'agent' ? ' active' : ''}" data-tab="agent" onclick="switchSettingsTab('agent')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="14" r="4"/><path d="m10.5 11 7.5-7.5M17 6l3 3M14 9l3 3"/></svg>
+        Agent Access
       </button>
     </div>
 
@@ -124,6 +136,21 @@ export function openSettingsModal(tab) {
         <div id="ai-provider-panel">${window.renderAIProviderPanel(provider)}</div>
       </div>
 
+      <div class="settings-group-title">AI Context</div>
+
+      <div class="settings-section" id="ai-context-section">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;color:var(--text-secondary)">Include wearable data</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:2px">~200 tokens summarising HRV, sleep, recovery and trends from your connected wearables.</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="ai-ctx-wearables-toggle" ${window.isWearableContextEnabled?.() ? 'checked' : ''} onchange="window.setWearableContextEnabled(this.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
       <div class="settings-group-title">PDF Import Privacy</div>
 
       <div class="settings-section" id="privacy-section">
@@ -157,12 +184,6 @@ export function openSettingsModal(tab) {
         ${renderSyncSection()}
       </div>
 
-      <div class="settings-group-title">Agent Access</div>
-
-      <div class="settings-section" id="messenger-section">
-        ${renderMessengerSection()}
-      </div>
-
       <div class="settings-group-title">Backup &amp; Restore</div>
 
       <div class="settings-section" id="backup-section">
@@ -174,6 +195,20 @@ export function openSettingsModal(tab) {
       <div class="settings-section" id="data-entries-section">
         ${renderDataEntriesSection()}
       </div>
+    </div>
+
+    <!-- Wearables Tab — incoming biometric data (Oura, WHOOP, Fitbit, etc.) -->
+    <div class="settings-tab-panel${_activeSettingsTab === 'wearables' ? ' active' : ''}" data-tab-panel="wearables">
+      <div class="settings-section" id="wearables-section">
+        ${renderWearablesSettingsSection()}
+      </div>
+    </div>
+
+    <!-- Agent Access Tab — outgoing read permission for AI agents (MCP / Hermes / OpenClaw) -->
+    <div class="settings-tab-panel${_activeSettingsTab === 'agent' ? ' active' : ''}" data-tab-panel="agent">
+      <div class="settings-section" id="messenger-section">
+        ${renderMessengerSection()}
+      </div>
     </div>`;
   overlay.classList.add('show');
   window.initSettingsOllamaCheck();
@@ -181,18 +216,38 @@ export function openSettingsModal(tab) {
   loadBackupSnapshots();
   loadSettingsCommitHash();
   if (isSyncEnabled()) { loadMnemonic(); updateRelayStatus(); }
+  // Always fire so wearables Manual-row reading counts populate on first paint
+  // (whether the user lands on the Integrations tab or switches into it).
+  document.dispatchEvent(new CustomEvent('settings:wearables-rendered'));
 }
 
 function loadSettingsCommitHash() {
   const el = document.getElementById('settings-commit-hash');
   if (!el) return;
-  fetch('https://api.github.com/repos/elkimek/get-based/commits/main', { headers: { Accept: 'application/vnd.github.sha' } })
-    .then(r => r.ok ? r.text() : Promise.reject())
-    .then(sha => { const short = sha.slice(0, 7); const e = document.getElementById('settings-commit-hash'); if (e) e.innerHTML = `<a href="https://github.com/elkimek/get-based/commit/${short}" target="_blank" rel="noopener" style="color:var(--text-muted);text-decoration:none">${short}</a>`; })
-    .catch(() => { const e = document.getElementById('settings-commit-hash'); if (e) e.textContent = ''; });
+  const render = (sha, ref) => {
+    const short = sha.slice(0, 7);
+    const e = document.getElementById('settings-commit-hash');
+    if (!e) return;
+    // Show branch suffix on previews so BETA testers can tell main from a feature branch.
+    const suffix = ref && ref !== 'main' ? ` <span style="color:var(--text-muted);opacity:0.7">(${ref})</span>` : '';
+    e.innerHTML = `<a href="https://github.com/elkimek/get-based/commit/${short}" target="_blank" rel="noopener" style="color:var(--text-muted);text-decoration:none">${short}</a>${suffix}`;
+  };
+  // Prefer the deployed SHA from Vercel (truthful on previews). Fall back to
+  // main HEAD via GitHub when /api/commit isn't available (local dev, etc).
+  fetch('/api/commit')
+    .then(r => r.ok ? r.json() : Promise.reject())
+    .then(({ sha, ref }) => render(sha, ref))
+    .catch(() => fetch('https://api.github.com/repos/elkimek/get-based/commits/main', { headers: { Accept: 'application/vnd.github.sha' } })
+      .then(r => r.ok ? r.text() : Promise.reject())
+      .then(sha => render(sha, 'main'))
+      .catch(() => { const e = document.getElementById('settings-commit-hash'); if (e) e.textContent = ''; }));
 }
 
 export function switchSettingsTab(tabId) {
+  // Legacy v1.27 tab id 'integrations' covered both wearables + agent access.
+  // v1.30.0 split them. Land on Wearables for the back-compat redirect — most
+  // pre-existing deep-links pointed at the wearable adapter rows.
+  if (tabId === 'integrations') tabId = 'wearables';
   _activeSettingsTab = tabId;
   const modal = document.getElementById('settings-modal');
   if (!modal) return;
@@ -210,6 +265,11 @@ export function switchSettingsTab(tabId) {
   if (tabId === 'data') {
     refreshDataEntriesSection();
     loadBackupSnapshots();
+  }
+  if (tabId === 'wearables') {
+    // Notify the wearables module so it can populate the Manual-row reading
+    // counts on first paint, not just on details-toggle.
+    document.dispatchEvent(new CustomEvent('settings:wearables-rendered'));
   }
 }
 
@@ -354,6 +414,26 @@ export function closeSettingsModal() {
 // ═══════════════════════════════════════════════
 // SYNC SECTION
 // ═══════════════════════════════════════════════
+function renderPendingTombstones() {
+  const pending = window.listPendingTombstones?.() || [];
+  if (pending.length === 0) return '';
+  const rows = pending.map(p => `
+    <div class="sync-tombstone-row" data-tomb-id="${escapeAttr(p.id)}">
+      <span class="sync-tombstone-name">${escapeHTML(p.name)}</span>
+      <span class="sync-tombstone-meta">${p.at ? `flagged ${new Date(p.at).toLocaleDateString()}` : ''}</span>
+      <button class="sync-tombstone-btn sync-tombstone-apply" onclick="window.applyPendingTombstone('${escapeAttr(p.id)}').then(() => window.openSettingsModal('data'))">Apply delete</button>
+      <button class="sync-tombstone-btn sync-tombstone-reject" onclick="window.rejectPendingTombstone('${escapeAttr(p.id)}').then(() => window.openSettingsModal('data'))">Restore</button>
+    </div>`).join('');
+  return `
+    <div class="sync-tombstone-banner">
+      <div class="sync-tombstone-head">
+        <strong>${pending.length} profile${pending.length === 1 ? '' : 's'} flagged for deletion on another device</strong>
+        <span class="sync-tombstone-help">Confirm each — Apply wipes locally, Restore re-publishes.</span>
+      </div>
+      ${rows}
+    </div>`;
+}
+
 function renderSyncSection() {
   const enabled = isSyncEnabled();
   const relay = getSyncRelay();
@@ -369,6 +449,7 @@ function renderSyncSection() {
     </div>` : '';
   return `
     ${blockerBanner}
+    ${renderPendingTombstones()}
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${enabled ? '16' : '8'}px;${blocker ? 'opacity:0.5;pointer-events:none' : ''}">
       <div>
         <div style="font-size:13px;font-weight:600;color:var(--text-primary)">Cross-device sync</div>
@@ -832,7 +913,7 @@ function renderMessengerSection() {
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${enabled ? '16' : '8'}px">
       <div>
         <div style="font-size:13px;font-weight:600;color:var(--text-primary)">Agent Access</div>
-        <div style="font-size:12px;color:var(--text-muted);margin-top:2px">Let AI agents query your labs via MCP, Hermes Agent, or OpenClaw</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:2px">Let AI agents query your labs and context via MCP, Hermes Agent, or OpenClaw</div>
       </div>
       <label class="chat-websearch-toggle-label" style="display:flex" aria-label="Toggle Agent Access">
         <input type="checkbox" ${enabled ? 'checked' : ''} onchange="toggleMessenger(this.checked)" style="display:none">
@@ -852,6 +933,23 @@ function renderMessengerSection() {
         <div style="font-size:11px;color:var(--text-muted);margin-top:6px;line-height:1.5">Use <a href="https://github.com/elkimek/getbased-agents/tree/main/packages/mcp" target="_blank" rel="noopener" style="color:var(--accent)">getbased-mcp</a> to connect <a href="https://github.com/hermes-agent/hermes-agent" target="_blank" rel="noopener" style="color:var(--accent)">Hermes Agent</a>, <a href="https://openclaw.ai" target="_blank" rel="noopener" style="color:var(--accent)">OpenClaw</a>, or any MCP-compatible agent. Paste this token into your agent's config.</div>
       </div>
       <button class="import-btn import-btn-secondary" style="font-size:12px;padding:5px 14px;width:100%" onclick="regenerateMessengerToken()">Regenerate token</button>
+      <div style="margin-top:18px;padding-top:14px;border-top:1px dashed var(--border)">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:14px">
+          <div style="flex:1">
+            <div style="font-size:13px;color:var(--text-secondary)">Push wearable daily series</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Adds a pivoted daily-values matrix (HRV, RHR, sleep…) so agents can spot trends. ~100 / 400 / 1200 extra tokens for 7 / 30 / 90 days respectively (real-measured at 13 metrics); cached cleanly so the marginal cost per turn is small. Off by default — pick 7 days for cheap follow-ups, 30 for monthly reasoning, 90 for season-spanning analysis.</div>
+          </div>
+          <select id="agent-wearable-series-select"
+            onchange="window.setAgentWearableSeriesDays(this.value === 'off' ? 0 : Number(this.value)); window.pushContextToGateway && window.pushContextToGateway()"
+            aria-label="Wearable series window pushed to agent"
+            style="font-size:12px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text-primary);min-width:90px">
+            <option value="off"${(window.getAgentWearableSeriesDays?.() || 0) === 0 ? ' selected' : ''}>Off</option>
+            <option value="7"${window.getAgentWearableSeriesDays?.() === 7 ? ' selected' : ''}>7 days</option>
+            <option value="30"${window.getAgentWearableSeriesDays?.() === 30 ? ' selected' : ''}>30 days</option>
+            <option value="90"${window.getAgentWearableSeriesDays?.() === 90 ? ' selected' : ''}>90 days</option>
+          </select>
+        </div>
+      </div>
     ` : `
       <div style="font-size:12px;color:var(--text-muted);line-height:1.5">
         Let AI agents query your labs — coding agents, messenger bots, or any <a href="https://github.com/elkimek/getbased-agents/tree/main/packages/mcp" target="_blank" rel="noopener" style="color:var(--accent)">MCP-compatible tool</a>. Only a read-only summary is shared — your data stays encrypted.

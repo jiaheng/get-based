@@ -104,6 +104,46 @@ getbased-mcp provides these tools:
 | `knowledge_stats` | Per-source chunk counts for the active library — useful for diagnosing missing results |
 | `getbased_lens_config` | Show the Custom Knowledge Source endpoint + key from getbased, so the agent can stay in sync with what the PWA is configured to query. |
 
+### Wearable data (HRV, RHR, sleep, recovery)
+
+If you have wearables connected (Oura, Polar, WHOOP, Fitbit, Withings, Ultrahuman, Apple Health, or manual entries) and the **Settings → AI → AI Context → Include wearable data** toggle is on, the agent automatically receives a `[section:wearables]` block in `getbased_lab_context`. Format: ~200 tokens — current value, baseline, weekly trend, and recent anomaly events for each metric.
+
+To pull just the wearables section:
+
+```
+getbased_section('wearables', profile='Main')
+```
+
+#### 30-day daily series (opt-in, ~400 tokens)
+
+For time-series reasoning ("did HRV drop the week before I got sick?"), the always-on summary isn't enough. Open **Settings → Agent Access** and turn on **"Push 30-day wearable series"**. The browser then writes a pivoted matrix into a separate section:
+
+```
+getbased_section('wearables-series-30d', profile='Main')
+```
+
+Output shape:
+
+```
+[section:wearables-series-30d]
+## Wearables — 30-day daily series (oldest→newest, "—" = no reading)
+HRV (🌙) ms (oura): —→—→…→37→36→27→33→26→32→30→26→32→33→29→33→37→39→38→43→30
+Resting HR bpm (oura): 64→62→61→…→59
+Heart rate (☀️) bpm (oura): 88→91→92→…→78
+Sleep (score) (oura): 68→72→75→…→72
+Readiness (score) (oura): 58→61→63→…→69
+Steps (oura): 7800→8200→…→4250
+[/section:wearables-series-30d]
+```
+
+One line per metric. Primary source in parens. `→` separates daily values, oldest first. `—` means no reading on that day. Values are rounded to 1 decimal place to keep token cost down.
+
+**Privacy.** Raw daily samples never sync via Evolu — they live in the browser's local IndexedDB only. The browser renders the section string and posts it to the gateway, which is content-blind. OAuth tokens are still stripped by the same path the regular sync uses (`stripWearableCredentials`).
+
+**Cost.** Live-measured at 30 days × 13 metrics: ~400 tokens. Prompt caching keeps the marginal per-turn cost ~10× cheaper than naïve since wearable data only changes ~once/day on overnight sync.
+
+**Toggle re-pushes immediately**, so the agent sees the new (or removed) section the next time it queries — no 5-second debounce wait.
+
 ## Security
 
 Agent Access is designed to share the minimum needed for a bot to be useful:
