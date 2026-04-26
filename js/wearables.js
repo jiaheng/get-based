@@ -994,7 +994,9 @@ async function syncWearableNow(triggerEl) {
   if (btn) btn.disabled = true;
   try {
     showNotification?.('Syncing wearables…', 'info', 1500);
-    for (const sid of sources) await syncNow(sid);
+    // force:true → bypass L2 gate so the strip never appears stuck on a
+    // stale snapshot when a user explicitly clicks "sync now."
+    for (const sid of sources) await syncNow(sid, { force: true });
     if (window.navigate) window.navigate('dashboard');
     showNotification?.('Wearables synced', 'success', 2000);
   } catch { /* per-source error already surfaced */ }
@@ -1545,7 +1547,7 @@ async function handleWearableSyncNow(adapterId, triggerEl) {
   if (btn) btn.disabled = true;
   try {
     showNotification?.(`Syncing ${adapterId}…`, 'info', 1500);
-    const res = await syncNow(adapterId);
+    const res = await syncNow(adapterId, { force: true });
     showNotification?.(`${adapterId} synced (${res.rows ?? 0} new)`, 'success', 2500);
     refreshSettingsWearables();
     if (window.navigate) window.navigate('dashboard');

@@ -425,12 +425,16 @@ export async function disconnectWearable(adapterId, { deleteData = true } = {}) 
 // Top-level orchestrator: sync one source end-to-end
 // ─────────────────────────────────────────────────────────
 
-export async function syncNow(adapterId) {
+export async function syncNow(adapterId, { force = false } = {}) {
   const profileId = getActiveProfileId();
   try {
     const res = await incrementalSyncWearable(adapterId);
     if (res.skipped) return res;
-    await syncWearableSummary(profileId, listConnectedSources());
+    // Manual user-driven syncs pass `force: true` so the L2 gate (which
+    // skips writes when the d7 mean / trend / weekly delta haven't moved
+    // ≥ 5%) can't make the strip card "stick" on a stale snapshot.
+    // Background scheduler omits the flag → keeps Evolu writes minimal.
+    await syncWearableSummary(profileId, listConnectedSources(), { force });
     return res;
   } catch (e) {
     const displayName = adapterById(adapterId)?.displayName || adapterId;

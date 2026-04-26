@@ -347,7 +347,7 @@ export function persistWearableSummary(newSummary, anomalyEvents) {
 // Orchestrator — reads L1, computes, persists if gate trips
 // ─────────────────────────────────────────────────────────
 
-export async function syncWearableSummary(profileId, connectedSources) {
+export async function syncWearableSummary(profileId, connectedSources, { force = false } = {}) {
   if (!profileId || !connectedSources) return { wrote: false, reason: 'noop-inputs' };
   const sourceIds = Object.keys(connectedSources);
   if (sourceIds.length === 0) return { wrote: false, reason: 'no-sources' };
@@ -375,7 +375,12 @@ export async function syncWearableSummary(profileId, connectedSources) {
   const primaryOverride = state.importedData?.wearablePrimaryOverride || {};
   const newSummary = computeWearableSummary(rowsBySource, connectedSources, primaryOverride);
   const old = state.importedData?.wearableSummary || null;
-  const gate = shouldWriteL2(newSummary, old);
+  // `force` bypasses the gate. Used by user-driven manual syncs so the
+  // strip never appears stuck. The scheduled background path still goes
+  // through `shouldWriteL2` so the Evolu write budget stays small.
+  const gate = force
+    ? { write: true, reason: 'force', anomalyEvents: [] }
+    : shouldWriteL2(newSummary, old);
 
   if (!gate.write) return { wrote: false, reason: 'gate-not-tripped', summary: newSummary };
 

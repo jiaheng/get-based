@@ -5,6 +5,12 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.30.6', date: '2026-04-26', title: 'Wearables — manual sync always refreshes the strip',
+    items: [
+      '<b>Manual "sync now" now bypasses the L2 write gate</b> so the strip can\'t appear stuck on a stale snapshot. Background scheduled syncs still go through the gate (preserves the few-writes-per-month Evolu sync budget); only user-initiated clicks force a refresh. Closes the loop on the v1.30.x "HRV/RHR show 2-day-old data" report — pairs with the v1.30.5 latest-advanced gate trigger and the v1.30.4 Oura time-series fallback. After this build, click <i>sync now</i> once and the strip will catch up to whatever is in your Oura cloud (HRV/RHR included).',
+    ]
+  },
+  {
     version: '1.30.5', date: '2026-04-26', title: 'Wearables — strip cards now refresh on every sync',
     items: [
       '<b>Strip cards now refresh whenever a fresher data point lands</b> instead of "sticking" between threshold-tripping events. Bug was in the L2 write gate: it only persisted a new summary when a 5% rolling-mean shift, trend flip, or weekly rollover crossed a threshold — which made sense for sync-write minimisation but left the strip showing stale latest values when the underlying numbers were stable. Now any advance in <code>latestDate</code> forces a write. The cost is one extra L2 write per metric per day at most — still well inside the few-writes-per-month Evolu budget. This was the root cause of the "HRV/RHR show 2-day-old data even though sync ran 19 minutes ago" report.',
