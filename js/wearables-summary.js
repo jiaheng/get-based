@@ -260,6 +260,18 @@ export function shouldWriteL2(newSummary, oldSummary) {
       trippedReason = trippedReason || `source-flip:${metricId}`;
     }
 
+    // 0c. Latest sample advanced. A user who synced 19 minutes ago expects
+    // the strip card to show the freshest data point that's actually in
+    // their L1 — not whatever snapshot survived the last d7-shift trip.
+    // Without this trigger the strip "sticks" between threshold-tripping
+    // events: HRV last wrote on Tuesday's d7 shift, today is Friday, and
+    // the card still reads "Tuesday's value" even though L1 has Wed/Thu/Fri.
+    // The cost is one extra L2 write per metric per day at most — still
+    // well inside the few-writes-per-month Evolu sync budget.
+    if (old.latestDate && neu.latestDate && neu.latestDate > old.latestDate) {
+      trippedReason = trippedReason || `latest-advanced:${metricId}`;
+    }
+
     // 1. d7 rolling-mean delta
     const oldD7 = old.rolling?.d7, newD7 = neu.rolling?.d7;
     if (typeof oldD7 === 'number' && typeof newD7 === 'number' && oldD7 !== 0) {

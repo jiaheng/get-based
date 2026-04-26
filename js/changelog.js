@@ -5,6 +5,12 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.30.5', date: '2026-04-26', title: 'Wearables — strip cards now refresh on every sync',
+    items: [
+      '<b>Strip cards now refresh whenever a fresher data point lands</b> instead of "sticking" between threshold-tripping events. Bug was in the L2 write gate: it only persisted a new summary when a 5% rolling-mean shift, trend flip, or weekly rollover crossed a threshold — which made sense for sync-write minimisation but left the strip showing stale latest values when the underlying numbers were stable. Now any advance in <code>latestDate</code> forces a write. The cost is one extra L2 write per metric per day at most — still well inside the few-writes-per-month Evolu budget. This was the root cause of the "HRV/RHR show 2-day-old data even though sync ran 19 minutes ago" report.',
+    ]
+  },
+  {
     version: '1.30.4', date: '2026-04-26', title: 'Oura — fix HRV/RHR lagging behind sleep score',
     items: [
       '<b>Oura HRV and RHR now sync today\'s data</b> instead of staying 1–2 days behind. Root cause: Oura\'s <code>/sleep</code> API returns the time-series HRV samples (<code>hrv.items</code>) shortly after a session ends, but the scalar <code>average_hrv</code> only fills in once the full overnight analysis pipeline finishes hours later. Our adapter only read the scalar — so today\'s HRV/RHR cards stayed null even though Oura cloud was already showing the value (their app computes the average client-side from the items array). The fetcher now falls back to a zero-filtered mean of the time series when the scalar isn\'t ready yet, matching what Oura\'s own UI does.',

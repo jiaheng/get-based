@@ -185,6 +185,34 @@ return (async function() {
     sourceFlipRes.write === true && sourceFlipRes.reason?.startsWith('source-flip:'),
     `reason=${sourceFlipRes.reason}`);
 
+  // Gate: latest-advanced. The user-reported v1.30.x bug: HRV/RHR cards
+  // showed 2-day-old values even though the most recent sync ran minutes
+  // ago — because today's d7 mean was within 5% of yesterday's, the gate
+  // didn't trip and L2 stayed frozen on the last threshold-tripping
+  // snapshot. With this trigger, any latestDate advance forces a write so
+  // the strip never lags behind L1.
+  const oldLagging = {
+    summaryUpdatedAt: baseSummary.summaryUpdatedAt,
+    sources: baseSummary.sources,
+    metrics: { hrv_rmssd: { latest: 42, latestDate: '2026-04-24', primarySource: 'oura', baseline: 42, rolling: { d7: 42 }, trend30d: 'flat', weekly: [42] } }
+  };
+  const newAdvanced = {
+    summaryUpdatedAt: baseSummary.summaryUpdatedAt,
+    sources: baseSummary.sources,
+    metrics: { hrv_rmssd: { latest: 43, latestDate: '2026-04-26', primarySource: 'oura', baseline: 42, rolling: { d7: 42.3 }, trend30d: 'flat', weekly: [42.3] } }
+  };
+  const advRes = summary.shouldWriteL2(newAdvanced, oldLagging);
+  assert('Gate: latest-advanced trips write even when d7 / trend / weekly are stable',
+    advRes.write === true && advRes.reason?.startsWith('latest-advanced:'),
+    `reason=${advRes.reason}`);
+
+  // Sanity: same latestDate (re-sync of an already-current snapshot) does
+  // NOT trigger a redundant write. Preserves the write-minimization budget.
+  const sameDate = JSON.parse(JSON.stringify(oldLagging));
+  const sameDateRes = summary.shouldWriteL2(sameDate, oldLagging);
+  assert('Gate: identical snapshot (same latestDate) does NOT write',
+    sameDateRes.write === false, `reason=${sameDateRes.reason}`);
+
   // ═══════════════════════════════════════
   // 5. buildWearableContext
   // ═══════════════════════════════════════
