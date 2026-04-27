@@ -12,10 +12,60 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
+import crypto from 'node:crypto';
 
 const PORT = parseInt(process.argv[2], 10) || 8000;
 const __filename = fileURLToPath(import.meta.url);
 const ROOT = path.dirname(__filename);
+
+// Mutex for /api/deploy-catalog so two concurrent POSTs can't race on
+// the read-hash → writeFileSync critical section. Promise-chained queue:
+// each request's _deployCatalog body waits for the prior one to finish.
+let _deployLock = Promise.resolve();
+function _deployCatalog(body, req, res) {
+  _deployLock = _deployLock.then(() => new Promise(resolve => {
+    try {
+      JSON.parse(body); // validate JSON shape
+      // Surface-level shape check — protect the app against a successful
+      // deploy of `[1,2,3]` (valid JSON, broken catalog).
+      const parsed = JSON.parse(body);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)
+          || !parsed.slots || !parsed.shops) {
+        res.writeHead(400, { 'Content-Type': 'text/plain' });
+        res.end('Invalid catalog shape: missing required slots/shops keys');
+        resolve();
+        return;
+      }
+      const filePath = path.join(ROOT, 'data', 'recommendations.json');
+      // Conflict detection: client sends If-Match with the SHA-256 hash of
+      // the catalog as it last saw it; reject when the file changed since
+      // (multi-tab / concurrent-write race).
+      const ifMatch = req.headers['if-match'];
+      if (ifMatch) {
+        let currentHash = '';
+        try {
+          const buf = fs.readFileSync(filePath);
+          currentHash = crypto.createHash('sha256').update(buf).digest('hex');
+        } catch {}
+        if (currentHash && currentHash !== ifMatch.replace(/"/g, '')) {
+          res.writeHead(409, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'conflict', currentHash }));
+          resolve();
+          return;
+        }
+      }
+      fs.writeFileSync(filePath, body);
+      const newHash = crypto.createHash('sha256').update(body).digest('hex');
+      res.writeHead(200, { 'Content-Type': 'application/json', 'ETag': '"' + newHash + '"' });
+      res.end(JSON.stringify({ ok: true, hash: newHash }));
+    } catch (e) {
+      res.writeHead(400, { 'Content-Type': 'text/plain' });
+      res.end('Invalid JSON: ' + e.message);
+    }
+    resolve();
+  })).catch(() => {});
+  return _deployLock;
+}
 const SITE_DIR = process.env.SITE_DIR || path.join(ROOT, '..', 'get-based-site');
 const SITE_INDEX = path.join(SITE_DIR, 'index.html');
 const hasSite = fs.existsSync(SITE_INDEX);
@@ -151,10 +201,22 @@ function serveFile(res, filePath) {
   });
 }
 
+// Origins allowed to hit /api/* and /proxy. Includes:
+//   - Our own dev server on PORT (browser tab loaded directly)
+//   - Sibling local dev tools (default :5173, fallback :5174). All allowed
+//     hosts here must be loopback-only — widening this set assumes the
+//     same trust boundary (no cross-network requests).
+// LOCAL_TOOL_PORTS env var lets a user override if a tool picked a different port.
+const _localToolPorts = (process.env.LOCAL_TOOL_PORTS || process.env.EDITOR_PORTS || '5173,5174').split(',').map(s => s.trim()).filter(Boolean);
 const ALLOWED_ORIGINS = new Set([
   `http://127.0.0.1:${PORT}`,
   `http://localhost:${PORT}`,
   `http://[::1]:${PORT}`,
+  ..._localToolPorts.flatMap(p => [
+    `http://127.0.0.1:${p}`,
+    `http://localhost:${p}`,
+    `http://[::1]:${p}`,
+  ]),
 ]);
 function isSameOrigin(req) {
   if (req.headers.origin) return ALLOWED_ORIGINS.has(req.headers.origin);
@@ -273,20 +335,97 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // API: deploy catalog JSON from editor to data/
+  // API: deploy catalog JSON to data/recommendations.json
   if (pathname === '/api/deploy-catalog' && req.method === 'POST') {
+    // Body-size cap. The catalog is ~100 KB today; 5 MB gives plenty of
+    // headroom while preventing a runaway POST from OOM'ing the dev server.
+    const MAX_BODY_BYTES = 5 * 1024 * 1024;
     let body = '';
-    req.on('data', chunk => body += chunk);
-    req.on('end', () => {
-      try {
-        JSON.parse(body); // validate
-        fs.writeFileSync(path.join(ROOT, 'data', 'recommendations-czsk.json'), body);
-        res.writeHead(200, { 'Content-Type': 'text/plain' });
-        res.end('OK');
-      } catch(e) {
-        res.writeHead(400, { 'Content-Type': 'text/plain' });
-        res.end('Invalid JSON: ' + e.message);
+    let bytes = 0;
+    let aborted = false;
+    req.on('data', chunk => {
+      if (aborted) return;
+      bytes += chunk.length;
+      if (bytes > MAX_BODY_BYTES) {
+        aborted = true;
+        res.writeHead(413, { 'Content-Type': 'text/plain' });
+        res.end('Catalog body exceeds 5 MB limit');
+        req.destroy();
+        return;
       }
+      body += chunk;
+    });
+    req.on('end', () => {
+      if (aborted) return;
+      // Serialize concurrent deploys with an in-process mutex. Without this,
+      // two concurrent POSTs both pass the If-Match check against the same
+      // pre-write hash, then race on writeFileSync — the second clobbers
+      // the first. Lock spans the read-hash → write critical section.
+      _deployCatalog(body, req, res);
+    });
+    return;
+  }
+
+  // API: git status of a tracked file. A client surfaces this in a diff
+  // preview so users see whether they're about to overwrite uncommitted work.
+  if (pathname === '/api/git-status' && req.method === 'GET') {
+    const filePath = String(url.searchParams.get('path') || 'data/recommendations.json');
+    // Path-traversal guard runs on the QUERY ARG ITSELF — that's the
+    // attacker-controllable input. Reject `..` and absolute paths so the
+    // resolved path is guaranteed inside ROOT. Maintainer-placed symlinks
+    // whose targets resolve outside ROOT are explicitly allowed; the
+    // realpath check that previously rejected them was over-restrictive.
+    if (filePath.split(/[/\\]/).some(seg => seg === '..') || path.isAbsolute(filePath)) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'invalid path' }));
+      return;
+    }
+    const resolved = path.resolve(ROOT, filePath);
+    let real;
+    try { real = fs.realpathSync(resolved); } catch { real = resolved; }
+    // Detect when the symlink resolves outside ROOT — when it does, we
+    // suppress git metadata (last-commit SHA / message / dirty flag) to
+    // avoid fingerprinting whatever the maintainer linked to. The
+    // contentHash is still computed (it's just a hash of bytes the user
+    // already controls) so If-Match conflict detection keeps working.
+    let rel = path.relative(ROOT, real);
+    const symlinksOutsideRoot = rel.startsWith('..') || path.isAbsolute(rel);
+    if (symlinksOutsideRoot) rel = filePath;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    let contentHash = null;
+    try { contentHash = crypto.createHash('sha256').update(fs.readFileSync(real)).digest('hex'); } catch {}
+    // Skip git lookups entirely for symlinks resolving outside the repo —
+    // we don't want to expose another repo's HEAD SHA / commit message via
+    // an endpoint anyone in the same browser can hit.
+    if (symlinksOutsideRoot) {
+      res.end(JSON.stringify({ path: rel, dirty: false, lastCommit: null, contentHash }));
+      return;
+    }
+    // Run two cheap git commands in parallel: status (for dirty/clean) and
+    // log (for last commit metadata).
+    let statusOut = '', logOut = '', errored = false;
+    let pending = 2;
+    function done() {
+      if (--pending !== 0) return;
+      if (errored) { res.end(JSON.stringify({ error: 'git unavailable', dirty: false, contentHash })); return; }
+      const dirty = statusOut.trim().length > 0;
+      const lastCommit = (() => {
+        const line = (logOut || '').trim();
+        if (!line) return null;
+        const [sha, date, ...rest] = line.split('\x1f');
+        return { sha, date, message: rest.join('\x1f') };
+      })();
+      res.end(JSON.stringify({ path: rel, dirty, lastCommit, contentHash }));
+    }
+    execFile('git', ['-C', ROOT, 'status', '--porcelain', '--', rel], { timeout: 3000 }, (err, out) => {
+      if (err) errored = true;
+      else statusOut = out;
+      done();
+    });
+    execFile('git', ['-C', ROOT, 'log', '-1', '--pretty=format:%h\x1f%cI\x1f%s', '--', rel], { timeout: 3000 }, (err, out) => {
+      if (err) errored = true;
+      else logOut = out;
+      done();
     });
     return;
   }

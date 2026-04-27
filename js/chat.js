@@ -1455,6 +1455,11 @@ export function renderChatMessages() {
       if (msg.lensSources?.length) {
         html += _renderLensSources(msg.lensSources, msg.lensSourceName);
       }
+      // EMF hint (persisted, single-line link to assessment editor)
+      if (msg.emfHint && window.isProductRecsEnabled?.()) {
+        const openHandler = `event.preventDefault();window.openEMFAssessmentEditor&&window.openEMFAssessmentEditor();`;
+        html += `<div class="chat-emf-hint"><span aria-hidden="true">💡</span> Curious about your EMF environment? <a href="#" onclick="${openHandler}" data-umami-event="emf-nudge-chat">Open the assessment →</a></div>`;
+      }
       // Rec slots (persisted on message, rendered from catalog)
       if (msg.recSlots?.length && window.isProductRecsEnabled?.() && window.renderRecommendationSectionSync && window._cachedCatalog?.slots) {
         const recSections = msg.recSlots.map(slot => {
@@ -2149,6 +2154,43 @@ export async function sendChatMessage() {
     // Detect supplement slots from AI text — persist on message for re-rendering
     const _recSlots = (window.isProductRecsEnabled && window.isProductRecsEnabled() && window.detectSupplementSlots) ? window.detectSupplementSlots(fullText) : [];
     if (_recSlots.length) assistantMsg.recSlots = _recSlots;
+
+    // EMF hint with profile-level 30-day cooldown. Fires only when (a) EMF is
+    // explicitly on the user's mind in this turn AND (b) they haven't already
+    // explored EMF (no fresh assessment) AND (c) we haven't surfaced this hint
+    // for this profile in the last 30 days AND (d) the hint actually rendered
+    // to the DOM (so a stop-mid-stream doesn't burn the cooldown).
+    (function maybeInjectEMFHint() {
+      try {
+        if (!window.isProductRecsEnabled?.() || !window.detectEMFRelevance) return;
+        const userText = state.chatHistory[state.chatHistory.length - 2]?.content || '';
+        const turnText = `${userText}\n${fullText}`;
+        if (!window.detectEMFRelevance(turnText)) return;
+        const assessments = state.importedData?.emfAssessment?.assessments || [];
+        if (assessments.length) {
+          const latest = assessments.reduce((a, b) => (a.date > b.date ? a : b));
+          const ageDays = (Date.now() - new Date(latest.date + 'T00:00:00').getTime()) / 86400000;
+          if (ageDays < 120) return;
+        }
+        const profileId = state.currentProfile || 'default';
+        const flagKey = `labcharts-emf-hint-last-${profileId}`;
+        const lastShown = parseInt(localStorage.getItem(flagKey) || '0', 10);
+        const COOLDOWN_MS = 30 * 24 * 60 * 60 * 1000;
+        if (lastShown && (Date.now() - lastShown) < COOLDOWN_MS) return;
+        // Only persist the hint + cooldown once we've actually injected the
+        // DOM node — otherwise a torn-down message (stop, regenerate, error)
+        // would silently consume the 30-day cooldown.
+        if (!aiMsgEl?.isConnected) return;
+        const hintEl = document.createElement('div');
+        hintEl.className = 'chat-emf-hint';
+        hintEl.innerHTML = `<span aria-hidden="true">💡</span> Curious about your EMF environment? <a href="#" onclick="event.preventDefault();window.openEMFAssessmentEditor&&window.openEMFAssessmentEditor();" data-umami-event="emf-nudge-chat">Open the assessment →</a>`;
+        const actionBar = aiMsgEl.querySelector('.chat-action-bar');
+        if (actionBar) aiMsgEl.insertBefore(hintEl, actionBar);
+        else aiMsgEl.appendChild(hintEl);
+        assistantMsg.emfHint = true;
+        localStorage.setItem(flagKey, String(Date.now()));
+      } catch {}
+    })();
 
     // Append action bar
     const msgIndex = state.chatHistory.length - 1;

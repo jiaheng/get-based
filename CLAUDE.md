@@ -55,7 +55,7 @@ Female profiles only. Phase-aware reference ranges (`PHASE_RANGES`), cycle phase
 
 ### EMF Assessment
 
-Baubiologie sub-module under Environment card. Room-by-room measurements with SBM-2015 severity, source/mitigation tags, AI interpretation. See `emf.js`.
+Baubiologie sub-module under Environment card. Room-by-room measurements with SBM-2015 severity, source/mitigation tags, AI interpretation. See `emf.js`. EMF affiliate products live in the unified catalog at `data/recommendations.json` (`_internal.emfMeters` for meters, `env.*` for mitigation products). Region routing + UTM stamping handled by `recommendations.js`. Surfaces: empty-state meter CTA + post-interpretation mitigation product list. Gated by `isProductRecsEnabled()` (same toggle as supplements).
 
 ### Cross-Device Sync
 
@@ -97,6 +97,10 @@ Six backends: PPQ, Routstr, OpenRouter, Venice, Local AI (Ollama/LM Studio/Jan),
 node dev-server.js
 ```
 Dev server mirrors production routing. Landing page repo (`../get-based-site`) served at `/` when present, app at `/app`. Docs at `/docs/*` route to `dist-docs/`.
+
+### Recommendation catalog
+
+`data/recommendations.json` holds the supplement / lifestyle / EMF affiliate catalog. For local development the maintainer typically symlinks it to a separate working directory; for forks, copy `data/recommendations.example.json` to `data/recommendations.json` to start from a minimal stub. For Vercel deploy, `scripts/fetch-catalog.mjs` (wired into `vercel.json`'s `buildCommand`) fetches the file at build time when `CATALOG_FETCH_URL` and `CATALOG_FETCH_TOKEN` env vars are set; without them, it preserves whatever `data/recommendations.json` contains (or copies the example stub if the file is missing).
 
 ### Tests
 

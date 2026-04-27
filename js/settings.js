@@ -1,7 +1,7 @@
 // settings.js — Settings modal (profile, display, AI provider, privacy)
 
 import { state } from './state.js';
-import { escapeHTML, escapeAttr, showNotification, isDebugMode, setDebugMode, isPIIReviewEnabled, setPIIReviewEnabled, isAnalyticsEnabled, setAnalyticsEnabled } from './utils.js';
+import { escapeHTML, escapeAttr, showNotification, showConfirmDialog, isDebugMode, setDebugMode, isPIIReviewEnabled, setPIIReviewEnabled, isAnalyticsEnabled, setAnalyticsEnabled } from './utils.js';
 import { getTheme, setTheme, getTimeFormat, setTimeFormat } from './theme.js';
 import { formatCost, getProfileUsage, getGlobalUsage, resetProfileUsage } from './schema.js';
 import { getAIProvider, isAIPaused, getOllamaPIIUrl, getOllamaPIIModel } from './api.js';
@@ -40,6 +40,10 @@ export function openSettingsModal(tab) {
       <button class="settings-tab-btn${_activeSettingsTab === 'ai' ? ' active' : ''}" data-tab="ai" onclick="switchSettingsTab('ai')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 0-4 4v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2h-2V6a4 4 0 0 0-4-4z"/><circle cx="9" cy="14" r="1"/><circle cx="15" cy="14" r="1"/></svg>
         AI
+      </button>
+      <button class="settings-tab-btn${_activeSettingsTab === 'privacy' ? ' active' : ''}" data-tab="privacy" onclick="switchSettingsTab('privacy')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        Privacy
       </button>
       <button class="settings-tab-btn${_activeSettingsTab === 'data' ? ' active' : ''}" data-tab="data" onclick="switchSettingsTab('data')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
@@ -151,12 +155,6 @@ export function openSettingsModal(tab) {
         </div>
       </div>
 
-      <div class="settings-group-title">PDF Import Privacy</div>
-
-      <div class="settings-section" id="privacy-section">
-        ${renderPrivacySection()}
-      </div>
-
       <div class="settings-group-title">Knowledge Base</div>
 
       <div class="settings-section" id="custom-lens-section">
@@ -167,6 +165,15 @@ export function openSettingsModal(tab) {
 
       <div class="settings-section" id="ai-usage-section">
         ${renderAIUsageSection()}
+      </div>
+    </div>
+
+    <!-- Privacy Tab -->
+    <div class="settings-tab-panel${_activeSettingsTab === 'privacy' ? ' active' : ''}" data-tab-panel="privacy">
+      <div class="settings-group-title">AI Privacy Protection</div>
+
+      <div class="settings-section" id="privacy-section">
+        ${renderPrivacySection()}
       </div>
     </div>
 
@@ -277,41 +284,13 @@ export function renderPrivacySection() {
   const piiUrl = getOllamaPIIUrl();
   const piiEnabled = isOllamaPIIEnabled();
   return `<div class="local-ai-settings">
-    <div class="ai-provider-desc" style="margin-bottom:10px">Before your lab PDF is sent to AI for analysis, personal information (name, date of birth, ID numbers, address) is detected and replaced with fake data. Only lab results and marker values reach the AI provider.</div>
+    <div class="ai-provider-desc" style="margin-bottom:10px">Before any document or chat context is sent to AI for analysis — lab PDFs, EMF assessment reports, image-based imports — personal information (name, date of birth, ID numbers, address) is detected and replaced with fake data. Only lab values and content relevant to interpretation reach the AI provider.</div>
     <div class="privacy-status-card" id="privacy-status-card">
       <div class="privacy-status-icon" id="privacy-status-icon">&#128274;</div>
       <div class="privacy-status-body">
         <div class="privacy-status-title" id="privacy-status-title">Checking...</div>
         <div class="privacy-status-detail" id="privacy-status-detail"></div>
       </div>
-    </div>
-    <div style="display:flex;align-items:start;justify-content:space-between;gap:12px;margin:12px 0">
-      <span style="font-size:13px">Use local AI for privacy protection<br><span style="font-size:11px;color:var(--text-muted)">Requires a local AI server. When disabled, regex pattern matching is used instead</span></span>
-      <label class="toggle-switch" style="margin-top:2px">
-        <input type="checkbox" id="pii-local-toggle" ${piiEnabled ? 'checked' : ''} onchange="toggleOllamaPII(this.checked)">
-        <span class="toggle-slider"></span>
-      </label>
-    </div>
-    <div style="display:flex;align-items:start;justify-content:space-between;gap:12px;margin-top:4px">
-      <span style="font-size:13px">Review obfuscated text before sending to AI<br><span style="font-size:11px;color:var(--text-muted)">Pause after privacy protection to inspect what AI will receive</span></span>
-      <label class="toggle-switch" style="margin-top:2px">
-        <input type="checkbox" id="pii-review-toggle" ${isPIIReviewEnabled() ? 'checked' : ''} onchange="setPIIReviewEnabled(this.checked)">
-        <span class="toggle-slider"></span>
-      </label>
-    </div>
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:8px">
-      <span style="font-size:13px">Show privacy details in import preview</span>
-      <label class="toggle-switch">
-        <input type="checkbox" id="debug-mode-toggle" ${isDebugMode() ? 'checked' : ''} onchange="setDebugMode(this.checked)">
-        <span class="toggle-slider"></span>
-      </label>
-    </div>
-    <div style="display:flex;align-items:start;justify-content:space-between;gap:12px;margin-top:8px">
-      <span style="font-size:13px">Send anonymous usage stats<br><span style="font-size:11px;color:var(--text-muted)">Cookieless Umami pageviews — no personal data, no tracking, no IP. Toggle takes effect on next launch.</span></span>
-      <label class="toggle-switch" style="margin-top:2px">
-        <input type="checkbox" id="analytics-toggle" ${isAnalyticsEnabled() ? 'checked' : ''} onchange="setAnalyticsEnabled(this.checked)">
-        <span class="toggle-slider"></span>
-      </label>
     </div>
     <div class="privacy-configure-toggle" onclick="togglePrivacyConfigure()" style="margin-top:12px">
       <span class="privacy-configure-arrow" id="privacy-configure-arrow">&#9654;</span>
@@ -335,6 +314,38 @@ export function renderPrivacySection() {
           <select class="api-key-input" id="pii-model-select" style="margin-top:4px" onchange="setOllamaPIIModel(this.value)"></select>
         </div>
       </div>
+    </div>
+    <div style="display:flex;align-items:start;justify-content:space-between;gap:12px;margin-top:14px">
+      <span style="font-size:13px">Use local AI for privacy protection<br><span style="font-size:11px;color:var(--text-muted)">Requires a local AI server (configure above). When disabled, regex pattern matching is used instead.</span></span>
+      <label class="toggle-switch" style="margin-top:2px">
+        <input type="checkbox" id="pii-local-toggle" ${piiEnabled ? 'checked' : ''} onchange="toggleOllamaPII(this.checked)">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <div style="display:flex;align-items:start;justify-content:space-between;gap:12px;margin-top:8px">
+      <span style="font-size:13px">Review obfuscated text before sending to AI<br><span style="font-size:11px;color:var(--text-muted)">Pause after privacy protection runs so you can inspect what the AI is about to receive. Adds one click per import — recommended.</span></span>
+      <label class="toggle-switch" style="margin-top:2px">
+        <input type="checkbox" id="pii-review-toggle" ${isPIIReviewEnabled() ? 'checked' : ''} onchange="confirmDisablePIIReview(this)">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <div style="display:flex;align-items:start;justify-content:space-between;gap:12px;margin-top:8px">
+      <span style="font-size:13px">Verbose console logging<br><span style="font-size:11px;color:var(--text-muted)">Adds detailed log output across the app — useful for debugging or filing issues. No data leaves your device.</span></span>
+      <label class="toggle-switch" style="margin-top:2px">
+        <input type="checkbox" id="debug-mode-toggle" ${isDebugMode() ? 'checked' : ''} onchange="setDebugMode(this.checked)">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+  </div>
+  <div class="local-ai-settings" style="margin-top:16px">
+    <h4 style="margin:0 0 6px 0;font-size:13px;color:var(--text-primary)">Anonymous Usage Stats</h4>
+    <div class="ai-provider-desc" style="margin-bottom:10px">No health data is ever sent. We track cookieless pageviews and outbound clicks on affiliate links so we can tell which integrations actually help users — never which user, what data they were viewing, or any health context.</div>
+    <div style="display:flex;align-items:start;justify-content:space-between;gap:12px">
+      <span style="font-size:13px">Send anonymous usage stats<br><span style="font-size:11px;color:var(--text-muted)">Toggle takes effect on next launch.</span></span>
+      <label class="toggle-switch" style="margin-top:2px">
+        <input type="checkbox" id="analytics-toggle" ${isAnalyticsEnabled() ? 'checked' : ''} onchange="setAnalyticsEnabled(this.checked)">
+        <span class="toggle-slider"></span>
+      </label>
     </div>
   </div>`;
 }
@@ -1094,6 +1105,32 @@ function resetCurrentProfileUsage() {
   if (el) el.innerHTML = renderAIUsageSection();
 }
 
+// Disable confirmation for the PII review toggle. On→off shows a one-time
+// warning so users don't silently lose visibility into what's leaving their
+// device. On→on (re-enabling) and the initial setup are silent.
+export function confirmDisablePIIReview(checkbox) {
+  if (checkbox.checked) {
+    setPIIReviewEnabled(true);
+    return;
+  }
+  // Going from on → off: warn unless they've explicitly dismissed before
+  const acknowledged = localStorage.getItem('labcharts-pii-review-disable-ack') === '1';
+  if (acknowledged) {
+    setPIIReviewEnabled(false);
+    return;
+  }
+  // Restore the toggle while the dialog is open; commit only on confirm
+  checkbox.checked = true;
+  showConfirmDialog(
+    "Turn off the obfuscation review?\n\nWith this off, getbased's PII detector runs but you won't see the result before it's sent to the AI provider. Recommended only after you've verified the obfuscation works on your data.",
+    () => {
+      localStorage.setItem('labcharts-pii-review-disable-ack', '1');
+      setPIIReviewEnabled(false);
+      checkbox.checked = false;
+    }
+  );
+}
+
 Object.assign(window, {
   openSettingsModal,
   closeSettingsModal,
@@ -1101,6 +1138,7 @@ Object.assign(window, {
   renderPrivacySection,
   togglePrivacyConfigure,
   toggleOllamaPII,
+  confirmDisablePIIReview,
   updatePrivacyStatusCard,
   updateSettingsUI,
   renderDataEntriesSection,

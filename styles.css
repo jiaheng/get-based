@@ -3858,6 +3858,10 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
 .rec-product-link { color: var(--accent); text-decoration: none; font-size: 12px; white-space: nowrap; padding: 6px 12px; }
 .rec-product-link:hover { text-decoration: underline; }
 .rec-disclosure { font-size: 10px; color: var(--text-muted); margin-top: 10px; padding-top: 6px; border-top: 1px solid var(--border); }
+.rec-region-tag { color: var(--text-muted); opacity: 0.75; font-size: 11px; display: inline-block; margin-left: 8px; }
+.rec-region-edit { color: var(--accent); text-decoration: none; font-size: 11px; cursor: pointer; padding: 4px 6px; border-radius: 4px; min-height: 24px; display: inline-block; }
+.rec-region-edit:hover { text-decoration: underline; }
+.rec-region-edit:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .rec-suggest { font-size: 10px; margin-top: 8px; }
 .rec-suggest a { color: var(--text-muted); text-decoration: none; }
 .rec-suggest a:hover { color: var(--accent); }
@@ -3892,6 +3896,61 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
   border-left: 3px solid var(--red); background: rgba(239, 68, 68, 0.06);
   padding: 6px 10px; margin-top: 6px; border-radius: 0 var(--radius) var(--radius) 0;
   font-size: 11px; line-height: 1.4; color: var(--text-secondary);
+}
+/* EMF mitigation product recs (Safe Living Technologies affiliate) */
+.rec-emf-section { margin-top: 12px; }
+.rec-emf-product { display: block; padding: 10px 12px; margin: 6px 0; border: 1px solid var(--border); border-radius: var(--radius); background: rgba(99, 102, 241, 0.03); }
+.rec-emf-product-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.rec-emf-product-head strong { word-break: break-word; }
+.rec-emf-product-meta { font-size: 11px; color: var(--text-muted); word-break: break-word; }
+.rec-emf-product-blurb { font-size: 12px; color: var(--text-secondary); margin-top: 4px; line-height: 1.45; word-break: break-word; overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .rec-emf-product { padding: 8px 10px; }
+  .rec-emf-product-head { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .rec-emf-product-meta { font-size: 10px; }
+  .rec-emf-product-blurb { font-size: 12px; }
+  .rec-coupon { font-size: 11px; padding: 6px 8px; }
+  .rec-emf-product .rec-product-link { padding: 6px 0; }
+}
+.rec-emf-product .rec-product-link { display: inline-block; margin-top: 6px; padding: 4px 0; font-size: 12px; }
+.rec-coupon { font-size: 12px; color: var(--text-secondary); margin-top: 8px; padding: 6px 10px; background: rgba(34, 197, 94, 0.06); border-left: 3px solid var(--green); border-radius: 0 var(--radius) var(--radius) 0; }
+.rec-coupon code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; padding: 1px 6px; background: rgba(34, 197, 94, 0.12); border-radius: 4px; }
+.rec-coupon-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; padding: 2px 8px; background: rgba(34, 197, 94, 0.12); border: 1px dashed rgba(34, 197, 94, 0.35); border-radius: 4px; color: var(--text-primary); cursor: pointer; font-size: inherit; transition: background 0.15s, border-color 0.15s; }
+.rec-coupon-code:hover { background: rgba(34, 197, 94, 0.20); border-color: rgba(34, 197, 94, 0.55); }
+.rec-coupon-code:active { transform: translateY(1px); }
+.ctx-tip-emf-nudge { font-size: 12px; color: var(--text-secondary); margin-top: 12px; padding: 8px 10px; background: rgba(99, 102, 241, 0.05); border-left: 3px solid var(--accent); border-radius: 0 var(--radius) var(--radius) 0; line-height: 1.5; }
+.ctx-tip-emf-nudge a { color: var(--accent); text-decoration: none; font-weight: 500; }
+.ctx-tip-emf-nudge a:hover { text-decoration: underline; }
+.wearable-detail-emf-hint { font-size: 12px; color: var(--text-secondary); margin-top: 14px; padding: 8px 10px; background: rgba(99, 102, 241, 0.05); border-left: 3px solid var(--accent); border-radius: 0 var(--radius) var(--radius) 0; line-height: 1.5; }
+.wearable-detail-emf-hint a { color: var(--accent); text-decoration: none; font-weight: 500; }
+.wearable-detail-emf-hint a:hover { text-decoration: underline; }
+.chat-emf-hint { font-size: 12px; color: var(--text-secondary); margin-top: 10px; padding: 6px 10px; background: rgba(99, 102, 241, 0.05); border-left: 3px solid var(--accent); border-radius: 0 var(--radius) var(--radius) 0; line-height: 1.5; }
+.chat-emf-hint a { color: var(--accent); text-decoration: none; font-weight: 500; }
+.chat-emf-hint a:hover { text-decoration: underline; }
+/* First-launch analytics transparency banner — fixed bottom-center, dismisses forever */
+.analytics-consent-banner {
+  position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+  z-index: 1000; max-width: min(640px, calc(100vw - 24px));
+  display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+  background: var(--bg-secondary, #1a1d24); border: 1px solid var(--border, #2d3138);
+  border-radius: 10px; padding: 10px 14px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.32);
+  animation: analytics-consent-in 0.25s ease-out;
+}
+@keyframes analytics-consent-in {
+  from { opacity: 0; transform: translate(-50%, 12px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+.analytics-consent-body { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--text-secondary); line-height: 1.45; flex: 1 1 280px; min-width: 0; }
+.analytics-consent-body strong { color: var(--text-primary); }
+.analytics-consent-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+.analytics-consent-btn { font-size: 12px; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text-secondary); cursor: pointer; transition: background 0.15s, border-color 0.15s, color 0.15s; }
+.analytics-consent-btn:hover { background: var(--bg-elevated, rgba(255,255,255,0.04)); color: var(--text-primary); border-color: var(--text-muted); }
+.analytics-consent-btn-primary { background: var(--accent); border-color: var(--accent); color: white; }
+.analytics-consent-btn-primary:hover { filter: brightness(1.08); background: var(--accent); color: white; }
+@media (max-width: 600px) {
+  .analytics-consent-banner { left: 12px; right: 12px; transform: none; max-width: none; bottom: 12px; }
+  @keyframes analytics-consent-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 }
 /* DNA-aware recommendation hints */
 .rec-dna-hints { border-left: 3px solid var(--accent); padding: 8px 12px; margin-bottom: 10px; background: rgba(99, 102, 241, 0.04); border-radius: 0 var(--radius) var(--radius) 0; }
