@@ -6,11 +6,17 @@
 //                       6 live vendor hosts (must NOT be blocked), strict
 //                       decimal octet parsing (no octal smuggling)
 //   - _isAllowedProxyUrl: vendor-allowlist shortcuts + HTTPS-public-host fallback
+//   - _resolveCatalogRepo: env-override path, symlink-to-other-repo path,
+//                       refusal to push the app repo when there's no symlink
+//   - _runPostDeployHooks: end-to-end Deploy button hooks (git commit + push
+//                       in catalog repo, Vercel deploy hook trigger). Each
+//                       step gated on env config; downstream skipped when
+//                       upstream didn't actually publish.
 //
 // These were extracted as exports so tests can import them without spinning
 // up the HTTP server (the server-side SSRF guard would be end-to-end work).
 
-import { parseEnvLocal, _proxyHostBlocked, _isAllowedProxyUrl } from '../dev-server.js';
+import { parseEnvLocal, _proxyHostBlocked, _isAllowedProxyUrl, _resolveCatalogRepo, _runPostDeployHooks } from '../dev-server.js';
 
 let passed = 0, failed = 0;
 function assert(name, cond, detail) {
@@ -196,6 +202,259 @@ assert('blocks private IP',            !_isAllowedProxyUrl('https://192.168.1.1/
 assert('blocks cloud metadata',        !_isAllowedProxyUrl('https://169.254.169.254/latest/meta-data/'));
 assert('blocks .local',                !_isAllowedProxyUrl('https://box.local/admin'));
 assert('blocks malformed URL',         !_isAllowedProxyUrl('not a url'));
+
+// ── _resolveCatalogRepo ──
+console.log('\n── _resolveCatalogRepo ──');
+
+// Helper: build a fake execFile that resolves git rev-parse --show-toplevel
+// by lookup table, rejecting unknown cwds.
+function fakeExecFile(table) {
+  return function(cmd, args, opts, cb) {
+    const cwdIdx = args.indexOf('-C');
+    const cwd = cwdIdx >= 0 ? args[cwdIdx + 1] : null;
+    const sub = args.slice(cwdIdx + 2);
+    const key = cwd + ' ' + sub.join(' ');
+    const handler = table[key];
+    if (!handler) return cb(new Error('exec not stubbed: ' + key));
+    if (handler instanceof Error) return cb(handler);
+    cb(null, handler + '\n', '');
+  };
+}
+function fakeFs(realpathTable) {
+  return {
+    realpathSync(p) {
+      if (p in realpathTable) return realpathTable[p];
+      return p;
+    },
+  };
+}
+
+// 1. CATALOG_GIT_REPO override resolves correctly when file is inside it
+{
+  const result = await _resolveCatalogRepo('/links/cat.json', {
+    envRepo: '/repos/tools',
+    appRoot: '/app',
+    fs: fakeFs({ '/links/cat.json': '/repos/tools/data/cat.json' }),
+    execFile: fakeExecFile({ '/repos/tools rev-parse --show-toplevel': '/repos/tools' }),
+  });
+  assert('override resolves to repo + relative path',
+    result?.repoRoot === '/repos/tools' && result?.relPath === 'data/cat.json',
+    JSON.stringify(result));
+}
+
+// 2. CATALOG_GIT_REPO override rejected when file lives outside that repo
+{
+  const result = await _resolveCatalogRepo('/elsewhere/cat.json', {
+    envRepo: '/repos/tools',
+    appRoot: '/app',
+    fs: fakeFs({ '/elsewhere/cat.json': '/elsewhere/cat.json' }),
+    execFile: fakeExecFile({ '/repos/tools rev-parse --show-toplevel': '/repos/tools' }),
+  });
+  assert('override rejected when file outside repo', result === null,
+    'expected null, got ' + JSON.stringify(result));
+}
+
+// 3. No override + file is symlinked into a different repo → resolves via realpath
+{
+  const result = await _resolveCatalogRepo('/app/data/cat.json', {
+    appRoot: '/app',
+    fs: fakeFs({
+      '/app/data/cat.json': '/repos/tools/data/cat.json',
+      '/app': '/app',
+    }),
+    execFile: fakeExecFile({ '/repos/tools/data rev-parse --show-toplevel': '/repos/tools' }),
+  });
+  assert('resolves via symlink → other repo',
+    result?.repoRoot === '/repos/tools' && result?.relPath === 'data/cat.json',
+    JSON.stringify(result));
+}
+
+// 4. No override + no symlink (file lives inside Lab Charts) → null
+//    (we don't want to auto-push the app repo on every catalog edit)
+{
+  const result = await _resolveCatalogRepo('/app/data/cat.json', {
+    appRoot: '/app',
+    fs: fakeFs({
+      '/app/data/cat.json': '/app/data/cat.json',
+      '/app': '/app',
+    }),
+    execFile: fakeExecFile({}),  // never queried
+  });
+  assert('no symlink → null (refuses to push app repo)', result === null,
+    'expected null, got ' + JSON.stringify(result));
+}
+
+// 5. Git not available / not a repo → null
+{
+  const result = await _resolveCatalogRepo('/app/data/cat.json', {
+    appRoot: '/app',
+    fs: fakeFs({
+      '/app/data/cat.json': '/random/cat.json',
+      '/app': '/app',
+    }),
+    execFile: fakeExecFile({}),  // unstubbed → throws
+  });
+  assert('git unavailable → null', result === null,
+    'expected null, got ' + JSON.stringify(result));
+}
+
+// ── _runPostDeployHooks ──
+console.log('\n── _runPostDeployHooks ──');
+
+function gitTable(opts = {}) {
+  // Default: clean execFile that handles every step of a successful push.
+  return {
+    '/repos/tools rev-parse --show-toplevel': '/repos/tools',
+    '/repos/tools add -- data/cat.json': '',
+    '/repos/tools diff --cached --quiet -- data/cat.json': new Error(Object.assign(new Error('diff'), { code: 1 })),
+    '/repos/tools commit -m catalog: deploy from editor -- data/cat.json': '',
+    '/repos/tools rev-parse HEAD': 'abc123def4567890',
+    '/repos/tools push origin HEAD': '',
+    ...opts,
+  };
+}
+
+// 6. Both hooks skipped when no env config + file is in app repo
+{
+  const out = await _runPostDeployHooks('/app/data/cat.json', {
+    env: {},
+    execFile: fakeExecFile({}),
+    fetch: async () => { throw new Error('should not fetch'); },
+  });
+  // _resolveCatalogRepo returns null here (no override, no symlink)
+  // → git skipped. Vercel skipped because no URL.
+  assert('no env → both hooks skipped',
+    out.git?.skipped === true && out.vercel?.skipped === true,
+    JSON.stringify(out));
+}
+
+// 7. Successful git push + Vercel trigger
+{
+  // diff --cached --quiet exits non-zero when there ARE staged changes
+  const exec = function(cmd, args, opts, cb) {
+    const key = args.slice(args.indexOf('-C') + 2).join(' ');
+    if (key === 'rev-parse --show-toplevel') return cb(null, '/repos/tools\n', '');
+    if (key === 'add -- data/cat.json') return cb(null, '', '');
+    if (key === 'diff --cached --quiet -- data/cat.json') {
+      // simulate "has staged changes" — git exits 1
+      const e = new Error('diff'); e.code = 1; return cb(e, '', '');
+    }
+    if (key === 'commit -m catalog: deploy from editor -- data/cat.json') return cb(null, '', '');
+    if (key === 'rev-parse HEAD') return cb(null, 'abc123def4567890\n', '');
+    if (key === 'push origin HEAD') return cb(null, '', '');
+    cb(new Error('unstubbed: ' + key));
+  };
+  const fetchCalls = [];
+  const fakeFetch = async (url, init) => {
+    fetchCalls.push({ url, method: init?.method });
+    return { ok: true, status: 200, async json() { return { job: { id: 'dep_xyz' } }; } };
+  };
+  const out = await _runPostDeployHooks('/app/data/cat.json', {
+    env: {
+      CATALOG_GIT_REPO: '/repos/tools',
+      VERCEL_DEPLOY_HOOK_URL: 'https://api.vercel.com/v1/integrations/deploy/abc',
+    },
+    appRoot: '/app',
+    fs: fakeFs({ '/app/data/cat.json': '/repos/tools/data/cat.json' }),
+    execFile: exec,
+    fetch: fakeFetch,
+  });
+  assert('successful path: git committed + pushed',
+    out.git?.committed === true && out.git?.pushed === true && out.git?.sha === 'abc123def4567890',
+    JSON.stringify(out.git));
+  assert('successful path: Vercel triggered with jobId',
+    out.vercel?.triggered === true && out.vercel?.jobId === 'dep_xyz',
+    JSON.stringify(out.vercel));
+  assert('Vercel hook called with POST', fetchCalls.length === 1 && fetchCalls[0].method === 'POST',
+    JSON.stringify(fetchCalls));
+}
+
+// 8. No staged changes → idempotent skip (no commit, no push, but valid sha)
+{
+  const exec = function(cmd, args, opts, cb) {
+    const key = args.slice(args.indexOf('-C') + 2).join(' ');
+    if (key === 'rev-parse --show-toplevel') return cb(null, '/repos/tools\n', '');
+    if (key === 'add -- data/cat.json') return cb(null, '', '');
+    if (key === 'diff --cached --quiet -- data/cat.json') return cb(null, '', '');  // exit 0 = no changes
+    if (key === 'rev-parse HEAD') return cb(null, 'oldsha1234567890\n', '');
+    cb(new Error('should not have run: ' + key));
+  };
+  const out = await _runPostDeployHooks('/app/data/cat.json', {
+    env: {
+      CATALOG_GIT_REPO: '/repos/tools',
+      VERCEL_DEPLOY_HOOK_URL: 'https://api.vercel.com/v1/integrations/deploy/abc',
+    },
+    appRoot: '/app',
+    fs: fakeFs({ '/app/data/cat.json': '/repos/tools/data/cat.json' }),
+    execFile: exec,
+    fetch: async () => { throw new Error('should not fetch — git was a no-op'); },
+  });
+  assert('no diff → no commit, no push, sha returned',
+    out.git?.committed === false && out.git?.pushed === false && out.git?.sha === 'oldsha1234567890',
+    JSON.stringify(out.git));
+  assert('no diff → Vercel skipped (would rebuild stale)',
+    out.vercel?.skipped === true,
+    JSON.stringify(out.vercel));
+}
+
+// 9. Push fails → committed=true but pushed=false, error surfaced
+{
+  const exec = function(cmd, args, opts, cb) {
+    const key = args.slice(args.indexOf('-C') + 2).join(' ');
+    if (key === 'rev-parse --show-toplevel') return cb(null, '/repos/tools\n', '');
+    if (key === 'add -- data/cat.json') return cb(null, '', '');
+    if (key === 'diff --cached --quiet -- data/cat.json') {
+      const e = new Error('diff'); e.code = 1; return cb(e, '', '');
+    }
+    if (key === 'commit -m catalog: deploy from editor -- data/cat.json') return cb(null, '', '');
+    if (key === 'rev-parse HEAD') return cb(null, 'newsha1234567890\n', '');
+    if (key === 'push origin HEAD') return cb(Object.assign(new Error('push'), { code: 1 }), '', 'fatal: protected branch');
+    cb(new Error('unstubbed: ' + key));
+  };
+  const out = await _runPostDeployHooks('/app/data/cat.json', {
+    env: {
+      CATALOG_GIT_REPO: '/repos/tools',
+      VERCEL_DEPLOY_HOOK_URL: 'https://api.vercel.com/v1/integrations/deploy/abc',
+    },
+    appRoot: '/app',
+    fs: fakeFs({ '/app/data/cat.json': '/repos/tools/data/cat.json' }),
+    execFile: exec,
+    fetch: async () => { throw new Error('should not fetch — git push failed'); },
+  });
+  assert('push failure: committed but not pushed, error surfaced',
+    out.git?.committed === true && out.git?.pushed === false && /protected branch/.test(out.git?.error || ''),
+    JSON.stringify(out.git));
+  assert('push failure: Vercel skipped (catalog not on origin)',
+    out.vercel?.skipped === true,
+    JSON.stringify(out.vercel));
+}
+
+// 10. Vercel hook URL rejected when not a Vercel deploy hook (paranoia)
+{
+  const exec = function(cmd, args, opts, cb) {
+    const key = args.slice(args.indexOf('-C') + 2).join(' ');
+    if (key === 'rev-parse --show-toplevel') return cb(null, '/repos/tools\n', '');
+    if (key === 'add -- data/cat.json') return cb(null, '', '');
+    if (key === 'diff --cached --quiet -- data/cat.json') {
+      const e = new Error('diff'); e.code = 1; return cb(e, '', '');
+    }
+    if (key === 'commit -m catalog: deploy from editor -- data/cat.json') return cb(null, '', '');
+    if (key === 'rev-parse HEAD') return cb(null, 'abc123def4567890\n', '');
+    if (key === 'push origin HEAD') return cb(null, '', '');
+    cb(new Error('unstubbed: ' + key));
+  };
+  const out = await _runPostDeployHooks('/app/data/cat.json', {
+    env: {
+      CATALOG_GIT_REPO: '/repos/tools',
+      VERCEL_DEPLOY_HOOK_URL: 'https://evil.example.com/steal',
+    },
+    execFile: exec,
+    fetch: async () => { throw new Error('should not fetch — URL rejected'); },
+  });
+  assert('non-Vercel URL rejected before fetch',
+    out.vercel?.skipped === true && /does not look like a Vercel/.test(out.vercel?.reason || ''),
+    JSON.stringify(out.vercel));
+}
 
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 process.exit(failed === 0 ? 0 : 1);
