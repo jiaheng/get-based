@@ -16,6 +16,17 @@ return (async function() {
   const cssSrc = await fetchWithRetry('styles.css');
   const snpData = await fetch('data/snp-health.json').then(r => r.json());
   const catalogData = await fetch('data/recommendations.json').then(r => r.json());
+  // Detect the stub fallback (Dependabot / fork PRs without CATALOG_FETCH_TOKEN —
+  // see scripts/fetch-catalog.mjs). The stub only contains 3 slots so any test
+  // that asserts on real catalog content (B12/folate slot shape, snpHint
+  // slotKey resolution) would deterministically fail. Skip those assertions
+  // and report the skip count at the end.
+  const STUB_CATALOG = catalogData?._stub === true;
+  let skipped = 0;
+  function assertCatalog(name, condition, detail) {
+    if (STUB_CATALOG) { skipped++; console.log(`%c SKIP %c ${name} (stub catalog)`, 'background:#94a3b8;color:#fff;padding:2px 6px;border-radius:3px', ''); return; }
+    assert(name, condition, detail);
+  }
 
   // ═══════════════════════════════════════
   // 1. snp-health.json — snpHints structure
@@ -95,14 +106,14 @@ return (async function() {
   // ═══════════════════════════════════════
   console.log('%c 2. Catalog Slots ', 'font-weight:bold;color:#f59e0b');
 
-  assert('Catalog has vitamins.vitaminB12 slot', !!catalogData.slots?.['vitamins.vitaminB12']);
-  assert('Catalog has vitamins.folate slot', !!catalogData.slots?.['vitamins.folate']);
+  assertCatalog('Catalog has vitamins.vitaminB12 slot', !!catalogData.slots?.['vitamins.vitaminB12']);
+  assertCatalog('Catalog has vitamins.folate slot', !!catalogData.slots?.['vitamins.folate']);
   const b12Slot = catalogData.slots?.['vitamins.vitaminB12'];
   const folateSlot = catalogData.slots?.['vitamins.folate'];
-  assert('B12 slot has forms', b12Slot?.forms?.length >= 2);
-  assert('B12 slot has food forms', b12Slot?.foodForms?.length >= 2);
-  assert('Folate slot has forms', folateSlot?.forms?.length >= 2);
-  assert('Folate slot has food forms', folateSlot?.foodForms?.length >= 2);
+  assertCatalog('B12 slot has forms', b12Slot?.forms?.length >= 2);
+  assertCatalog('B12 slot has food forms', b12Slot?.foodForms?.length >= 2);
+  assertCatalog('Folate slot has forms', folateSlot?.forms?.length >= 2);
+  assertCatalog('Folate slot has food forms', folateSlot?.foodForms?.length >= 2);
 
   // ═══════════════════════════════════════
   // 3. recommendations.js — buildDNAHints
@@ -201,7 +212,7 @@ return (async function() {
       }
     }
   }
-  assert('All snpHint slotKeys exist in catalog', allSlotsExist, missingSlots.size ? `Missing: ${[...missingSlots].join(', ')}` : '');
+  assertCatalog('All snpHint slotKeys exist in catalog', allSlotsExist, missingSlots.size ? `Missing: ${[...missingSlots].join(', ')}` : '');
 
   // ═══════════════════════════════════════
   // 10. Direction coverage
@@ -243,5 +254,6 @@ return (async function() {
   // ═══════════════════════════════════════
   // Results
   // ═══════════════════════════════════════
-  console.log(`\n%c Results: ${pass} passed, ${fail} failed `, `background:${fail?'#ef4444':'#22c55e'};color:#fff;font-size:14px;padding:4px 12px;border-radius:4px`);
+  const skipNote = skipped ? ` (${skipped} skipped — stub catalog)` : '';
+  console.log(`\n%c Results: ${pass} passed, ${fail} failed${skipNote} `, `background:${fail?'#ef4444':'#22c55e'};color:#fff;font-size:14px;padding:4px 12px;border-radius:4px`);
 })();
