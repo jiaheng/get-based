@@ -45,6 +45,13 @@ jobs:
               - docs/.vitepress/cache/**
               - node_modules/**
               - brands/**
+              # Test fixtures intentionally exercise unsafe patterns
+              # (URL substring matching, hardcoded sensitive-named locals,
+              # XSS payloads) to verify the production guards. CodeQL flags
+              # those as findings; useful in principle, useless in practice
+              # on a 25-file Puppeteer suite. Production code is still
+              # fully scanned.
+              - tests/**
 
       - uses: github/codeql-action/analyze@v3
         with:
