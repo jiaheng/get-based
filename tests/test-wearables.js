@@ -1153,7 +1153,13 @@ return (async function() {
     window._labState.currentProfile = TEST_PROFILE_S;
     try {
       const storeM = await import('/js/wearables-store.js?bust=' + Date.now());
-      await storeM.upsertDaily(TEST_PROFILE_S, { source: 'oura', date: '2026-04-23', hrv_rmssd: 38 });
+      // Date must fall inside buildWearableSeriesSection's 7-day window
+      // (today − 6 .. today). A hardcoded literal goes stale with time —
+      // 2026-04-23 was the original value, which silently dropped out of
+      // the window after April 29, breaking CI deterministically until
+      // someone reran. Pin to (today − 1) instead.
+      const testDate = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+      await storeM.upsertDaily(TEST_PROFILE_S, { source: 'oura', date: testDate, hrv_rmssd: 38 });
       const block = await labCtxMcp.buildWearableSeriesSection(7);
       assert('Series section opens with [section:wearables-series-7d]',
         block.startsWith('[section:wearables-series-7d]'));
