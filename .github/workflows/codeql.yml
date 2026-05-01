@@ -1,0 +1,51 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly catch-up so newly-published rules surface against quiet weeks.
+    - cron: "27 5 * * 1"
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          # security-extended adds taint-flow + injection rules beyond the
+          # default set. Worth it for an app that handles user health data,
+          # E2EE crypto (crypto.js / venice-e2ee.js), markdown rendering,
+          # and PDF/AI input parsing.
+          queries: security-extended
+          # Skip vendored libraries (Chart.js, pdf.js, mammoth, JSZip,
+          # cashu-ts, evolu, transformers via CDN, etc.) — findings inside
+          # those are upstream, not our code, and produce a flood of noise
+          # on first run. Same for built docs.
+          config: |
+            paths-ignore:
+              - vendor/**
+              - dist-docs/**
+              - docs/.vitepress/cache/**
+              - node_modules/**
+              - brands/**
+
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:${{ matrix.language }}
