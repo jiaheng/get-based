@@ -1,0 +1,22 @@
+version: 2
+updates:
+  # npm — devDependencies only (the app itself is no-bundler / no-runtime-npm;
+  # vendor/ ships pinned bundled copies refreshed via update-vendor.sh, NOT
+  # tracked by Dependabot).
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      types:
+        patterns:
+          - "@types/*"
+        update-types:
+          - patch
+          - minor
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
