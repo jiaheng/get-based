@@ -5,6 +5,12 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.5.2', date: '2026-05-02', title: 'Bugfixes & improvements',
+    items: [
+      'Internal hardening pass — small fixes across input sanitization and worker isolation.',
+    ]
+  },
+  {
     version: '1.5.1', date: '2026-04-29', title: 'Bugfixes & improvements',
     items: [
       '<b>Genetics rows in the marker detail modal no longer duplicate.</b> When a SNP carried both a raw finding and an actionable hint pointing at the same marker, the same gene rendered twice with the same study link. Now collapses to a single row.',
