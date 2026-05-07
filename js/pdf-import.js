@@ -972,6 +972,15 @@ export async function renameImportedEntryDate(oldDate) {
     showNotification('Date must be YYYY-MM-DD', 'error');
     return;
   }
+  // Format-only regex accepts logically invalid dates (Feb 30, month 13).
+  // Round-trip through Date to reject those — `<input type="date">` already
+  // guards in modern browsers, but free-text fallbacks and programmatic
+  // values can still slip through.
+  const parsed = new Date(newDate + 'T00:00:00');
+  if (isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== newDate) {
+    showNotification('That date doesn\'t exist on the calendar.', 'error');
+    return;
+  }
   if (entries.some(e => e.date === newDate)) {
     showNotification(`Another entry already exists on ${newDate} — remove it first, then try again.`, 'error', 5000);
     return;

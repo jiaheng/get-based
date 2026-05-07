@@ -103,13 +103,21 @@ function isMockAllowed() {
   return true;
 }
 
+// Per-profile so a practitioner can disable wearables for a labs-only client
+// without affecting their own profile. Mirrors the per-profile pattern used
+// by `labcharts-wearable-stub-dismissed-${profile}` further down.
+function _wearableStripHiddenKey() {
+  return `wearables-strip-hidden-${state.currentProfile || 'default'}`;
+}
+
 export function isWearableStripHidden() {
-  return localStorage.getItem('wearables-strip-hidden') === '1';
+  return localStorage.getItem(_wearableStripHiddenKey()) === '1';
 }
 
 export function setWearableStripHidden(hidden) {
-  if (hidden) localStorage.setItem('wearables-strip-hidden', '1');
-  else localStorage.removeItem('wearables-strip-hidden');
+  const key = _wearableStripHiddenKey();
+  if (hidden) localStorage.setItem(key, '1');
+  else localStorage.removeItem(key);
   if (window.navigate) window.navigate('dashboard');
 }
 
@@ -384,13 +392,17 @@ export function renderWearableStrip() {
   // BP, and pulse cards still render — wearable vendor cards (Oura, etc.)
   // drop out.
   if (wearablesHidden) sourceIds = sourceIds.filter(s => s === 'manual');
-  if (sourceIds.length === 0) {
-    if (wearablesHidden) return '';
-    return renderWearableStripStub();
-  }
+  // In wearables-off mode, fall through to the render path even if the user
+  // has no 'manual' source yet — the MANUAL_EMPTY_METRICS placeholders below
+  // give them a way to discover hand-logging weight / BP / RHR. Synthesize
+  // a virtual 'manual' source id; the chrome that uses summary.sources[s]
+  // (last-synced label, sync button, demo pill) is hidden in manualOnly mode
+  // anyway, and null-safe access protects what's left.
+  if (wearablesHidden && sourceIds.length === 0) sourceIds = ['manual'];
+  if (sourceIds.length === 0) return renderWearableStripStub();
   if (!summary.metrics || Object.keys(summary.metrics).length === 0) {
-    if (wearablesHidden) return '';
-    return renderWearableStripStub();
+    if (!wearablesHidden) return renderWearableStripStub();
+    // else: wearables-off + no metrics — keep going so MANUAL_EMPTY_METRICS render.
   }
 
   const collapsed = localStorage.getItem('wearables-strip-collapsed') === '1';
@@ -398,12 +410,12 @@ export function renderWearableStrip() {
   // with no recent device sync) shouldn't headline the strip — they make
   // "Wearables: Oura + Polar · 15d" read like Polar contributed half the data.
   // Surface them in the footer instead.
-  const sourcesWithData = sourceIds.filter(s => (summary.sources[s].coverageDays || 0) > 0);
+  const sourcesWithData = sourceIds.filter(s => (summary.sources?.[s]?.coverageDays || 0) > 0);
   // 'manual' is user-authored data — it's not a device that can be "waiting
   // on a device sync", so exclude it from the waiting footer note even when
   // coverageDays is zero (e.g. user touched the manual adapter without
   // saving anything yet).
-  const sourcesWaiting  = sourceIds.filter(s => s !== 'manual' && (summary.sources[s].coverageDays || 0) === 0);
+  const sourcesWaiting  = sourceIds.filter(s => s !== 'manual' && (summary.sources?.[s]?.coverageDays || 0) === 0);
   const headerSourceIds = sourcesWithData.length ? sourcesWithData : sourceIds;
   const baseMetricOrder = metricsForSources(headerSourceIds);
   const showSourceBadges = headerSourceIds.length > 1;
@@ -463,8 +475,8 @@ export function renderWearableStrip() {
   }
 
   // Header meta: most recent sync across connected sources + a short coverage label.
-  const lastSyncAt = Math.max(0, ...sourceIds.map(s => summary.sources[s].lastSyncAt || 0));
-  const coverageDays = Math.max(0, ...headerSourceIds.map(s => summary.sources[s].coverageDays || 0));
+  const lastSyncAt = Math.max(0, ...sourceIds.map(s => summary.sources?.[s]?.lastSyncAt || 0));
+  const coverageDays = Math.max(0, ...headerSourceIds.map(s => summary.sources?.[s]?.coverageDays || 0));
   const sourceLabel = headerSourceIds.map(id => adapterById(id)?.displayName || id).join(' + ');
   const coverageLabel = coverageDays > 0 ? ` · ${coverageDays}d` : '';
   const waitingLabel = sourcesWaiting
