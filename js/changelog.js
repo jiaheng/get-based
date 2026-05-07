@@ -5,6 +5,12 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.5.4', date: '2026-05-07', title: 'Optional wearables',
+    items: [
+      '<b>Don\'t want wearables?</b> Settings → Wearables → "Wearable integrations" toggles them off. The strip stays for your manual weight, BP, and pulse entries.',
+    ]
+  },
+  {
     version: '1.5.2', date: '2026-05-02', title: 'Bugfixes & improvements',
     items: [
       'Internal hardening pass — small fixes across input sanitization and worker isolation.',

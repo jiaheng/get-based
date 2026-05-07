@@ -103,6 +103,16 @@ function isMockAllowed() {
   return true;
 }
 
+export function isWearableStripHidden() {
+  return localStorage.getItem('wearables-strip-hidden') === '1';
+}
+
+export function setWearableStripHidden(hidden) {
+  if (hidden) localStorage.setItem('wearables-strip-hidden', '1');
+  else localStorage.removeItem('wearables-strip-hidden');
+  if (window.navigate) window.navigate('dashboard');
+}
+
 function getWearableSummary() {
   const real = state.importedData?.wearableSummary;
   if (real && real.sources && Object.keys(real.sources).length > 0) return real;
@@ -347,10 +357,17 @@ function dismissWearableStub() {
 }
 
 export function renderWearableStrip() {
-  const summary = getWearableSummary();
+  const wearablesHidden = isWearableStripHidden();
+  let summary = getWearableSummary();
+  // Wearables-off mode: drop the demo summary (no mock vendor cards) so
+  // we only render real data the user actually logged.
+  if (wearablesHidden && summary === MOCK_SUMMARY) summary = null;
   if (!summary) {
     // No real summary AND mock is suppressed (or off). Surface the stub
-    // so users who skipped the welcome flow still discover the feature.
+    // so users who skipped the welcome flow still discover the feature —
+    // unless wearables are explicitly off, in which case the user has
+    // opted out of vendor integrations entirely.
+    if (wearablesHidden) return '';
     return renderWearableStripStub();
   }
   // Sort by ADAPTERS registry order (Oura first, Apple Health last) instead
@@ -361,10 +378,20 @@ export function renderWearableStrip() {
     const idx = ADAPTERS.findIndex(a => a.id === sid);
     return idx === -1 ? 999 : idx;
   };
-  const sourceIds = Object.keys(summary.sources || {})
+  let sourceIds = Object.keys(summary.sources || {})
     .sort((a, b) => adapterOrderIndex(a) - adapterOrderIndex(b));
-  if (sourceIds.length === 0) return renderWearableStripStub();
-  if (!summary.metrics || Object.keys(summary.metrics).length === 0) return renderWearableStripStub();
+  // Wearables-off mode: keep only the manual pseudo-source. Manual weight,
+  // BP, and pulse cards still render — wearable vendor cards (Oura, etc.)
+  // drop out.
+  if (wearablesHidden) sourceIds = sourceIds.filter(s => s === 'manual');
+  if (sourceIds.length === 0) {
+    if (wearablesHidden) return '';
+    return renderWearableStripStub();
+  }
+  if (!summary.metrics || Object.keys(summary.metrics).length === 0) {
+    if (wearablesHidden) return '';
+    return renderWearableStripStub();
+  }
 
   const collapsed = localStorage.getItem('wearables-strip-collapsed') === '1';
   // Connected vendors that haven't returned any rows yet (e.g. Polar account
@@ -372,7 +399,11 @@ export function renderWearableStrip() {
   // "Wearables: Oura + Polar · 15d" read like Polar contributed half the data.
   // Surface them in the footer instead.
   const sourcesWithData = sourceIds.filter(s => (summary.sources[s].coverageDays || 0) > 0);
-  const sourcesWaiting  = sourceIds.filter(s => (summary.sources[s].coverageDays || 0) === 0);
+  // 'manual' is user-authored data — it's not a device that can be "waiting
+  // on a device sync", so exclude it from the waiting footer note even when
+  // coverageDays is zero (e.g. user touched the manual adapter without
+  // saving anything yet).
+  const sourcesWaiting  = sourceIds.filter(s => s !== 'manual' && (summary.sources[s].coverageDays || 0) === 0);
   const headerSourceIds = sourcesWithData.length ? sourcesWithData : sourceIds;
   const baseMetricOrder = metricsForSources(headerSourceIds);
   const showSourceBadges = headerSourceIds.length > 1;
@@ -388,7 +419,14 @@ export function renderWearableStrip() {
   const seenDisplay = new Set();
   for (const id of baseMetricOrder) {
     if (STRIP_HIDDEN_METRICS.has(id)) continue;
-    if (summary.metrics?.[id]) { displayOrder.push({ id, empty: false }); seenDisplay.add(id); }
+    const m = summary.metrics?.[id];
+    if (!m) continue;
+    // Wearables-off mode: only manual-sourced cards survive. Vendor metrics
+    // (HRV, sleep score, etc.) hide; the stored data stays untouched so
+    // flipping the toggle back on restores them instantly.
+    if (wearablesHidden && m.primarySource !== 'manual') continue;
+    displayOrder.push({ id, empty: false });
+    seenDisplay.add(id);
   }
   for (const id of MANUAL_EMPTY_METRICS) {
     if (!seenDisplay.has(id) && canonicalMetric(id)) {
@@ -448,20 +486,33 @@ export function renderWearableStrip() {
     ? `${waitingLabel} connected — waiting on first device sync.`
     : '';
 
+  // When wearables are off the strip is purely manual entries — drop the
+  // "Wearables: Oura · 15d" header, the sync button (nothing remote to
+  // sync), and the demo pill / waiting note.
+  const manualOnly = wearablesHidden;
+  const titleHTML = manualOnly
+    ? '<span>Biometrics</span>'
+    : `<span>Wearables: <span class="wearable-source-label">${escapeHTML(sourceLabel)}${coverageLabel}</span></span>`;
+  const lastSyncHTML = manualOnly ? '' : `<span class="wearable-strip-lastsync">last synced ${formatAgo(lastSyncAt)}</span>`;
+  const syncBtnHTML = manualOnly ? '' : `<button type="button" class="wearable-strip-sync" aria-label="Sync wearables now" onclick="event.stopPropagation();syncWearableNow(this);return false">
+    <svg class="wearable-strip-sync-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 4 21 12 13 12"/></svg>
+    <span>Sync</span>
+  </button>`;
+  const ariaLabel = manualOnly
+    ? (collapsed ? 'Expand biometrics strip' : 'Collapse biometrics strip')
+    : (collapsed ? 'Expand wearables strip' : 'Collapse wearables strip');
+
   let html = `<section class="wearable-strip" id="wearable-strip">
-    <div class="wearable-strip-header" role="button" tabindex="0" aria-expanded="${!collapsed}" aria-label="${collapsed ? 'Expand wearables strip' : 'Collapse wearables strip'}" onclick="toggleWearableStrip()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleWearableStrip()}">
+    <div class="wearable-strip-header" role="button" tabindex="0" aria-expanded="${!collapsed}" aria-label="${ariaLabel}" onclick="toggleWearableStrip()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleWearableStrip()}">
       <div class="wearable-strip-title">
         <span class="wearable-strip-icon" aria-hidden="true">⌬</span>
-        <span>Wearables: <span class="wearable-source-label">${escapeHTML(sourceLabel)}${coverageLabel}</span></span>
-        ${isMock ? '<button type="button" class="wearable-strip-demo-pill" onclick="event.stopPropagation();window.openSettingsModal(\'wearables\')" title="This is a sample. Connect your own wearable to see real data here.">demo data — connect yours</button>' : ''}
+        ${titleHTML}
+        ${!manualOnly && isMock ? '<button type="button" class="wearable-strip-demo-pill" onclick="event.stopPropagation();window.openSettingsModal(\'wearables\')" title="This is a sample. Connect your own wearable to see real data here.">demo data — connect yours</button>' : ''}
         ${reorderMode ? '<span class="wearable-strip-reorder-pill">⇄ Reorder mode — use ◀ ▶ on each card</span>' : ''}
       </div>
       <div class="wearable-strip-meta">
-        <span class="wearable-strip-lastsync">last synced ${formatAgo(lastSyncAt)}</span>
-        <button type="button" class="wearable-strip-sync" aria-label="Sync wearables now" onclick="event.stopPropagation();syncWearableNow(this);return false">
-          <svg class="wearable-strip-sync-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 4 21 12 13 12"/></svg>
-          <span>Sync</span>
-        </button>
+        ${lastSyncHTML}
+        ${syncBtnHTML}
         <button type="button" class="wearable-strip-reorder${reorderMode ? ' active' : ''}" aria-label="${reorderMode ? 'Done reordering' : 'Reorder cards'}" title="${reorderMode ? 'Done reordering' : 'Reorder cards'}" onclick="event.stopPropagation();toggleWearableReorder()">
           ${reorderMode ? 'Done' : '⇄ Reorder'}
         </button>
@@ -1097,9 +1148,20 @@ export function renderWearablesSettingsSection() {
   const connected = listConnectedSources();
   const rows = visibleAdapters(Object.keys(connected))
     .map(a => renderAdapterRow(a, !!connected[a.id])).join('');
+  const hidden = isWearableStripHidden();
   // BETA badge moves out of every row to a single section-level note. Every
   // wearable adapter is currently beta — the per-row chip was redundant.
-  return `<div class="settings-section-header" style="display:block">
+  return `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+    <div style="flex:1;min-width:0">
+      <div style="font-size:13px;color:var(--text-secondary)">Wearable integrations</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Show data from connected wearables (Oura, Withings, Fitbit, etc.) on the dashboard. Off keeps the strip as a Biometrics strip — your manual weight, BP, and pulse entries still appear.</div>
+    </div>
+    <label class="toggle-switch">
+      <input type="checkbox" id="wearables-strip-hidden-toggle" ${hidden ? '' : 'checked'} onchange="window.setWearableStripHidden(!this.checked)">
+      <span class="toggle-slider"></span>
+    </label>
+  </div>
+  <div class="settings-section-header" style="display:block">
     <div class="settings-section-title" style="display:block;margin-bottom:4px">Connected devices</div>
     <div class="settings-section-hint" style="display:block">Data stays on this device; a compact summary + anomaly events sync to your other devices. All integrations are <em>beta</em> — please report issues.</div>
   </div>
@@ -1806,6 +1868,8 @@ function cancelManualLog(event) {
 
 Object.assign(window, {
   renderWearableStrip,
+  setWearableStripHidden,
+  isWearableStripHidden,
   dismissWearableStub,
   toggleWearableStrip,
   openWearableDetail,
