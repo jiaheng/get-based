@@ -66,7 +66,26 @@ const TEST_FILES = [
   'tests/test-markdown.js',
   'tests/test-security-phase1.js',
   'tests/test-correctness-phase2.js',
-  'tests/test-a11y-phase3.js'
+  'tests/test-a11y-phase3.js',
+  'tests/test-sun-spectrum.js',
+  'tests/test-sun-uvdata.js',
+  'tests/test-sun-correlations.js',
+  'tests/test-sun-defaults.js',
+  'tests/test-sun.js',
+  'tests/test-sun-context.js',
+  'tests/test-ai-verdict-engine.js',
+  'tests/test-sun-ai-analysis.js',
+  'tests/test-light-ai-renders.js',
+  'tests/test-light-env.js',
+  'tests/test-light-tools.js',
+  'tests/test-light-devices.js',
+  'tests/test-silhouette-picker.js',
+  'tests/test-silhouette-region-map.js',
+  'tests/test-lighting-hardware-caveats.js',
+  'tests/test-sun-ui-flow.js',
+  'tests/test-data-merge.js',
+  'tests/test-blob-storage.js',
+  'tests/test-audit-fixes.js'
 ];
 
 const PORT = process.env.PORT || 8000;

@@ -3,7 +3,7 @@
 // Runs the heavy parsing in a Web Worker (inline blob) to keep UI responsive
 
 import { state } from './state.js';
-import { escapeHTML, showNotification } from './utils.js';
+import { escapeHTML, hashString, showNotification } from './utils.js';
 import { saveImportedData } from './data.js';
 
 // ═══════════════════════════════════════════════
@@ -183,10 +183,18 @@ function createWorker() {
 let _snpTable = null;
 let _snpTablePromise = null;
 
-function loadSNPTable() {
-  if (_snpTable) return Promise.resolve(_snpTable);
+function loadSNPTable({ forceFresh = false } = {}) {
+  // Page-lifetime cache short-circuit. Bypass with forceFresh=true so a
+  // re-import after a catalog version bump always sees the latest entries
+  // — without the bypass, the parser walks an old allowlist and silently
+  // drops any rsIDs that were added to the catalog since the page loaded.
+  if (_snpTable && !forceFresh) return Promise.resolve(_snpTable);
+  if (forceFresh) {
+    _snpTable = null;
+    _snpTablePromise = null;
+  }
   if (!_snpTablePromise) {
-    _snpTablePromise = fetch('data/snp-health.json')
+    _snpTablePromise = fetch('data/snp-health.json', forceFresh ? { cache: 'no-store' } : undefined)
       .then(r => r.json())
       .then(data => { _snpTable = data; window._snpTableCache = data; return data; })
       .catch(err => { _snpTablePromise = null; if (window.isDebugMode?.()) console.error('Failed to load SNP table:', err); throw err; });
@@ -197,9 +205,24 @@ function loadSNPTable() {
 // Eagerly load SNP table when genetics data exists (e.g. after JSON import)
 export function ensureSNPTable() { if (state.importedData?.genetics) loadSNPTable(); }
 
+// Catalog signature: { size, hash } over the sorted rsID list. Stamped on
+// genetics at import time and re-computed at render time so the genetics
+// card can flag "catalog grew since your import — re-import to include
+// new SNPs". Hash catches swap/replace cases that a raw size compare misses.
+function _catalogSignature(snpTable) {
+  if (!snpTable) return null;
+  const rsids = Object.keys(snpTable).filter(k => k.startsWith('rs')).sort();
+  return { size: rsids.length, hash: hashString(rsids.join(',')) };
+}
+
 // Returns { matches: { rsid: { genotype, gene, variant, effect, note } }, source, totalLines, coverage }
 export async function parseDNAFile(file) {
-  const snpTable = await loadSNPTable();
+  // Force-fresh on every parse so a re-import after the catalog grew
+  // (e.g. new SNP added to data/snp-health.json since this page loaded)
+  // always sees the latest allowlist. The cache hit is fine for everything
+  // else (rendering, re-rendering, dashboard tooltips); the import path
+  // is the one place a stale cache silently drops valid SNPs.
+  const snpTable = await loadSNPTable({ forceFresh: true });
   const snpIds = Object.keys(snpTable).filter(k => k.startsWith('rs'));
 
   // Detect format from first chunk
@@ -297,6 +320,7 @@ export function saveGeneticsData(profileData, parseResult) {
     coverage: parseResult.coverage,
     effects: { significant, moderate, normal },
     snps: {},
+    catalogVersion: _catalogSignature(_snpTable),
   };
   for (const [rsid, data] of Object.entries(parseResult.matches)) {
     profileData.genetics.snps[rsid] = {
@@ -312,6 +336,27 @@ export function saveGeneticsData(profileData, parseResult) {
 
 export function deleteGeneticsData(profileData) {
   delete profileData.genetics;
+}
+
+// Returns a one-line user-facing hint or null. "May" wording — the user's
+// raw file may not actually contain the new rsIDs, so we don't promise
+// anything specific.
+function _geneticsStalenessHint(genetics) {
+  if (!_snpTable || !genetics) return null;
+  const current = _catalogSignature(_snpTable);
+  if (!current) return null;
+  const stored = genetics.catalogVersion;
+  if (stored && stored.hash === current.hash) return null;
+  if (stored && current.size > stored.size) {
+    const delta = current.size - stored.size;
+    return `${delta} new SNP${delta === 1 ? '' : 's'} added to the catalog since your import — re-importing may include them.`;
+  }
+  if (stored) {
+    return `Catalog has been updated since your import — re-importing may refresh your matches.`;
+  }
+  // Legacy import (pre-catalog-tracking): we can't tell precisely, but the
+  // current catalog may include SNPs the user is missing.
+  return `Re-importing may include any SNPs added to the catalog since your last import.`;
 }
 
 // ═══════════════════════════════════════════════
@@ -460,7 +505,7 @@ export function renderGeneticsSection() {
     if (effect === 'mild') return '\uD83D\uDFE0';
     return '';
   };
-  const catLabels = { methylation: 'Methylation', iron: 'Iron', lipids: 'Lipids', vitaminD: 'Vitamin D', vitaminB12: 'Vitamin B12', bilirubin: 'Bilirubin', thyroid: 'Thyroid', fattyAcids: 'Fatty Acids', bloodSugar: 'Blood Sugar', sexHormones: 'Sex Hormones', alcohol: 'Alcohol', caffeine: 'Caffeine', bodyComposition: 'Body Composition' };
+  const catLabels = { methylation: 'Methylation', iron: 'Iron', lipids: 'Lipids', vitaminD: 'Vitamin D', vitaminB12: 'Vitamin B12', bilirubin: 'Bilirubin', thyroid: 'Thyroid', fattyAcids: 'Fatty Acids', bloodSugar: 'Blood Sugar', sexHormones: 'Sex Hormones', alcohol: 'Alcohol', caffeine: 'Caffeine', bodyComposition: 'Body Composition', skin: 'Skin & Sun' };
 
   const metaParts = [];
   if (genetics.source) metaParts.push(escapeHTML(genetics.source));
@@ -540,6 +585,11 @@ export function renderGeneticsSection() {
       html += `<button class="genetics-show-all" onclick="toggleGeneticsExpand(this)">${totalFindings - INITIAL_LIMIT} more findings</button>`;
     }
     html += `</div>`;
+  }
+
+  const _staleHint = _geneticsStalenessHint(genetics);
+  if (_staleHint) {
+    html += `<div class="genetics-stale-hint">${escapeHTML(_staleHint)}</div>`;
   }
 
   html += `<div class="genetics-actions">
@@ -732,7 +782,13 @@ function confirmDNAImport() {
     window.updateChatNudge();
   }
 
-  // Refresh dashboard
+  // Refresh sidebar (genetics nav count) AND dashboard. Without the
+  // explicit buildSidebar call, the nav-count stays at the pre-import
+  // value because navigate() only re-renders main content, not nav.
+  // Symptom that surfaced this: after re-importing on the same device
+  // the dashboard correctly showed "43 SNPs" while the sidebar still
+  // said "🧬 Genetics 40".
+  if (window.buildSidebar) try { window.buildSidebar(); } catch (e) {}
   if (window.navigate) window.navigate('dashboard');
 }
 
@@ -988,6 +1044,7 @@ export function confirmMtDNAImport() {
   saveImportedData();
   closeMtDNAPreview();
   showNotification(`Haplogroup ${pending.resolved.haplogroup} imported`, 'success');
+  if (window.buildSidebar) try { window.buildSidebar(); } catch (e) {}
   if (window.navigate) window.navigate('dashboard');
 }
 
@@ -995,6 +1052,7 @@ export function deleteMtDNAData() {
   if (state.importedData.genetics) {
     delete state.importedData.genetics.mtdna;
     saveImportedData();
+    if (window.buildSidebar) try { window.buildSidebar(); } catch (e) {}
     if (window.navigate) window.navigate('dashboard');
     showNotification('mtDNA haplogroup removed', 'info');
   }
@@ -1034,6 +1092,7 @@ export async function setManualHaplogroup(haplogroup) {
   };
   saveImportedData();
   showNotification(`Haplogroup ${hg} saved${coupling ? ' — ' + coupling.shortLabel : ''}`, 'success');
+  if (window.buildSidebar) try { window.buildSidebar(); } catch (e) {}
   if (window.navigate) window.navigate('dashboard');
 }
 
@@ -1076,5 +1135,5 @@ Object.assign(window, {
   _buildGeneticsContext: buildGeneticsContext,
   _getRelevantSNPs: getRelevantSNPs,
   _getState: () => state,
-  _saveAndRefresh: () => { saveImportedData(); if (window.navigate) window.navigate('dashboard'); },
+  _saveAndRefresh: () => { saveImportedData(); if (window.buildSidebar) try { window.buildSidebar(); } catch (e) {} if (window.navigate) window.navigate('dashboard'); },
 });

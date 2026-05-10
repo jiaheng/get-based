@@ -2,7 +2,7 @@
 
 import { state } from './state.js';
 import { CORRELATION_PRESETS, CHIP_COLORS, trackUsage } from './schema.js';
-import { escapeHTML, getStatus, getRangePosition, formatValue, getTrend, showNotification, showConfirmDialog, hasCardContent } from './utils.js';
+import { escapeHTML, getStatus, getRangePosition, formatValue, getTrend, showNotification, showConfirmDialog, hasCardContent, formatDate } from './utils.js';
 import { getChartColors } from './theme.js';
 import { getActiveData, filterDatesByRange, destroyAllCharts, getEffectiveRange, getEffectiveRangeForDate, getLatestValueIndex, getAllFlaggedMarkers, statusIcon, detectTrendAlerts, getKeyTrendMarkers, getFocusCardFingerprint, saveImportedData, recalculateHOMAIR, updateHeaderDates, renderDateRangeFilter, renderChartLayersDropdown, convertDisplayToSI } from './data.js';
 import { profileStorageKey } from './profile.js';
@@ -25,6 +25,20 @@ function markerHasData(m) { return m.values?.some(v => v !== null) ?? false; }
 // ═══════════════════════════════════════════════
 
 export function navigate(category, data) {
+  // Detect "re-render in place" (callsite is requesting a refresh of the
+  // current view, not a real navigation). On in-place re-renders we use
+  // ELEMENT-ANCHOR scroll preservation, not pixel-based: capture the
+  // viewport-top of the clicked element (or the closest stable container
+  // with a data-id), then after the rebuild scroll so that same element
+  // lands at the same viewport position. Pixel-based preservation breaks
+  // when the new layout has different content heights above the user's
+  // viewport — they'd see a jump even though scrollY was technically
+  // preserved.
+  const sameView = category === state.currentView;
+  let anchor = null;
+  if (sameView && typeof document !== 'undefined') {
+    anchor = _captureScrollAnchor();
+  }
   document.querySelectorAll(".nav-item").forEach(el => {
     el.classList.toggle("active", el.dataset.category === category);
   });
@@ -35,7 +49,2467 @@ export function navigate(category, data) {
   if (category === "dashboard") showDashboard(data);
   else if (category === "correlations") showCorrelations(data);
   else if (category === "compare") showCompare(data);
+  else if (category === "light") showLight(data);
   else showCategory(category, data);
+  state.currentView = category;
+
+  if (anchor) {
+    // Force synchronous layout so getBoundingClientRect is accurate.
+    void document.body.offsetHeight;
+    _restoreScrollAnchor(anchor);
+    // Re-apply on next frame and the frame after, in case post-layout
+    // async paths (chart paint, image decoding) shift content.
+    requestAnimationFrame(() => {
+      _restoreScrollAnchor(anchor);
+      requestAnimationFrame(() => _restoreScrollAnchor(anchor));
+    });
+  }
+}
+
+// Capture identity + viewport position of the most reasonable scroll
+// anchor for the current interaction. Priority:
+//   1. The currently focused element (usually the button the user just
+//      clicked) — walks up to a parent with data-id or [data-screen-id]
+//      so the marker survives an innerHTML wipe of #main-content.
+//   2. Failing that, the first element with data-id that's visible in
+//      the viewport — keeps the on-screen content stable even when the
+//      navigation wasn't user-initiated (e.g. async refresh).
+function _captureScrollAnchor() {
+  let el = document.activeElement;
+  // Walk up looking for a stable selector
+  while (el && el !== document.body && el !== document.documentElement) {
+    const sel = _stableSelectorFor(el);
+    if (sel) {
+      const rect = el.getBoundingClientRect();
+      // Skip if the anchor is off-screen — would still work but
+      // intent-wise we want a viewport-visible anchor.
+      if (rect.bottom > 0 && rect.top < window.innerHeight) {
+        return { selector: sel, viewportTop: rect.top };
+      }
+    }
+    el = el.parentElement;
+  }
+  // Fallback: pick the first stably-identifiable element currently in
+  // viewport. This covers async re-renders (AI refresh, sync pull) where
+  // there's no focused click target.
+  const candidates = document.querySelectorAll('[data-id], [data-screen-id], [data-room-id]');
+  for (const c of candidates) {
+    const rect = c.getBoundingClientRect();
+    if (rect.top >= 0 && rect.top < window.innerHeight) {
+      const sel = _stableSelectorFor(c);
+      if (sel) return { selector: sel, viewportTop: rect.top };
+    }
+  }
+  return null;
+}
+
+function _stableSelectorFor(el) {
+  if (!el || !el.dataset) return null;
+  if (el.dataset.id) return `[data-id="${CSS.escape(el.dataset.id)}"]`;
+  if (el.dataset.screenId) return `[data-screen-id="${CSS.escape(el.dataset.screenId)}"]`;
+  if (el.dataset.roomId) return `[data-room-id="${CSS.escape(el.dataset.roomId)}"]`;
+  return null;
+}
+
+function _restoreScrollAnchor(anchor) {
+  if (!anchor) return;
+  const el = document.querySelector(anchor.selector);
+  if (!el) return;
+  const rect = el.getBoundingClientRect();
+  const delta = rect.top - anchor.viewportTop;
+  if (Math.abs(delta) > 1) {
+    try { window.scrollBy({ top: delta, behavior: 'instant' }); } catch (_) {
+      try { window.scrollBy(0, delta); } catch (__) {}
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════
+// LIGHT TODAY STRIP — dashboard panel between Lens and Wearables
+// ═══════════════════════════════════════════════
+
+// Render only when the user has logged sessions OR we're in a solar window
+// (sunrise/midday/sunset ±2h) and the user has labs — encourages discovery.
+export function renderLightTodayStrip() {
+  const sessions = (window.getSessions && window.getSessions()) || [];
+  const hasData = sessions.length > 0;
+  const inSolarWindow = isSolarWindow();
+  // Always render — even a fresh user outside a solar window needs to see
+  // that the Light lens exists. The CTA copy adapts to the situation.
+
+  const active = (window.getActiveSession && window.getActiveSession()) || null;
+  const totals7d = (window.rollingChannelTotals && window.rollingChannelTotals(7)) || {};
+  const medToday = (window.cumulativeMEDToday && window.cumulativeMEDToday()) || 0;
+
+  // CTA — adaptive to whether the user has therapy devices set up. A
+  // winter user with a Joovv but no recent sun should see the device
+  // option as a peer, not buried under sun-only copy. Solar windows
+  // still privilege outdoor sun (it's a transient cue you'd miss).
+  // CTAs are wrapped in .light-today-cta-group so margin-left:auto
+  // applies once to the GROUP — without the wrapper each individual
+  // CTA's margin-left:auto pushed every button to the right edge,
+  // spreading them apart instead of clustering them.
+  const devicesArr = (window.getDevices && window.getDevices()) || [];
+  const hasDevices = devicesArr.length > 0;
+  // Device button copy adapts to how many devices the user owns. With
+  // 1 device, name it inline so the click goes straight to that
+  // device's session log. With 2+, show a generic "Device ▼" — taps
+  // open the picker (quickLogDeviceSession already handles this case).
+  let deviceBtn = '';
+  if (hasDevices) {
+    if (devicesArr.length === 1) {
+      const d = devicesArr[0];
+      const label = `🔴 ${d.brand || ''} ${d.model || ''}`.trim();
+      deviceBtn = `<button class="light-today-cta light-today-cta-secondary" onclick="window.quickLogDeviceSession && window.quickLogDeviceSession()" title="Log a session on your ${escapeHTML(d.brand || '')} ${escapeHTML(d.model || '')}">${escapeHTML(label)}</button>`;
+    } else {
+      deviceBtn = `<button class="light-today-cta light-today-cta-secondary" onclick="window.quickLogDeviceSession && window.quickLogDeviceSession()" title="Pick from your ${devicesArr.length} devices">🔴 Device <span aria-hidden="true">▼</span></button>`;
+    }
+  }
+  // Onboarding CTA — graduated by what's already filled in:
+  //   1. No Light setup yet (no skin type / location / Ott)  → "Set up Light & Sun"
+  //      The Light setup card is the FIRST thing on the Light page; without it
+  //      no other tracking math works correctly.
+  //   2. Setup done, no rooms                                → "Map a room"
+  //      Most users spend 8-14 h/day indoors — once setup is in, surface the
+  //      indoor environment as the natural next layer.
+  //   3. Both done                                            → no CTA
+  // Earlier draft only had the room CTA, which oversold the link target —
+  // clicking "Map a room" actually drops users at a page where Light setup
+  // is the dominant card. Naming it for what it actually leads to is more
+  // honest + improves the empty-state conversion path.
+  const sd = state.importedData?.sunDefaults;
+  const hasSetup = !!(sd && sd.completedAt && sd.fitzpatrick);
+  const lightEnv = state.importedData?.lightEnvironment;
+  const hasRooms = lightEnv && Array.isArray(lightEnv.rooms) && lightEnv.rooms.length > 0;
+  let setupBtn = '';
+  if (!hasSetup) {
+    setupBtn = `<button class="light-today-cta light-today-cta-secondary" onclick="window.navigate && window.navigate('light')" title="Skin type, location, indoor light, photosensitive meds — 30 seconds. Drives every Light & Sun calculation.">🌞 Set up Light & Sun</button>`;
+  } else if (!hasRooms) {
+    setupBtn = `<button class="light-today-cta light-today-cta-secondary" onclick="window.navigate && window.navigate('light')" title="Map your rooms — most of your day is under indoor lights">🛋 Map a room</button>`;
+  }
+  // Keep the legacy roomBtn name so the template strings below don't change.
+  const roomBtn = setupBtn;
+
+  let cta;
+  if (active) {
+    // mm:ss live counter; the active-session ticker updates this same
+    // element every second via the [data-live-elapsed-for] selector.
+    const elapsedMs = Date.now() - active.startedAt;
+    const elapsed = _formatElapsedShort(elapsedMs);
+    cta = `<div class="light-today-cta-group"><button class="light-today-cta light-today-cta-active" onclick="window.quickLogSunSession()" aria-label="Stop active sun session"><span aria-hidden="true">⏹ Stop session — </span><span data-live-elapsed-for="${active.id}" aria-live="off">${elapsed}</span></button></div>`;
+  } else if (inSolarWindow) {
+    const wlabel = solarWindowLabel();
+    cta = `<div class="light-today-cta-group"><button class="light-today-cta" onclick="window.quickLogSunSession()"><span aria-hidden="true">☀</span> ${wlabel} — log a session</button>${deviceBtn}${roomBtn}</div>`;
+  } else if (hasDevices) {
+    cta = `<div class="light-today-cta-group"><button class="light-today-cta" onclick="window.quickLogSunSession()"><span aria-hidden="true">☀</span> Log sun</button>${deviceBtn}${roomBtn}</div>`;
+  } else {
+    cta = `<div class="light-today-cta-group"><button class="light-today-cta" onclick="window.quickLogSunSession()">☀ Log a sun session</button>${roomBtn}</div>`;
+  }
+
+  // Qualitative pill summary of the 6 user-facing channels for the past 7 days.
+  // Numbers are kept off the dashboard — only "none / low / moderate / good /
+  // strong" tiers + dots. Hover for science.
+  const ch = window.CHANNEL_DISPLAY || {};
+  // Dashboard strip pills represent a 7-day rolling total; classify with
+  // the weekly tier so the strip agrees with the Light page pills + the
+  // AI rollup on the same data.
+  const tier = window.weeklyChannelTier || (() => 0);
+  const order = ['vitamin_d', 'circadian', 'nir_solar', 'no_cv', 'pomc', 'violet_eye'];
+  // Combine sun + device contributions so a user with a Joovv panel and no
+  // outdoor sessions still sees PBM channels light up.
+  const devTotals7d = (window.rollingDeviceTotals && window.rollingDeviceTotals(7)) || {};
+  const combinedTotals7d = mergeTotalsLocal(totals7d, devTotals7d);
+  // Dashboard pills are clickable — navigate to the Light & Sun page
+  // and auto-expand the matching channel's drill-down panel. Same
+  // vocabulary as the Light page pills, just one click away from the
+  // detail instead of three (open Light page → find pill → tap).
+  const pills = order.map(k => {
+    const meta = ch[k] || {};
+    const t = tier(combinedTotals7d[k] || 0, k);
+    const dc = _channelDayCount(k);
+    const tip = `${meta.what || ''} — ${dc.n} of 7 days hit target this week. Tap for details.`;
+    return `<button type="button" class="light-pill light-pill-tier-${t} light-pill-dashboard" data-channel="${escapeAttr(k)}" title="${escapeHTML(tip)}" onclick="window._openChannelOnLightPage && window._openChannelOnLightPage('${escapeAttr(k)}')" aria-label="${escapeHTML((meta.label || k) + ', ' + dc.n + ' of 7 days hit target, tap to open detail')}">
+      <span class="light-pill-icon" aria-hidden="true">${meta.icon || '·'}</span>
+      <span class="light-pill-label">${escapeHTML(meta.label || k)}</span>
+      ${_channelSparkline(k)}
+      <span class="light-pill-daycount">${escapeHTML(dc.txt)}</span>
+    </button>`;
+  }).join('');
+
+  // Burn-risk gauge — qualitative, plain English, no acronyms
+  const medPct = Math.round(medToday * 100);
+  let medCls = 'ok', medMsg = 'safe — well under your burn threshold';
+  if (medToday >= 1) { medCls = 'over'; medMsg = 'burn threshold reached — sunburn risk, no more sun today'; }
+  else if (medToday >= 0.7) { medCls = 'warn'; medMsg = 'approaching burn threshold'; }
+  else if (medToday >= 0.3) { medCls = 'ok'; medMsg = 'moderate sun exposure today'; }
+
+  // Surface the burn-risk gauge only when it actually carries information.
+  // Below 30% MED it's noise on a normal day — the user has the full
+  // banner one click away on the Light & Sun page if they need it.
+  const showBurnRisk = medToday >= 0.3;
+  // Combined session count for the past 7 days — sun + device. Replaces
+  // the previous sun-only "X sessions this week" copy which lied about
+  // its window (it was actually counting all-time sun sessions).
+  const weekCutoff = Date.now() - 7 * 86400 * 1000;
+  const sunWeek = sessions.filter(s => (s.startedAt || 0) >= weekCutoff).length;
+  const devSessionsAll = (window.getDeviceSessions && window.getDeviceSessions()) || [];
+  const devWeek = devSessionsAll.filter(s => (s.startedAt || 0) >= weekCutoff).length;
+  const weekTotal = sunWeek + devWeek;
+  // Rolling 7-day vitamin D total in IU — sums per-session yields with
+  // each session's 20k saturation cap, so a week of three good sessions
+  // doesn't get clipped to one session's maximum. Hidden when the total
+  // is essentially zero (cloudy week / no UVB exposure / device-only).
+  const weeklyIU = (window.rollingVitaminDIU && window.rollingVitaminDIU(7)) || 0;
+  let weeklyIUStr = '';
+  if (weeklyIU >= 100) {
+    // Surface the same uncertainty band as session detail. The weekly
+    // total inherits each session's per-session uncertainty; using the
+    // central estimate ± 25% — aggregating across many sessions averages
+    // out per-session model error somewhat, so the band tightens vs the
+    // single-session model band (which is ±20-45% per zenith).
+    const fmt = (n) => n >= 10000 ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k'
+      : n >= 1000 ? Math.round(n / 100) * 100
+      : Math.round(n / 10) * 10;
+    weeklyIUStr = `<span class="light-today-vitd" title="Approximate vitamin D₃ synthesized from sun over the last 7 days, summed per session and Fitzpatrick-scaled. Model accuracy ±25% across a week (Bird-Riordan + Bass-Paur, aggregated). Your blood 25(OH)D response to the same UV dose can vary 2-3× across individuals — calibrate against your own labs over time. Central estimate sits between Bogh 2010 lab values and Holick 2008 natural-sun extrapolations.">☀ ~${fmt(weeklyIU)} IU vitamin D this week</span>`;
+  }
+
+  // Vit-D budget cross-check — shows today's combined sun-derived +
+  // supplement IU. Warn chip when supplements alone exceed the IOM 4000
+  // IU/d Tolerable Upper Intake Level. Sun-derived doesn't count toward
+  // UL (skin photoisomerization plateaus naturally) but is shown for
+  // context — clinicians treating high serum 25(OH)D look at total daily
+  // input.
+  let vitDBudgetChip = '';
+  if (typeof window.vitaminDBudgetStatus === 'function') {
+    const b = window.vitaminDBudgetStatus();
+    const fmtIU = (n) => n >= 1000 ? `${(n/1000).toFixed(1).replace(/\.0$/, '')}k` : `${Math.round(n)}`;
+    if (b.exceedsSupplementUL) {
+      vitDBudgetChip = `<span class="light-today-vitd-warn" title="IOM 2010 Tolerable Upper Intake Level for vitamin D from supplements alone is 4000 IU/d. Today: ${fmtIU(b.supplementIU)} IU supplement + ~${fmtIU(b.sunIU)} IU sun = ~${fmtIU(b.total)} IU total. Supplement above UL — flag this with your clinician.">⚠ Vit D today: ${fmtIU(b.supplementIU)} IU supplement above 4000 IU UL (+${fmtIU(b.sunIU)} sun)</span>`;
+    } else if (b.supplementIU > 0 && b.total > 8000) {
+      vitDBudgetChip = `<span class="light-today-vitd-info" title="High combined dose today — sun usually self-regulates via photoisomerization plateau but supplements stack additively. Worth tracking serum 25(OH)D over time.">Vit D today: ~${fmtIU(b.total)} IU (${fmtIU(b.supplementIU)} supplement + ~${fmtIU(b.sunIU)} sun)</span>`;
+    }
+  }
+
+  // High-altitude UV chip — UV irradiance climbs ~10% per 1000m above sea
+  // level (WHO/INTERSUN). At >1500m it's a meaningful safety modifier the
+  // user should see before going outside.
+  const altCoords = (window.getSunCoords && window.getSunCoords()) || null;
+  const altM = altCoords?.altitudeM || 0;
+  const altChip = altM > 1500
+    ? `<span class="light-today-altitude" title="UV irradiance climbs ~10% per 1000m above sea level. At ${Math.round(altM)}m, expect ~${Math.round((altM / 1000) * 10)}% more UV than sea-level estimates.">⛰ +${Math.round((altM / 1000) * 10)}% UV (altitude ${Math.round(altM)}m)</span>`
+    : '';
+  return `<section class="light-today-strip">
+    <div class="light-today-head">
+      <span class="light-today-icon">☀</span>
+      <span class="light-today-title">Light Today</span>
+      <span class="light-today-sub" title="${sunWeek} sun + ${devWeek} device · last 7 days">${weekTotal} light session${weekTotal !== 1 ? 's' : ''} this week</span>
+      ${altChip}
+      <a href="#" class="light-today-link" onclick="event.preventDefault();window.navigate('light')">Open Light &amp; Sun →</a>
+    </div>
+    ${typeof window !== 'undefined' && window.renderLightTodayDashboardChip ? window.renderLightTodayDashboardChip() : ''}
+    ${renderConditionsNow({ variant: 'compact' })}
+    <div class="light-pills-row">
+      ${pills}
+    </div>
+    ${weeklyIUStr || vitDBudgetChip ? `<div class="light-today-vitd-row">${weeklyIUStr}${vitDBudgetChip ? ' ' + vitDBudgetChip : ''}</div>` : ''}
+    <div class="light-today-foot">
+      ${showBurnRisk ? `<span class="light-today-med light-today-med-${medCls}" title="How close today's sun exposure is to your burn threshold (Fitzpatrick-based). 100% = burn threshold reached.">
+        ☀ Sun exposure today: <strong>${medMsg}</strong>${medPct > 0 ? ` (${medPct}%)` : ''}
+      </span>` : ''}
+      ${cta}
+    </div>
+  </section>`;
+}
+
+// "Conditions now" strip — renders current UVI / ozone / AQI / sun-angle
+// for the user's resolved coords. Lazy-fetches via window.fetchAtmosphere
+// (which has its own 1hr cache layer). On fetch failure, falls back to
+// cached or zenith-only estimate and shows a "stale" indicator. Designed
+// to work fully offline once any earlier fetch has populated the cache.
+//
+// Renders as a placeholder div initially; the async fetch fills it in
+// after first paint so dashboard render isn't blocked by network I/O.
+//
+// Cache is coords-keyed so a profile swap (different country → different
+// coords) doesn't serve the previous profile's UVI/AQ/etc. Key is rounded
+// to 0.5° (~55 km) — much coarser than the network privacy rounding so
+// near-by points share a cache entry, but cross-country swaps don't.
+let _conditionsCache = null; // { coordKey, atm, fetchedAt }
+let _conditionsFetchInFlight = false;
+// Per-slot 5min refresh intervals — keyed by deterministic slotId
+// ('cond-now-compact' / 'cond-now-full'). Survives strip re-renders
+// so a single interval handles auto-refresh for the slot's lifetime.
+const _conditionsIntervals = new Map();
+
+function _coordKey(coords) {
+  if (!coords || !Number.isFinite(coords.lat) || !Number.isFinite(coords.lon)) return null;
+  const f = 2; // 0.5° rounding → coarse enough to share within a metro, fine enough to distinguish countries
+  const k = (n) => (Math.round(n * f) / f).toFixed(1);
+  return `${k(coords.lat)}_${k(coords.lon)}`;
+}
+
+export function renderConditionsNow(opts = {}) {
+  const variant = opts.variant || 'full'; // 'full' (Light page) | 'compact' (dashboard)
+  // Deterministic slotId per variant — pre-2026-05-08 used Date.now()
+  // which made the rendered HTML differ on every call, so any caller
+  // doing a string-diff (Light Today strip 5s ticker) saw the strip
+  // "always different" and re-swapped innerHTML, tearing this slot
+  // down + restarting its loading spinner = visible blink.
+  const slotId = opts.slotId || `cond-now-${variant}`;
+  // Schedule the initial fetch + 5min auto-refresh interval only the
+  // first time this slot is rendered — subsequent renders (e.g. from
+  // _refreshLiveChannelSurfaces) just reuse the existing interval.
+  if (!_conditionsIntervals.has(slotId)) {
+    setTimeout(() => _refreshConditions(slotId, variant), 50);
+    const handle = setInterval(() => {
+      if (!document.getElementById(slotId)) {
+        clearInterval(handle);
+        _conditionsIntervals.delete(slotId);
+        return;
+      }
+      _refreshConditions(slotId, variant);
+    }, 5 * 60 * 1000);
+    _conditionsIntervals.set(slotId, handle);
+  }
+  // Cache hit fast path — when the user navigates between dashboard
+  // and Light & Sun within the 5min cache window, render the cached
+  // conditions block directly instead of the loading placeholder.
+  // Without this, every navigation away-and-back flashed the
+  // "Loading current conditions…" spinner before the cache resolved
+  // ~50ms later, which the user perceived as "conditions not persistent."
+  try {
+    const coords = (typeof window !== 'undefined' && window.getSunCoords && window.getSunCoords()) || null;
+    if (coords && _conditionsCache && _conditionsCache.coordKey === _coordKey(coords)
+        && (Date.now() - _conditionsCache.fetchedAt) < 5 * 60 * 1000) {
+      return `<div class="conditions-now conditions-now-${variant}" id="${slotId}" data-variant="${variant}" aria-busy="false">${_renderConditionsHTML(_conditionsCache.atm, coords, variant)}</div>`;
+    }
+  } catch (_) {}
+  // No aria-live on the wrapper — auto-refresh would re-announce the whole
+  // strip every cycle. Only user-triggered refresh announces, via a separate
+  // sr-only live region populated in _refreshConditions(opts.force).
+  return `<div class="conditions-now conditions-now-${variant}" id="${slotId}" data-variant="${variant}" aria-busy="true">
+    <div class="conditions-now-loading">
+      <span class="conditions-now-icon">☼</span>
+      <span class="conditions-now-text">Loading current conditions…</span>
+    </div>
+  </div>`;
+}
+
+async function _refreshConditions(slotId, variant, opts = {}) {
+  const slot = document.getElementById(slotId);
+  if (!slot) return;
+  // Clear aria-busy on every exit path — the slot was created with
+  // aria-busy="true" so screen readers don't announce intermediate
+  // values. Whatever path resolves first must clear it.
+  const _resolveBusy = () => slot.setAttribute('aria-busy', 'false');
+  const coords = (window.getSunCoords && window.getSunCoords()) || null;
+  if (!coords) {
+    _resolveBusy();
+    slot.innerHTML = `<div class="conditions-now-msg">Set a country in your profile to see current sun conditions.</div>`;
+    return;
+  }
+  // Throttle: serve in-memory cache if we fetched recently (5 min) AND the
+  // coords match the cached entry (within 0.5° bucket). Different coords
+  // (profile swap) bust the cache. Force=true bypasses the throttle.
+  const now = Date.now();
+  const key = _coordKey(coords);
+  if (!opts.force && _conditionsCache && _conditionsCache.coordKey === key && (now - _conditionsCache.fetchedAt) < 5 * 60 * 1000) {
+    _resolveBusy();
+    slot.innerHTML = _renderConditionsHTML(_conditionsCache.atm, coords, variant);
+    return;
+  }
+  if (_conditionsFetchInFlight) return;
+  _conditionsFetchInFlight = true;
+  // For a user-triggered refresh, mark the slot busy + add a guaranteed
+  // minimum visible-spinner duration. Otherwise a fast fetch (50ms) replaces
+  // the DOM before the browser can render the loading state, and the click
+  // looks like nothing happened.
+  let minSpinUntil = 0;
+  if (opts.force) {
+    slot.classList.add('is-refreshing');
+    minSpinUntil = Date.now() + 600;
+    // Also visually mark the existing data as "refreshing" without nuking
+    // the strip so the user keeps their UVI/clouds/etc visible during the
+    // fetch — we only swap content once the new payload arrives.
+    const trustFooter = slot.querySelector('.conditions-now-trust');
+    if (trustFooter) trustFooter.classList.add('is-refreshing');
+  }
+  try {
+    // For a forced refresh, wipe the localStorage cache for current coords
+    // so the providers are actually re-hit (not served from the 1hr TTL).
+    if (opts.force) _bustMeteoCacheForCoords(coords);
+    let atm = null, online = true, fetchError = null;
+    try {
+      atm = await window.fetchAtmosphere({
+        lat: coords.lat,
+        lon: coords.lon,
+        isoTime: new Date().toISOString(),
+        noCache: !!opts.force, // user-triggered refresh skips both fresh + stale cache
+      });
+      if (atm?._stale) online = false;
+      if (atm && window._applyAtmOverrides) atm = window._applyAtmOverrides(atm);
+    } catch (e) {
+      online = false;
+      fetchError = String(e?.message || e);
+      atm = (_conditionsCache && _conditionsCache.coordKey === key) ? _conditionsCache.atm : null;
+    }
+    // Honor the minimum spin duration so the user can actually see feedback
+    if (minSpinUntil) {
+      const remaining = minSpinUntil - Date.now();
+      if (remaining > 0) await new Promise(r => setTimeout(r, remaining));
+    }
+    if (!atm) {
+      slot.classList.remove('is-refreshing');
+      slot.setAttribute('aria-busy', 'false');
+      slot.innerHTML = `<div class="conditions-now-msg">Conditions data unavailable offline. Reconnect once and we'll cache it.${fetchError ? ` <small>(${escapeHTML(fetchError)})</small>` : ''}</div>`;
+      return;
+    }
+    _conditionsCache = { coordKey: key, atm, fetchedAt: now };
+    slot.setAttribute('aria-busy', 'false');
+    slot.innerHTML = _renderConditionsHTML(atm, coords, variant, !online);
+    slot.classList.remove('is-refreshing');
+    // Brief "✓ Updated" flash on user-triggered refresh — the new content
+    // already shows "just now" but a green tick gives explicit confirmation.
+    if (opts.force) {
+      const src = slot.querySelector('.conditions-now-source, .conditions-now-source-compact');
+      if (src) {
+        src.classList.add('just-refreshed');
+        setTimeout(() => src.classList.remove('just-refreshed'), 1500);
+      }
+      if (typeof window.showNotification === 'function') {
+        window.showNotification(online ? '✓ Conditions refreshed' : '✓ Cached values reloaded (offline)');
+      }
+    }
+  } finally {
+    _conditionsFetchInFlight = false;
+  }
+}
+
+// User-triggered: force a re-fetch of conditions, bypassing all caches.
+// Re-renders every conditions-now slot on the page (dashboard + Light page
+// can both have one mounted at the same time). Also wipes the localStorage
+// meteo:v2:* cache so a device that latched onto a degraded provider
+// (e.g. an Open-Meteo-only response cached while CAMS was unreachable
+// during a relay-side outage) can recover without tab-killing — the
+// next fetch hits the provider chain fresh.
+function _refreshConditionsNow() {
+  if (typeof window.purgeMeteoCache === 'function') {
+    try { window.purgeMeteoCache(); } catch {}
+  }
+  document.querySelectorAll('.conditions-now').forEach(el => {
+    const id = el.id;
+    const variant = el.dataset.variant || 'full';
+    if (id) _refreshConditions(id, variant, { force: true });
+  });
+}
+
+async function _setManualUvi() {
+  const input = document.getElementById('manual-uvi-input');
+  if (!input) return;
+  const v = parseFloat(input.value);
+  if (!Number.isFinite(v) || v < 0 || v > 20) {
+    if (window.showNotification) window.showNotification('UVI must be between 0 and 20', 'error');
+    return;
+  }
+  const data = state.importedData;
+  if (!data) return;
+  if (!data.sunDefaults) data.sunDefaults = {};
+  if (!data.sunDefaults.overrides) data.sunDefaults.overrides = {};
+  data.sunDefaults.overrides.uvIndex = v;
+  if (window.saveImportedData) await window.saveImportedData();
+  // Bust the in-memory conditions cache so the next render re-renders with
+  // the override applied. Fetch isn't re-issued — the override is applied
+  // to whatever atm we have cached.
+  _conditionsCache = null;
+  if (window.showNotification) window.showNotification(`Manual UVI ${v.toFixed(1)} applied — used for burn-time + vit-D-threshold math until cleared. (Spectrum stays driven by ozone + zenith + cloud cover.)`, 'success', 5000);
+  _refreshConditionsNow();
+}
+
+async function _clearManualUvi() {
+  const data = state.importedData;
+  if (!data?.sunDefaults?.overrides) return;
+  delete data.sunDefaults.overrides.uvIndex;
+  if (window.saveImportedData) await window.saveImportedData();
+  _conditionsCache = null;
+  if (window.showNotification) window.showNotification('Manual UVI cleared — back to live atmosphere data.');
+  _refreshConditionsNow();
+}
+
+// User-triggered: open a modal showing the raw atmosphere response so the
+// user can verify what the provider returned, what we parsed, and what the
+// engine will use. Pure inspection — no side effects.
+function _inspectConditionsNow() {
+  const coords = (window.getSunCoords && window.getSunCoords()) || null;
+  const key = _coordKey(coords);
+  const atm = (_conditionsCache && _conditionsCache.coordKey === key) ? _conditionsCache.atm : null;
+  const warnings = atm ? _sanityCheckAtmosphere(atm, coords) : [];
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay show';
+  const cacheKeys = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('meteo:')) cacheKeys.push(k);
+    }
+  } catch (e) {}
+  overlay.innerHTML = `<div class="modal" role="dialog" aria-label="Inspect conditions data" style="max-width:640px">
+    <div class="modal-header">
+      <h3>Inspect conditions data</h3>
+      <button class="modal-close" aria-label="Close" onclick="this.closest('.modal-overlay').remove()">×</button>
+    </div>
+    <div class="modal-body">
+      <p class="modal-body-hint">Last response from the conditions provider, exactly as parsed. Use this to verify the math is using the values you expect.</p>
+
+      <div class="sun-detail-section">
+        <div class="sun-detail-section-label">Source</div>
+        <div class="sun-detail-section-value">${atm?.source ? escapeHTML(atm.source) : '—'}</div>
+      </div>
+      <div class="sun-detail-section">
+        <div class="sun-detail-section-label">Fetched at</div>
+        <div class="sun-detail-section-value">${atm?.fetchedAt ? escapeHTML(new Date(atm.fetchedAt).toLocaleString()) : '—'}</div>
+      </div>
+      <div class="sun-detail-section">
+        <div class="sun-detail-section-label">Coords used</div>
+        <div class="sun-detail-section-value">${coords ? `${coords.lat.toFixed(2)}°, ${coords.lon.toFixed(2)}° (${escapeHTML(coords.source || 'unknown')})` : '—'}</div>
+      </div>
+      <div class="sun-detail-section">
+        <div class="sun-detail-section-label">Confidence</div>
+        <div class="sun-detail-section-value">${(() => {
+          // Computed real-time confidence — weights snapshot age, cloud
+          // cover, solar elevation, and UVI band so a low-sun heavy-cloud
+          // CAMS reading isn't dishonestly reported as 95%.
+          const computed = window.computeUVConfidence ? window.computeUVConfidence({
+            source: atm?.source,
+            snapshotAgeSec: atm?._camsMeta?.ageSec ?? null,
+            cloudCover: atm?.cloudCover ?? null,
+            zenithDeg: coords && atm?.fetchedAt && window.solarZenithAngle
+              ? window.solarZenithAngle(new Date(atm.fetchedAt), coords.lat, coords.lon)
+              : null,
+            uvIndex: atm?.uvIndex ?? null,
+            isStale: !!atm?._stale,
+            manualOverridden: !!atm?._uvOverridden,
+          }) : (atm?.confidence ?? null);
+          if (computed == null) return '—';
+          const pct = Math.round(computed * 100);
+          // Tooltip lists the active discounts so the user can see WHY
+          // confidence dropped — turns a single number into honest reasoning.
+          const factors = [];
+          if (atm?._uvOverridden) factors.push('manual UVI override');
+          else {
+            const age = atm?._camsMeta?.ageSec;
+            if (Number.isFinite(age)) {
+              if (age > 86400) factors.push(`stale grid (${Math.round(age/3600)}h old)`);
+              else if (age > 43200) factors.push(`grid ${Math.round(age/3600)}h old`);
+              else if (age > 21600) factors.push(`grid ${Math.round(age/3600)}h old`);
+            }
+            const cc = atm?.cloudCover;
+            const ccNorm = cc != null && cc > 1 ? cc / 100 : cc;
+            if (Number.isFinite(ccNorm)) {
+              if (ccNorm > 0.8) factors.push(`heavy cloud (${Math.round(ccNorm*100)}%)`);
+              else if (ccNorm > 0.5) factors.push(`moderate cloud (${Math.round(ccNorm*100)}%)`);
+            }
+            if (atm?._stale) factors.push('upstream marked stale');
+            const u = atm?.uvIndex;
+            if (Number.isFinite(u) && u < 2) factors.push(`low UVI (${u.toFixed(1)} — model band noisy below 2)`);
+          }
+          const tip = factors.length ? `Discounted by: ${factors.join('; ')}` : 'No active discounts; baseline source confidence.';
+          return `<span title="${escapeAttr(tip)}">${pct}%</span>`;
+        })()}</div>
+      </div>
+      ${warnings.length ? `<div class="sun-detail-section">
+        <div class="sun-detail-section-label">Sanity warnings</div>
+        <div class="sun-detail-section-value" style="color:var(--orange)">${warnings.map(w => '⚠ ' + escapeHTML(w)).join('<br>')}</div>
+      </div>` : `<div class="sun-detail-section"><div class="sun-detail-section-label">Sanity check</div><div class="sun-detail-section-value" style="color:var(--green)">✓ All values plausible</div></div>`}
+
+      <div class="sun-detail-section">
+        <div class="sun-detail-section-label">Raw payload</div>
+        <pre tabindex="0" style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;font-size:11px;color:var(--text-primary);overflow:auto;max-height:200px;overscroll-behavior:contain;white-space:pre-wrap;word-break:break-word">${atm ? escapeHTML(JSON.stringify(atm, null, 2)) : 'No cached response.'}</pre>
+      </div>
+
+      <div class="sun-detail-section">
+        <div class="sun-detail-section-label">localStorage cache (${cacheKeys.length} entr${cacheKeys.length === 1 ? 'y' : 'ies'})</div>
+        <div class="sun-detail-section-value" style="font-family:var(--font-mono,monospace);font-size:11px;color:var(--text-muted)">${cacheKeys.length ? cacheKeys.map(k => escapeHTML(k)).join('<br>') : '— (no cached entries)'}</div>
+      </div>
+
+      <div class="modal-actions" style="margin-top:18px">
+        <button class="import-btn import-btn-secondary" onclick="this.closest('.modal-overlay').remove()">Close</button>
+        <button class="import-btn import-btn-primary" onclick="this.closest('.modal-overlay').remove();window._refreshConditionsNow();">↻ Force refresh</button>
+      </div>
+    </div>
+  </div>`;
+  if (window._wireBackdropClose) try { window._wireBackdropClose(overlay); } catch (e) {}
+  document.body.appendChild(overlay);
+  if (window.trapModalFocus) try { window.trapModalFocus(overlay); } catch (e) {}
+  // Manually drive scroll + halt propagation on the Raw payload <pre>.
+  // CSS-only `overflow:auto`/`overscroll-behavior:contain` couldn't beat
+  // the modal's own scroll container — wheel deltas were being claimed
+  // by the modal before the pre saw them. Explicitly handling the
+  // wheel event here forces the pre to scroll first and prevents the
+  // event from bubbling to the modal regardless of the pre's scroll
+  // boundary.
+  const rawPre = overlay.querySelector('.sun-detail-section pre');
+  if (rawPre) {
+    rawPre.addEventListener('wheel', (e) => {
+      const before = rawPre.scrollTop;
+      rawPre.scrollTop = before + e.deltaY;
+      // Stop the modal from also scrolling on the same wheel tick.
+      e.stopPropagation();
+      e.preventDefault();
+    }, { passive: false });
+  }
+}
+
+// Wipe localStorage `meteo:` keys so the next fetch hits the provider
+// chain instead of being served from the 1hr cache. Called on user-
+// triggered Refresh so the button has a real effect. Wipes ALL meteo
+// keys (not coord-filtered) — the previous targeted approach used
+// `lat.toFixed(2)` while sun-uvdata's makeCacheKey rounds via the
+// `privacyRounding` config (default 0.1°), so the two never matched
+// and Refresh was a no-op for almost any coord. Wiping all is fine:
+// the cache is small (per-hour buckets), and force-Refresh is rare.
+function _bustMeteoCacheForCoords(_coords) {
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('meteo:')) localStorage.removeItem(k);
+    }
+  } catch (e) {}
+}
+
+function _renderConditionsHTML(atm, coords, variant, offline = false) {
+  const uvi = atm.uvIndex != null ? Math.round(atm.uvIndex * 10) / 10 : null;
+  const uviClear = atm.uvClearSky != null ? Math.round(atm.uvClearSky * 10) / 10 : null;
+  // Stratospheric ozone (DU) — only available with CAMS/selfhost. Free
+  // Open-Meteo can't deliver it, so the cell typically falls back to the
+  // surface-ozone AQ reading further down.
+  const ozone = atm.ozoneDU != null ? Math.round(atm.ozoneDU) : null;
+  const surfaceOzone = atm.airQuality?.surfaceOzoneUgM3 != null ? Math.round(atm.airQuality.surfaceOzoneUgM3) : null;
+  const cloud = atm.cloudCover != null ? Math.round(atm.cloudCover) : null;
+  const aqPm25 = atm.airQuality?.pm25 != null ? Math.round(atm.airQuality.pm25) : null;
+
+  // Sanity-check the data — UVI shouldn't exist when sun is below horizon,
+  // shouldn't exceed ~16 anywhere on Earth, etc. Flag suspicious responses
+  // so the user knows when the upstream looks off.
+  const sanityWarnings = _sanityCheckAtmosphere(atm, coords);
+  const sourceLabel = _humanProviderLabel(atm.source);
+  const fetchedAgoMin = atm.fetchedAt ? Math.max(0, Math.round((Date.now() - atm.fetchedAt) / 60000)) : null;
+  const freshnessLabel = fetchedAgoMin == null ? 'unknown'
+    : fetchedAgoMin < 1 ? 'just now'
+    : fetchedAgoMin < 60 ? `${fetchedAgoMin} min ago`
+    : `${Math.round(fetchedAgoMin / 60)}h ago`;
+  // Solar zenith angle — degrees from vertical. 0 = sun directly overhead.
+  let zenith = null;
+  try {
+    if (window.solarZenithAngle) zenith = window.solarZenithAngle(new Date(), coords.lat, coords.lon);
+  } catch (e) {}
+  const sunAngle = zenith != null ? Math.round(90 - zenith) : null; // elevation above horizon
+
+  // UV index color ramp — UVI 0 green → UVI 11+ purple. WHO + Burn-Risk standard
+  let uviCls = 'low';
+  if (uvi != null) {
+    if (uvi >= 11) uviCls = 'extreme';
+    else if (uvi >= 8) uviCls = 'very-high';
+    else if (uvi >= 6) uviCls = 'high';
+    else if (uvi >= 3) uviCls = 'moderate';
+  }
+
+  // AQI bucket from PM2.5 (WHO 24h guideline)
+  let aqCls = 'good', aqLabel = '—';
+  if (aqPm25 != null) {
+    if (aqPm25 < 12) { aqCls = 'good'; aqLabel = 'Good'; }
+    else if (aqPm25 < 35) { aqCls = 'moderate'; aqLabel = 'Moderate'; }
+    else if (aqPm25 < 55) { aqCls = 'unhealthy-sensitive'; aqLabel = 'Unhealthy for sensitive'; }
+    else if (aqPm25 < 150) { aqCls = 'unhealthy'; aqLabel = 'Unhealthy'; }
+    else { aqCls = 'hazardous'; aqLabel = 'Hazardous'; }
+  }
+
+  const fetchedAgo = Math.max(0, Math.round((Date.now() - (atm.fetchedAt || Date.now())) / 60000));
+  const staleness = offline
+    ? `<span class="conditions-now-stale" title="Network unavailable — using cached values">⚠ offline · cached ${fetchedAgo} min ago</span>`
+    : (fetchedAgo > 60
+        ? `<span class="conditions-now-stale" title="Cached value, refresh to update">cached ${fetchedAgo} min ago — tap ↻ to refresh</span>`
+        : (fetchedAgo > 30
+            ? `<span class="conditions-now-stale conditions-now-stale-mild" title="Conditions can drift with cloud cover; tap refresh for a fresh fetch">data ${fetchedAgo} min old</span>`
+            : ''));
+
+  // Resolve user's Fitzpatrick (for time-to-MED). Track whether it's
+  // user-set vs the default III fallback so we can qualify the readout.
+  const userFp = state.importedData?.sunDefaults?.fitzpatrick ||
+                 (state.importedData?.lightCircadian?.skinType?.match?.(/^(I{1,3}|IV|VI?)\b/) || [])[1];
+  const fp = userFp || 'III';
+  const fpIsDefault = !userFp;
+  const medResult = uvi != null ? _timeToMed(uvi, fp, atm) : null;
+  const vitDLabel = _vitDLabel(uvi);
+  // Daily peak forecast — when does UVI hit its max today
+  const peakAt = atm.daily?.peakAt;
+  const peakUvi = atm.daily?.uvIndexMax;
+  const peakIsNow = peakAt && uvi != null && peakUvi != null && uvi >= peakUvi - 0.3;
+  const peakChip = peakAt && peakUvi != null && !peakIsNow
+    ? `peak ${_fmtTime(peakAt)} · UVI ${peakUvi.toFixed(1)}`
+    : (peakIsNow ? 'at today\'s peak' : '');
+  // Plain-English cloud framing — "Overcast" / "Partly cloudy" / "Clear sky"
+  const cloudWord = _cloudNarrative(cloud);
+  // If clouds are actively suppressing UVI, surface the clear-sky alternate
+  const cloudChip = cloudWord
+    ? (uviClear != null && uvi != null && uviClear > uvi + 0.5
+       ? `${cloudWord} · UVI ${uviClear.toFixed(1)} clear sky`
+       : cloudWord)
+    : '';
+  // Surface-ozone WHO bucket
+  const surfaceOzoneCls = _surfaceOzoneCls(surfaceOzone);
+  // Shadow narrative
+  const shadowText = _shadowNarrative(sunAngle);
+  // Multi-pollutant aggregate AQ — "worst-of" so high NO₂ doesn't hide
+  // behind low PM2.5. atm.airQuality.european_aqi (when present) is
+  // already the official EAQI multi-pollutant aggregation.
+  const eaqi = atm.airQuality?.european_aqi ?? null;
+  const aqAgg = _aggregateAQ(atm.airQuality, eaqi);
+
+  // Sun-events line — today's sun arc with sunrise / peak / sunset and a
+  // "you are here" marker. Past events fade to 55% so the eye reads the
+  // ordering as a timeline. The "now" marker shows time-to-next-event so
+  // it's actionable instead of a duplicate clock.
+  const sunrise = atm.daily?.sunrise;
+  const sunset = atm.daily?.sunset;
+  // Biological dawn / dusk — when UV-A first / last reaches the ground.
+  // For QB users this is the most meaningful moment of the day (Hattar
+  // ipRGC entrainment, eye-skin α-MSH cascade, retinal dopamine release).
+  const { firstUVA, lastUVA } = _computeUvaWindow(coords, sunrise || new Date());
+  const events = [];
+  // Sun-arc icon language (deliberately distinct so no two events share
+  // the same emoji meaning):
+  //   🌅 = geometric sunrise   (universal "sun crossing horizon")
+  //   ◐  = UV-A on (rising)    (half-sun rising — biological dawn)
+  //   ☀  = peak UVI            (solar noon)
+  //   ◑  = UV-A off (setting)  (half-sun setting — biological dusk)
+  //   🌇 = geometric sunset    (universal "sun below horizon")
+  //   ⏵  = now                 (current time pointer)
+  if (sunrise) events.push({ icon: '🌅', label: _fmtTime(sunrise), ts: new Date(sunrise).getTime(), kind: 'sunrise', tooltip: 'Geometric sunrise — sun crosses horizon. UV-A still negligible, eye-light barely above twilight.' });
+  // Local-time HH:MM formatter — matches the format Open-Meteo returns
+  // (YYYY-MM-DDTHH:MM in the requested timezone) so all events on the
+  // sun-arc row are in the same timezone.
+  const localHHMM = (d) => {
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+  if (firstUVA) {
+    events.push({
+      icon: '◐',
+      label: `${localHHMM(firstUVA)} · UV-A on`,
+      ts: firstUVA.getTime(),
+      kind: 'first-uva',
+      uvaEvent: true,
+      tooltip: 'Sun reaches ~5° elevation — atmospheric path short enough for 320-400 nm UV-A to penetrate. Biological dawn: eye + skin start receiving the violet/UV-A signals that drive circadian entrainment, α-MSH / β-endorphin, and retinal dopamine.',
+    });
+  }
+  if (peakAt)  events.push({ icon: '☀', label: `${_fmtTime(peakAt)}${peakUvi != null ? ` · UVI ${peakUvi.toFixed(1)}` : ''}`, ts: new Date(peakAt).getTime(), peak: true, kind: 'peak', tooltip: 'Solar noon — UVI at its daily maximum.' });
+  if (lastUVA) {
+    events.push({
+      icon: '◑',
+      label: `${localHHMM(lastUVA)} · UV-A off`,
+      ts: lastUVA.getTime(),
+      kind: 'last-uva',
+      uvaEvent: true,
+      tooltip: 'Sun drops below ~5° elevation — UV-A fades from the surface. Biological dusk window closes; melatonin synthesis ramps up.',
+    });
+  }
+  if (sunset)  events.push({ icon: '🌇', label: _fmtTime(sunset), ts: new Date(sunset).getTime(), kind: 'sunset', tooltip: 'Geometric sunset — sun drops below horizon. UV-A already gone for ~30-60 min.' });
+  const nowTs = Date.now();
+  // Find next upcoming event for the "now" actionable readout
+  const upcoming = events.filter(e => e.ts > nowTs).sort((a, b) => a.ts - b.ts);
+  const nextEvent = upcoming[0];
+  const nextEventLabel = nextEvent ? ({
+    sunrise: 'sunrise',
+    'first-uva': 'UV-A on',
+    peak: 'peak',
+    'last-uva': 'UV-A off',
+    sunset: 'sunset',
+  })[nextEvent.kind] : null;
+  const minsToNext = nextEvent ? Math.round((nextEvent.ts - nowTs) / 60000) : null;
+  const nowSubLabel = nextEvent && nextEventLabel
+    ? `now · ${_fmtMinutes(minsToNext)} to ${nextEventLabel}`
+    : 'now';
+  const nowEvent = { icon: '⏵', label: nowSubLabel, ts: nowTs, isNow: true };
+  // Insert "now" at the right chronological position
+  const eventsWithNow = [...events, nowEvent].sort((a, b) => a.ts - b.ts);
+  const sunEventsLine = events.length ? `<div class="conditions-now-events-wrap" title="${escapeAttr('Today\'s sun arc — left to right is the timeline through your day. Events left of the highlighted now-marker have passed; events to the right are upcoming.')}">
+    <div class="conditions-now-events-caption">Today's sun arc</div>
+    <div class="conditions-now-events">
+      ${eventsWithNow.map(e => `<span class="conditions-now-event${e.peak ? ' conditions-now-event-peak' : ''}${e.uvaEvent ? ' conditions-now-event-uva' : ''}${e.isNow ? ' conditions-now-event-now' : ''}${e.ts < nowTs ? ' conditions-now-event-past' : ''}"${e.tooltip ? ` title="${escapeAttr(e.tooltip)}"` : ''}><span class="conditions-now-event-icon">${e.icon}</span>${escapeHTML(e.label)}</span>`).join('')}
+    </div>
+  </div>` : '';
+
+  // Trust footer — source attribution + freshness + sanity warnings.
+  // Refresh + Inspect now live in the title row, not down here.
+  const ovStored = state.importedData?.sunDefaults?.overrides?.uvIndex;
+  const trustFooter = `<div class="conditions-now-trust">
+    <span class="conditions-now-source ${offline ? 'is-offline' : (atm._stale ? 'is-stale' : 'is-fresh')}" title="${escapeAttr(`via ${sourceLabel} · ${freshnessLabel} · refreshes every few minutes · works offline once cached`)}">
+      <span class="conditions-now-source-dot"></span>
+      ${offline ? 'offline · cached' : (atm._stale ? 'stale · cached' : 'live')} · via ${escapeHTML(sourceLabel)} · ${escapeHTML(freshnessLabel)}
+    </span>
+    ${sanityWarnings.length ? `<span class="conditions-now-warning" title="${escapeAttr(sanityWarnings.join(' · '))}">⚠ ${sanityWarnings.length} sanity warning${sanityWarnings.length === 1 ? '' : 's'}</span>` : ''}
+    <span class="conditions-now-override" title="Manual UVI override — feeds your own UV-meter reading into the spectrum reconstruction. Leave blank to use the live atmosphere fetch.">
+      <label for="manual-uvi-input">Manual UVI:</label>
+      <input type="number" min="0" max="20" step="0.1" inputmode="decimal" id="manual-uvi-input" value="${Number.isFinite(ovStored) ? ovStored : ''}" placeholder="${atm.uvIndex != null && !atm._uvOverridden ? atm.uvIndex.toFixed(1) : '—'}">
+      <button type="button" onclick="window._setManualUvi && window._setManualUvi()">Apply</button>
+      ${Number.isFinite(ovStored) ? `<button type="button" onclick="window._clearManualUvi && window._clearManualUvi()" title="Clear the manual override" aria-label="Clear manual UVI override">×</button>` : ''}
+    </span>
+  </div>`;
+
+  if (variant === 'compact') {
+    // Dashboard variant — pills + a 1-line interpretation underneath so
+    // users see the actionable info (won't burn / X min to MED) without
+    // opening the full Light & Sun page.
+    const compactInterp = uvi != null ? (() => {
+      let s = vitDLabel;
+      if (medResult?.kind === 'no-uv') s += ' · no burn risk';
+      else if (medResult?.kind === 'safe-til-sunset') s += ' · won\'t burn before sunset';
+      else if (medResult?.kind === 'minutes') s += ` · ~${_fmtMinutes(medResult.value)} to sunburn dose${fpIsDefault ? '*' : ''}`;
+      return s;
+    })() : '';
+    return `<div class="conditions-now-row">
+      ${uvi != null ? `<span class="conditions-now-pill conditions-uvi-${uviCls}" title="WHO UV index — sunburn intensity">UVI <strong>${uvi}</strong></span>` : ''}
+      ${aqAgg ? `<span class="conditions-now-pill conditions-aq-${aqAgg.cls}" title="Air quality (worst-of multi-pollutant)">AQ ${escapeHTML(aqAgg.label)}</span>` : ''}
+      ${peakAt && !peakIsNow ? `<span class="conditions-now-pill" title="UV index peaks today at ${_fmtTime(peakAt)} · UVI ${peakUvi != null ? peakUvi.toFixed(1) : '—'}">peak ${_fmtTime(peakAt)}</span>` : ''}
+      <span class="conditions-now-source-compact ${offline ? 'is-offline' : (atm._stale ? 'is-stale' : 'is-fresh')}" title="${escapeAttr(`via ${sourceLabel} · ${freshnessLabel}${offline ? ' (offline)' : ''}`)}">
+        <span class="conditions-now-source-dot"></span>${escapeHTML(sourceLabel)}
+      </span>
+    </div>
+    ${compactInterp ? `<div class="conditions-now-row-interp">${escapeHTML(compactInterp)}</div>` : ''}`;
+  }
+
+  // Full Light & Sun page strip — UVI is hero, others are supporting.
+  // 4-column grid where UVI spans 2 columns to dominate visually.
+  return `<div class="conditions-now-grid">
+    <div class="conditions-now-cell conditions-now-cell-hero ${uvi != null ? `conditions-uvi-${uviCls}` : ''}">
+      <div class="conditions-now-label">UV index${atm._uvOverridden ? ' <span class="conditions-now-override-badge" title="Manual UVI override active — clear in Light setup or via the override row below.">manual</span>' : ''}</div>
+      <div class="conditions-now-value conditions-now-value-hero">${uvi != null ? uvi : '—'}</div>
+      ${uvi != null ? `<div class="conditions-now-interpretation"${medResult && medResult.kind === 'minutes' ? ` title="${escapeAttr(TANNING_MODIFIERS_NOTE)}"` : ''}>${escapeHTML(vitDLabel)}${(() => {
+        if (!medResult) return '';
+        if (medResult.kind === 'no-uv') return ' · UV near zero, no burn risk';
+        if (medResult.kind === 'safe-til-sunset') return ' · won\'t burn before sunset';
+        if (medResult.kind === 'minutes') return ` · ~${_fmtMinutes(medResult.value)} to your sunburn dose${fpIsDefault ? '*' : ''}`;
+        return '';
+      })()}${fpIsDefault && medResult?.kind === 'minutes' ? ` <span class="conditions-now-asterisk" title="${escapeAttr('No skin type set yet — using medium (Fitzpatrick III) as a default. Set your actual skin type in Light setup for a personalized estimate.')}">*</span>` : ''}</div>` : ''}
+      ${(cloudChip || peakChip) ? `<div class="conditions-now-chips">
+        ${cloudChip ? `<span class="conditions-now-chip">${escapeHTML(cloudChip)}</span>` : ''}
+        ${peakChip ? `<span class="conditions-now-chip conditions-now-chip-peak">${escapeHTML(peakChip)}</span>` : ''}
+      </div>` : ''}
+    </div>
+    <div class="conditions-now-cell" title="${escapeAttr(`${SHADOW_RULE_HINT}\n\nSun elevation: ${sunAngle != null ? sunAngle + '°' : 'unknown'} above horizon.`)}">
+      <div class="conditions-now-label">Sun position</div>
+      <div class="conditions-now-value conditions-now-value-aq">${escapeHTML(_sunPositionLabel(sunAngle))}</div>
+      <div class="conditions-now-sub">${escapeHTML(_sunPositionSub(sunAngle))}</div>
+    </div>
+    <div class="conditions-now-cell ${surfaceOzoneCls ? `conditions-aq-${surfaceOzoneCls}` : ''}" title="${escapeAttr(ozone != null ? 'Total atmospheric ozone column (Dobson Units) — the protective stratospheric layer that blocks UV-B. Lower DU → more UV reaches the surface.' : SMOG_HINT)}">
+      <div class="conditions-now-label">${ozone != null ? 'Ozone column' : 'Smog (ground O₃)'}</div>
+      <div class="conditions-now-value conditions-now-value-aq">${ozone != null ? ozone : (surfaceOzone != null ? escapeHTML(_surfaceOzoneLabel(surfaceOzone)?.label || '—') : '—')}</div>
+      <div class="conditions-now-sub">${
+        ozone != null ? 'DU stratospheric' :
+        surfaceOzone != null ? escapeHTML(_surfaceOzoneLabel(surfaceOzone)?.action || `${surfaceOzone} µg/m³`) : ''
+      }</div>
+    </div>
+    <div class="conditions-now-cell ${aqAgg ? `conditions-aq-${aqAgg.cls}` : ''}" title="${escapeAttr('Air quality is the worst-of category across PM2.5, PM10, and NO₂ — so a high traffic-pollutant level (NO₂) won\'t hide behind clean PM. EAQI uses the same multi-pollutant logic.')}">
+      <div class="conditions-now-label">Air quality</div>
+      <div class="conditions-now-value conditions-now-value-aq">${aqAgg ? escapeHTML(aqAgg.label) : '—'}</div>
+      <div class="conditions-now-sub">${aqAgg ? (aqAgg.why ? `worst: ${aqAgg.why} ${aqAgg.why === 'PM2.5' && aqPm25 != null ? aqPm25 + ' µg/m³' : ''}` : 'worst-of multi-pollutant') : ''}</div>
+    </div>
+  </div>
+  ${sunEventsLine}
+  <div class="conditions-now-footnote" title="${escapeAttr(TANNING_MODIFIERS_NOTE)}">
+    Burn-time estimates are based on Fitzpatrick skin type — actual burn / tan response also depends on <strong>genetics</strong> (e.g. MC1R variants), <strong>diet</strong> (omega-3, antioxidants), <strong>recent sun history</strong>, <strong>circadian state</strong>, sleep, and hydration.
+  </div>
+  ${trustFooter}`;
+}
+
+// ─── Conditions-strip helpers ─────────────────────────────────────────
+
+// What the UVI means for vit-D synthesis (Holick threshold).
+function _vitDLabel(uvi) {
+  if (uvi == null || uvi < 1) return 'no vit-D synthesis';
+  if (uvi < 3) return 'vit-D synthesis weak';
+  if (uvi < 6) return 'vit-D synthesis moderate';
+  if (uvi < 9) return 'vit-D synthesis strong';
+  return 'vit-D synthesis ample (burn risk dominates)';
+}
+
+// "Time to MED" for the user — accounts for the real UVI curve from now
+// until sunset, not a naive constant-UVI extrapolation. At 6pm with UVI
+// 1.7 falling toward 0, naive math says "burn in 14 hours" which is
+// nonsense — the sun sets first.
+//
+// Integrates the user's accumulated erythemal dose hour-by-hour using
+// Open-Meteo's hourly forecast. Returns one of:
+//   { kind: 'no-uv' }                  — UV near zero, no risk to compute
+//   { kind: 'safe-til-sunset' }        — won't burn before sun is down
+//   { kind: 'minutes', value: N }      — N minutes from now to MED
+function _timeToMed(uvi, fitzpatrick, atm) {
+  if (uvi == null || uvi < 0.5) return { kind: 'no-uv' };
+  // Standard MED in J/m² by Fitzpatrick type. UVI 1 ≈ 25 mW/m² erythemal.
+  const medJoules = { I: 200, II: 250, III: 300, IV: 450, V: 600, VI: 1000 };
+  const j = medJoules[fitzpatrick] || medJoules.III;
+  const bodyFraction = 0.20; // face + arms + hands + neck default
+  const ratePerUvi = 25 * bodyFraction; // mW/m² of erythemal per UVI unit
+
+  // Try the integrated path first — uses Open-Meteo's hourly UVI forecast
+  // for today, accumulating dose from now until sunset.
+  const hourly = atm?.hourly;
+  const sunset = atm?.daily?.sunset;
+  if (Array.isArray(hourly?.time) && Array.isArray(hourly?.uv_index) && sunset) {
+    const sunsetMs = new Date(sunset).getTime();
+    const now = Date.now();
+    if (sunsetMs <= now) return { kind: 'no-uv' }; // already past sunset
+    let cumulativeJ = 0;
+    let lastT = now;
+    for (let i = 0; i < hourly.time.length; i++) {
+      const tStart = new Date(hourly.time[i]).getTime();
+      const tEnd = i + 1 < hourly.time.length ? new Date(hourly.time[i + 1]).getTime() : tStart + 3600000;
+      // Skip hours fully before now
+      if (tEnd <= now) continue;
+      // Stop at sunset
+      if (tStart >= sunsetMs) break;
+      const segStart = Math.max(tStart, lastT, now);
+      const segEnd = Math.min(tEnd, sunsetMs);
+      if (segEnd <= segStart) continue;
+      const segMinutes = (segEnd - segStart) / 60000;
+      const hourlyUvi = hourly.uv_index[i] || 0;
+      const erythemalRate = hourlyUvi * ratePerUvi; // mW/m²
+      const jPerMin = erythemalRate * 60 / 1000;    // J/m² per minute at this UVI
+      const segJ = jPerMin * segMinutes;
+      if (cumulativeJ + segJ >= j) {
+        // Crosses MED inside this segment — find the exact minute
+        const remainingJ = j - cumulativeJ;
+        const minutesIntoSeg = jPerMin > 0 ? remainingJ / jPerMin : 0;
+        const minutesFromNow = Math.round((segStart - now) / 60000 + minutesIntoSeg);
+        return { kind: 'minutes', value: Math.max(0, minutesFromNow) };
+      }
+      cumulativeJ += segJ;
+      lastT = segEnd;
+    }
+    // Made it to sunset without crossing MED
+    return { kind: 'safe-til-sunset' };
+  }
+
+  // Fallback — no hourly forecast available (e.g. CAMS / NOAA / offline).
+  // Use constant-UVI extrapolation, but clamp at "won't burn today" if the
+  // result exceeds time until sunset (when known).
+  const erythemalRate = uvi * ratePerUvi;
+  if (erythemalRate <= 0) return { kind: 'no-uv' };
+  const jPerMin = erythemalRate * 60 / 1000;
+  const naiveMin = Math.round(j / jPerMin);
+  if (sunset) {
+    const minToSunset = Math.max(0, (new Date(sunset).getTime() - Date.now()) / 60000);
+    if (naiveMin > minToSunset) return { kind: 'safe-til-sunset' };
+  }
+  return { kind: 'minutes', value: naiveMin };
+}
+
+// Format minutes as "Xh Ym" / "Xm" / "<1m"
+function _fmtMinutes(min) {
+  if (min == null) return '—';
+  if (min < 1) return '<1 min';
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  const m = Math.round(min - h * 60);
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
+
+// Sun-position headline — what the sun's doing, in plain English. Used
+// as the value cell instead of bare degrees.
+function _sunPositionLabel(elevDeg) {
+  if (elevDeg == null) return '—';
+  if (elevDeg < 0) return 'Sun set';
+  if (elevDeg < 5) return 'At horizon';
+  if (elevDeg < 15) return 'Very low';
+  if (elevDeg < 30) return 'Low';
+  if (elevDeg < 50) return 'Mid-sky';
+  if (elevDeg < 70) return 'High';
+  return 'Overhead';
+}
+
+// Sun-position sub — supporting context with shadow ratio + UV strength.
+function _sunPositionSub(elevDeg) {
+  if (elevDeg == null || elevDeg < 0) return 'no UV';
+  if (elevDeg < 5) return 'UV negligible';
+  const ratio = 1 / Math.tan(elevDeg * Math.PI / 180);
+  const r = ratio.toFixed(1);
+  if (elevDeg >= 70) return `UV peak · shadow ${r}× height`;
+  if (elevDeg >= 50) return `UV strong · shadow ${r}× height`;
+  if (elevDeg >= 30) return `UV building · shadow ${r}× height`;
+  if (elevDeg >= 15) return `UV moderate · shadow ${r}× height`;
+  return `UV weak · shadow ${r}× height`;
+}
+
+// Compute the time of day when UV-A first reaches the ground (and when
+// it stops). UV-A 320-400 nm requires sun elevation ~5° above the horizon
+// — below that, atmospheric path is too long for meaningful 320-400 nm to
+// penetrate. This is "biological dawn" / "biological dusk" — the moments
+// when the eye + skin actually start receiving the violet/UV-A signals
+// that drive circadian entrainment, α-MSH / β-endorphin release, and
+// retinal dopamine. Much more biologically meaningful than civil sunrise.
+//
+// Returns { firstUVA: <Date>, lastUVA: <Date> } for the day, or nulls if
+// the sun never rises high enough (polar winter) or coords unavailable.
+//
+// Threshold: 5° elevation. Reference: Hattar / Lambert eye-skin axis
+// literature; OZONE-corrected UV-A penetration models (Madronich 1998).
+function _computeUvaWindow(coords, dateLike) {
+  if (!coords || !window.solarZenithAngle) return { firstUVA: null, lastUVA: null };
+  const baseDate = dateLike ? new Date(dateLike) : new Date();
+  const day = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate());
+  const SAMPLE_STEP_MIN = 1;
+  const ELEVATION_THRESHOLD_DEG = 5; // sun elevation above horizon for UV-A penetration
+  let firstUVA = null;
+  let lastUVA = null;
+  // Scan minute-by-minute through the day. Lighter than it looks — 1440
+  // calls to a small math function per render, debounced by the 5-min
+  // conditions cache, so amortized cost is trivial.
+  for (let m = 0; m < 24 * 60; m += SAMPLE_STEP_MIN) {
+    const t = new Date(day.getTime() + m * 60_000);
+    const zenith = window.solarZenithAngle(t, coords.lat, coords.lon);
+    const elevation = 90 - zenith;
+    if (elevation >= ELEVATION_THRESHOLD_DEG) {
+      if (!firstUVA) firstUVA = t;
+      lastUVA = t;
+    }
+  }
+  return { firstUVA, lastUVA };
+}
+
+// Sun-position narrative — uses the "shadow rule" as a UV-strength proxy.
+// Elevation drives UV intensity: shadow shorter than your height = sun
+// high = strong UV. Shadow longer than you = sun low = weak UV. Returns
+// "qualitative phrase · shadow ratio" so users see both the meaning and
+// the underlying number.
+function _shadowNarrative(elevDeg) {
+  if (elevDeg == null) return '';
+  if (elevDeg < 5) return 'sun grazing horizon · UV negligible';
+  const ratio = 1 / Math.tan(elevDeg * Math.PI / 180);
+  const r = ratio.toFixed(1);
+  if (elevDeg >= 70) return `sun overhead · UV peak (shadow ${r}× height)`;
+  if (elevDeg >= 50) return `sun high · UV strong (shadow ${r}× height)`;
+  if (elevDeg >= 30) return `sun mid-sky · UV building (shadow ${r}× height)`;
+  if (elevDeg >= 15) return `sun low · UV moderate (shadow ${r}× height)`;
+  return `sun very low · UV weak (shadow ${r}× height)`;
+}
+
+// Tooltip explainer attached to the Sun-position cell so the shadow-rule
+// makes sense to anyone not familiar with the heuristic.
+const SHADOW_RULE_HINT = 'Shadow rule: when your shadow is shorter than you, UV is high (strong sunburn risk). When shadow is longer than you, UV is weak. Used by dermatology orgs as a no-meter outdoor heuristic.';
+
+// The Fitzpatrick scale is a coarse model — actual burn / tan response is
+// modulated by genetics (MC1R / IRF4 / TYR variants), diet (omega-3,
+// lycopene, antioxidants), recent sun history (tan-induced photoadapt),
+// circadian state (melanin synthesis is rhythmic), sleep, and hydration.
+// Surfaced as a tooltip on the burn-estimate + as a footnote line.
+const TANNING_MODIFIERS_NOTE = 'Estimate based on Fitzpatrick skin type alone. Actual burn time also depends on genetics (e.g. MC1R variants), diet (omega-3 / antioxidants), recent sun history (tan), circadian state, sleep, and hydration. Use as a starting point, not gospel.';
+
+// Friendly cloud-cover narrative — "Overcast" / "Partly cloudy" / "Clear sky".
+function _cloudNarrative(pct) {
+  if (pct == null) return null;
+  if (pct < 10) return 'Clear sky';
+  if (pct < 30) return 'Mostly clear';
+  if (pct < 60) return 'Partly cloudy';
+  if (pct < 90) return 'Mostly cloudy';
+  return 'Overcast';
+}
+
+// Aggregate AQ from multiple pollutants — return the worst-of category so
+// a user with high NO2 but low PM2.5 isn't told "Good" (false reassurance).
+// EAQI from Open-Meteo (when available) is preferred — it's already the
+// official multi-pollutant aggregation.
+function _aggregateAQ(airQuality, fallbackEaqi) {
+  const cats = [];
+  // Open-Meteo's european_aqi is on a 0-500 scale (not the 1-6 categorical
+  // version): 0-20 Good, 20-40 Fair, 40-60 Moderate, 60-80 Poor,
+  // 80-100 Very Poor, 100+ Extremely Poor.
+  if (Number.isFinite(fallbackEaqi)) {
+    if (fallbackEaqi <= 20) cats.push({ cls: 'good', label: 'Good', score: 0, why: 'EAQI' });
+    else if (fallbackEaqi <= 40) cats.push({ cls: 'good', label: 'Fair', score: 1, why: 'EAQI' });
+    else if (fallbackEaqi <= 60) cats.push({ cls: 'moderate', label: 'Moderate', score: 2, why: 'EAQI' });
+    else if (fallbackEaqi <= 80) cats.push({ cls: 'unhealthy-sensitive', label: 'Poor', score: 3, why: 'EAQI' });
+    else if (fallbackEaqi <= 100) cats.push({ cls: 'unhealthy', label: 'Very poor', score: 4, why: 'EAQI' });
+    else cats.push({ cls: 'hazardous', label: 'Extremely poor', score: 5, why: 'EAQI' });
+  }
+  if (airQuality) {
+    const pm25 = airQuality.pm25;
+    const pm10 = airQuality.pm10;
+    const no2 = airQuality.no2;
+    if (Number.isFinite(pm25)) {
+      if (pm25 < 12) cats.push({ cls: 'good', label: 'Good', score: 0, why: 'PM2.5' });
+      else if (pm25 < 35) cats.push({ cls: 'moderate', label: 'Moderate', score: 2, why: 'PM2.5' });
+      else if (pm25 < 55) cats.push({ cls: 'unhealthy-sensitive', label: 'Unhealthy for sensitive', score: 3, why: 'PM2.5' });
+      else if (pm25 < 150) cats.push({ cls: 'unhealthy', label: 'Unhealthy', score: 4, why: 'PM2.5' });
+      else cats.push({ cls: 'hazardous', label: 'Hazardous', score: 5, why: 'PM2.5' });
+    }
+    if (Number.isFinite(pm10)) {
+      if (pm10 < 54) cats.push({ cls: 'good', label: 'Good', score: 0, why: 'PM10' });
+      else if (pm10 < 154) cats.push({ cls: 'moderate', label: 'Moderate', score: 2, why: 'PM10' });
+      else if (pm10 < 254) cats.push({ cls: 'unhealthy-sensitive', label: 'Unhealthy for sensitive', score: 3, why: 'PM10' });
+      else cats.push({ cls: 'unhealthy', label: 'Unhealthy', score: 4, why: 'PM10' });
+    }
+    if (Number.isFinite(no2)) {
+      // µg/m³ — WHO 1-hour guideline 200, EU annual limit 40, EAQI thresholds
+      if (no2 < 40) cats.push({ cls: 'good', label: 'Good', score: 0, why: 'NO₂' });
+      else if (no2 < 90) cats.push({ cls: 'moderate', label: 'Moderate', score: 2, why: 'NO₂' });
+      else if (no2 < 120) cats.push({ cls: 'unhealthy-sensitive', label: 'Unhealthy for sensitive', score: 3, why: 'NO₂' });
+      else if (no2 < 230) cats.push({ cls: 'unhealthy', label: 'Unhealthy', score: 4, why: 'NO₂' });
+      else cats.push({ cls: 'hazardous', label: 'Hazardous', score: 5, why: 'NO₂' });
+    }
+  }
+  if (cats.length === 0) return null;
+  // Worst-of — highest score wins
+  cats.sort((a, b) => b.score - a.score);
+  return cats[0];
+}
+
+// Format an ISO time as HH:MM in the local timezone (Open-Meteo returns
+// "2026-04-30T13:18" already in the requested timezone, so just slice).
+function _fmtTime(iso) {
+  if (!iso) return '—';
+  // Slice the HH:MM portion — Open-Meteo returns YYYY-MM-DDTHH:MM
+  const m = iso.match(/T(\d{2}:\d{2})/);
+  return m ? m[1] : iso;
+}
+
+// Surface-ozone (smog) categorization. WHO 8-hour guideline is 100 µg/m³.
+// Returns the WHO color class + a layperson-friendly category + an
+// actionable line about outdoor exercise (the main lifestyle impact —
+// surface ozone irritates lungs, worse during exertion).
+function _surfaceOzoneCls(ugm3) {
+  if (ugm3 == null) return null;
+  if (ugm3 < 50) return 'good';
+  if (ugm3 < 100) return 'moderate';
+  if (ugm3 < 180) return 'unhealthy-sensitive';
+  if (ugm3 < 240) return 'unhealthy';
+  return 'hazardous';
+}
+function _surfaceOzoneLabel(ugm3) {
+  if (ugm3 == null) return null;
+  if (ugm3 < 50)  return { label: 'Clean',     action: 'fine for any outdoor activity' };
+  if (ugm3 < 100) return { label: 'Mild',      action: 'fine for most · sensitive may feel it' };
+  if (ugm3 < 180) return { label: 'Moderate',  action: 'go easy on hard cardio outdoors' };
+  if (ugm3 < 240) return { label: 'Unhealthy', action: 'limit outdoor exercise' };
+  return                  { label: 'Hazardous', action: 'avoid outdoor exercise' };
+}
+
+// Tooltip explainer for the smog cell — what surface ozone is + why it matters.
+const SMOG_HINT = 'Smog = ground-level ozone (O₃), formed when sunlight reacts with vehicle exhaust + industrial emissions. Higher levels irritate lungs and reduce exercise capacity, especially for asthma, COPD, kids, elderly. WHO 8-hour guideline: 100 µg/m³.';
+
+// Map internal provider keys to user-friendly attribution labels.
+function _humanProviderLabel(source) {
+  if (!source) return 'unknown';
+  if (source.startsWith('open_meteo')) return 'Open-Meteo';
+  if (source.startsWith('selfhost')) return 'self-hosted';
+  if (source.startsWith('cams')) return 'CAMS';
+  if (source.startsWith('noaa')) return 'NOAA NWS';
+  if (source.startsWith('manual')) return 'manual entry';
+  if (source.startsWith('zenith_offline') || source.startsWith('offline')) return 'offline estimate';
+  return source.replace(/_stale$/, '');
+}
+
+// Check the atmosphere response for plausibility — flag suspicious values
+// that suggest a parser bug, a stale provider, or a cosmic-ray bit-flip.
+function _sanityCheckAtmosphere(atm, coords) {
+  const warnings = [];
+  if (atm.uvIndex != null) {
+    if (atm.uvIndex < 0) warnings.push(`UVI is ${atm.uvIndex} (should be ≥ 0)`);
+    if (atm.uvIndex > 16) warnings.push(`UVI is ${atm.uvIndex} (extreme — typical max ~12-13)`);
+    // UVI should be near zero when sun is below horizon
+    try {
+      if (window.solarZenithAngle && coords) {
+        const z = window.solarZenithAngle(new Date(), coords.lat, coords.lon);
+        if (z > 95 && atm.uvIndex > 0.3) {
+          warnings.push(`UVI ${atm.uvIndex} reported but sun is ${Math.round(z - 90)}° below horizon`);
+        }
+      }
+    } catch (e) {}
+  }
+  if (atm.cloudCover != null && (atm.cloudCover < 0 || atm.cloudCover > 100)) {
+    warnings.push(`Cloud cover ${atm.cloudCover}% out of 0-100 range`);
+  }
+  const aq = atm.airQuality || {};
+  if (aq.pm25 != null && aq.pm25 < 0) warnings.push(`PM2.5 reported as negative (${aq.pm25})`);
+  if (aq.pm10 != null && aq.pm10 < 0) warnings.push(`PM10 reported as negative (${aq.pm10})`);
+  if (aq.no2 != null && aq.no2 < 0) warnings.push(`NO₂ reported as negative (${aq.no2})`);
+  if (aq.surfaceOzoneUgM3 != null) {
+    if (aq.surfaceOzoneUgM3 < 0) warnings.push(`Surface ozone reported as negative (${aq.surfaceOzoneUgM3})`);
+    else if (aq.surfaceOzoneUgM3 > 1000) warnings.push(`Surface ozone ${aq.surfaceOzoneUgM3} µg/m³ extreme — typical max ~400`);
+  }
+  if (aq.european_aqi != null && (aq.european_aqi < 0 || aq.european_aqi > 500)) {
+    warnings.push(`European AQI ${aq.european_aqi} outside 0-500 range`);
+  }
+  if (atm.ozoneDU != null && (atm.ozoneDU < 100 || atm.ozoneDU > 600)) {
+    warnings.push(`Ozone column ${atm.ozoneDU} DU outside typical 200-450 range`);
+  }
+  return warnings;
+}
+
+// Format elapsed milliseconds as mm:ss (under 1hr) or h:mm:ss (above).
+// Used by the dashboard Light Today CTA so its timer ticks every second.
+function _formatElapsedShort(ms) {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  const pad = (n) => String(n).padStart(2, '0');
+  if (h > 0) return `${h}:${pad(m)}:${pad(s)}`;
+  return `${m}:${pad(s)}`;
+}
+
+// In-place re-render of the Light & Sun page channel pill row only.
+// Called by the active-session ticker every 5s so live partial doses
+// propagate to the pills without doing a full navigate(). Preserves any
+// open drill-down panel by re-rendering it after the pills swap.
+// No-op when not on the Light page.
+export function renderLightChannelsLive() {
+  const section = document.querySelector('.light-channels-section');
+  if (!section) return;
+  const totals7d = (window.rollingChannelTotals && window.rollingChannelTotals(7)) || {};
+  const totals30d = (window.rollingChannelTotals && window.rollingChannelTotals(30)) || {};
+  const devTotals7d = (window.rollingDeviceTotals && window.rollingDeviceTotals(7)) || {};
+  const devTotals30d = (window.rollingDeviceTotals && window.rollingDeviceTotals(30)) || {};
+  const combined7d = mergeTotals(totals7d, devTotals7d);
+  const combined30d = mergeTotals(totals30d, devTotals30d);
+  const row = section.querySelector('.light-pills-row');
+  const slot = section.querySelector('[data-channel-detail-slot]');
+  const openChannel = slot?.dataset.openChannel || '';
+  if (row) {
+    const wrap = document.createElement('div');
+    wrap.innerHTML = renderChannelPills(combined7d, combined30d);
+    const newRow = wrap.querySelector('.light-pills-row');
+    if (newRow) row.replaceWith(newRow);
+    // Replace the slot with the freshly-built one too, then re-render the
+    // open panel if there was one. This keeps tier/dot updates live in
+    // both the pill row AND the visible drill-down stats.
+    const newSlot = wrap.querySelector('[data-channel-detail-slot]');
+    if (slot && newSlot) slot.replaceWith(newSlot);
+    if (openChannel) _toggleChannelDetail(openChannel);
+  }
+}
+
+// True if current time is within ±2h of sunrise / midday / sunset.
+// Uses a simple geographic estimate from the active profile's country (or
+// 50°N if unset). Browser locale doesn't carry lat/lon, so we fall back to
+// time-of-day heuristics: 5–9am, 11am–2pm, 4–8pm.
+function isSolarWindow() {
+  const h = new Date().getHours();
+  return (h >= 5 && h < 9) || (h >= 11 && h < 14) || (h >= 16 && h < 20);
+}
+
+function solarWindowLabel() {
+  const h = new Date().getHours();
+  if (h >= 5 && h < 9) return 'Morning sun window';
+  if (h >= 11 && h < 14) return 'Midday window';
+  if (h >= 16 && h < 20) return 'Evening sun window';
+  return 'Sun window';
+}
+
+// ═══════════════════════════════════════════════
+// LIGHT & SUN — dedicated view
+// ═══════════════════════════════════════════════
+
+export function showLight(_data) {
+  // Resume the live-session ticker if a session was started before this
+  // page loaded — without this, hard-reload while outside leaves the card
+  // static until you explicitly tap something else.
+  if (window._resumeActiveTickerIfNeeded) try { window._resumeActiveTickerIfNeeded(); } catch (e) {}
+  if (window.ensureActiveDeviceTicker) try { window.ensureActiveDeviceTicker(); } catch (e) {}
+  const main = document.getElementById("main-content");
+  const sessions = (window.getSessions && window.getSessions()) || [];
+  const totals7d = (window.rollingChannelTotals && window.rollingChannelTotals(7)) || {};
+  const totals30d = (window.rollingChannelTotals && window.rollingChannelTotals(30)) || {};
+  const medToday = (window.cumulativeMEDToday && window.cumulativeMEDToday()) || 0;
+
+  let html = `<div class="category-header">
+    <h2>Light &amp; Sun</h2>
+    <p>Track your light exposure. See how it shapes your sleep, hormones, and lab results.</p>
+  </div>`;
+
+  // AI hero verdict — synthesizes today's full picture (sun + devices +
+  // environment + trends) into one read. Sits above active-session and
+  // conditions so the user gets the "how am I doing?" answer before the
+  // raw inputs.
+  if (typeof window !== 'undefined' && window.renderLightTodayHero) {
+    try { html += window.renderLightTodayHero(); } catch (_) {}
+  }
+
+  // Active sun session card — pinned at the very top of the page so the
+  // live timer + channel chips + Pause/Flip/Sunscreen controls are the
+  // first thing the user sees when a session is running. Renders above
+  // Conditions / Setup / Stop CTA. Filtered out of the historical
+  // sessions list further down so the same row doesn't render twice.
+  const _activeSunSess = (window.getActiveSession && window.getActiveSession()) || null;
+  if (_activeSunSess && typeof window.renderSunSessionRow === 'function') {
+    html += `<div class="light-active-session-pinned" aria-label="Active sun session">${window.renderSunSessionRow(_activeSunSess)}</div>`;
+  }
+  // Same pattern for active device-therapy sessions (PBM panels, SAD
+  // lamps, dawn simulators). Pinned above the conditions panel so the
+  // stop button is always one tap away.
+  if (typeof window.renderActiveDeviceSessionCard === 'function') {
+    const _activeDevHtml = window.renderActiveDeviceSessionCard();
+    if (_activeDevHtml) {
+      html += `<div class="light-active-session-pinned" aria-label="Active device session">${_activeDevHtml}</div>`;
+    }
+  }
+
+  // Always-visible "Conditions now" panel — UVI / ozone / AQI / sun angle.
+  // Tells the user whether right now is a good time to go out, even before
+  // they have any session history.
+  html += `<div class="light-conditions-now-wrap">
+    <div class="light-conditions-now-head">
+      <span class="light-conditions-now-title">Conditions now</span>
+      <span class="light-conditions-now-actions">
+        <button type="button" class="conditions-now-refresh" aria-label="Refresh conditions data — bypasses cache" onclick="window._refreshConditionsNow && window._refreshConditionsNow()" title="Force a fresh fetch (bypasses cache)">↻ Refresh</button>
+        <button type="button" class="conditions-now-inspect" aria-label="Show raw conditions response, source, cache, and sanity check" onclick="window._inspectConditionsNow && window._inspectConditionsNow()" title="See raw response, source, cache, sanity check">Show details</button>
+      </span>
+    </div>
+    ${renderConditionsNow({ variant: 'full' })}
+  </div>`;
+
+  // Setup card / saved summary. renderSunSetupCard() returns the editor
+  // when onboarding is incomplete or the user has reopened to edit, and a
+  // compact "Light setup saved" summary with an Edit button otherwise.
+  if (typeof window.renderSunSetupCard === 'function') {
+    html += window.renderSunSetupCard();
+  }
+
+
+  // Quick-log CTA row — primary action. Adaptive: a winter user with a
+  // therapy panel sees "Start a device session" alongside (or instead of)
+  // "Start a sun session," and the count below counts BOTH session kinds.
+  // Devices and outdoor sun feed the same channels; the page shouldn't
+  // privilege one over the other.
+  const devices = (window.getDevices && window.getDevices()) || [];
+  const deviceSessionsAll = (window.getDeviceSessions && window.getDeviceSessions()) || [];
+  const hasDevices = devices.length > 0;
+  const totalSessions = sessions.length + deviceSessionsAll.length;
+  const sunCount = sessions.length;
+  const devCount = deviceSessionsAll.length;
+  const tallyDetail = (sunCount > 0 || devCount > 0)
+    ? `${sunCount} sun + ${devCount} device`
+    : '';
+  const sunActive = !!(window.getActiveSession && window.getActiveSession());
+  let ctaButtons = '';
+  if (sunActive) {
+    // While a sun session is active, the Stop control lives inside the
+    // pinned active-session card at the top (next to Pause / Flip /
+    // Sunscreen / Ozone). Don't render a second, far-away Stop here —
+    // earlier the row contained "⏹ Stop & save current session" 600+
+    // pixels below the running banner, so users hunted for it past the
+    // entire setup card and channel pills. Surface device/past-log
+    // affordances instead since those still apply during a running sun
+    // session.
+    if (hasDevices) {
+      ctaButtons = `<button class="import-btn import-btn-primary" onclick="window.quickLogDeviceSession && window.quickLogDeviceSession()"><span aria-hidden="true">🔴 </span>Start a device session</button>`;
+    } else {
+      ctaButtons = `<button class="import-btn import-btn-secondary" onclick="window.openAddDeviceDialog && window.openAddDeviceDialog()"><span aria-hidden="true">+ </span>Add a light device</button>`;
+    }
+  } else if (hasDevices) {
+    ctaButtons = `<button class="import-btn import-btn-primary" onclick="window.quickLogSunSession()"><span aria-hidden="true">☀ </span>Start a sun session</button>
+      <button class="import-btn import-btn-primary" onclick="window.quickLogDeviceSession && window.quickLogDeviceSession()"><span aria-hidden="true">🔴 </span>Start a device session</button>`;
+  } else {
+    ctaButtons = `<button class="import-btn import-btn-primary" onclick="window.quickLogSunSession()"><span aria-hidden="true">☀ </span>Start a sun session</button>
+      <button class="import-btn import-btn-secondary" onclick="window.openAddDeviceDialog && window.openAddDeviceDialog()"><span aria-hidden="true">+ </span>Add a light device</button>`;
+  }
+  html += `<div class="light-quicklog-row">
+    ${ctaButtons}
+    <button class="import-btn import-btn-secondary" onclick="window.openDetailedSessionDialog && window.openDetailedSessionDialog()">Log a past session</button>
+    ${totalSessions === 0 ? `<span class="light-summary-tally"${tallyDetail ? ` title="${tallyDetail}"` : ''}>No sessions yet</span>` : ''}
+  </div>`;
+
+  // Slot id for the async-populated channel-deficit device recommendation
+  // panel. Declared at top scope so the post-render population block can
+  // reference it even when the page rendered without the parent
+  // sessions-list section (e.g. all sessions deleted, but device sessions
+  // push totalSessions ≥ 7 anyway). Stays null when the assignment branch
+  // didn't run; the population block guards on truthiness.
+  let deficitRecSlotId = null;
+
+  // Combine sun + device totals so channels reflect every light source
+  const devTotals7d = (window.rollingDeviceTotals && window.rollingDeviceTotals(7)) || {};
+  const devTotals30d = (window.rollingDeviceTotals && window.rollingDeviceTotals(30)) || {};
+  const combined7d = mergeTotals(totals7d, devTotals7d);
+  const combined30d = mergeTotals(totals30d, devTotals30d);
+
+  // Unified channel pill row — same vocabulary as the dashboard strip.
+  // Empty state shows all ○○○○; populated state lights up dots as data
+  // accumulates. Tapping a pill expands a drill-down panel with the full
+  // science copy + tier comparison + suggestion. Empty defined as "no
+  // light data of any kind" — devices count too.
+  const isEmpty = totalSessions === 0;
+  // Lead copy adapts to the actual state of the data, not just session
+  // count. Three regimes:
+  //   • No sessions ever            → explain the model
+  //   • Sessions exist but every channel is at tier 0 (low-dose / sub-
+  //     threshold) → don't oversell "30-day comparison"; describe what's
+  //     actually there
+  //   • At least one channel has a meaningful tier → invite drill-down
+  //     with realistic copy
+  const channelKeysOrdered = ['vitamin_d', 'circadian', 'nir_solar', 'no_cv', 'pomc', 'violet_eye'];
+  const _wkTier = window.weeklyChannelTier || window.channelTier || (() => 0);
+  const litChannels = channelKeysOrdered.filter(k => _wkTier(combined7d[k] || 0, k) > 0).length;
+  let lead;
+  if (isEmpty) {
+    lead = "Sun isn't just vitamin D. Each pill is a different biological effect of light — they fill as you log sessions outdoors or with a therapy device. Tap any pill to see how to fill it.";
+  } else if (litChannels === 0) {
+    lead = `${totalSessions} session${totalSessions === 1 ? '' : 's'} logged but no channel has crossed the meaningful-dose threshold yet (sub-tier exposure). Tap any pill for what it tracks and a concrete next step.`;
+  } else {
+    lead = `${litChannels} of 6 channels lit by your recent sessions. Tap any pill for what you've logged, the 7-day rhythm, and what would tip it up.`;
+  }
+  html += `<div class="light-channels-section">
+    <h3 class="light-section-title">Your light, by what it does</h3>
+    <p class="light-section-hint">${lead}</p>
+    ${renderChannelPills(combined7d, combined30d)}
+    ${isEmpty ? getSunCoordsHint() : ''}
+  </div>`;
+
+  if (!isEmpty) {
+    // Today's burn-risk card — sun-specific, gated on having sun sessions.
+    // A winter user with only device sessions doesn't need a "Sun exposure
+    // today: safe (0%)" panel taking up space. Surfaces once outdoor sun
+    // is part of the routine.
+    if (sunCount > 0) {
+      const medPct = Math.round(medToday * 100);
+      const medY = (window.cumulativeMEDYesterday && window.cumulativeMEDYesterday()) || 0;
+      const combinedMED = medToday + medY;
+      let medCls = 'ok', medTitle = 'Sun exposure today: safe', medMsg = 'You\'re well under your burn threshold.';
+      if (medToday >= 1) { medCls = 'over'; medTitle = 'Burn threshold reached'; medMsg = 'You\'ve crossed your burn threshold for the day. Avoid more direct sun until tomorrow.'; }
+      else if (medToday >= 0.7) { medCls = 'warn'; medTitle = 'Approaching burn threshold'; medMsg = 'You\'re getting close to your daily limit. Move to shade or cover up if you go back out.'; }
+      else if (medToday >= 0.3) { medCls = 'ok'; medTitle = 'Moderate sun exposure today'; medMsg = 'A meaningful dose — well under your skin\'s threshold.'; }
+      // Carry-over chip — fires when today + yesterday combined exceeds
+      // 100%, even if today alone is under threshold. Skin doesn't reset
+      // overnight; back-to-back high-dose days are how vacation burns happen.
+      const carryChip = (combinedMED > 1.0 && medToday < 1.0)
+        ? `<div class="light-med-carryover" title="Yesterday ${Math.round(medY * 100)}% MED + today ${medPct}% MED. Skin partially carries dose between days — back-to-back exposure compounds burn risk.">⚠ Cumulative dose with yesterday: ${Math.round(combinedMED * 100)}% — go easy today.</div>`
+        : '';
+      html += `<div class="light-med-banner light-med-${medCls}">
+        <div class="light-med-icon">${medToday >= 1 ? '⚠' : medToday >= 0.7 ? '!' : '✓'}</div>
+        <div class="light-med-body">
+          <div class="light-med-title">${medTitle}${medPct > 0 ? ` <span class="light-med-pct">(${medPct}% of your burn threshold)</span>` : ''}</div>
+          <div class="light-med-sub">${medMsg}</div>
+          ${carryChip}
+        </div>
+      </div>`;
+    }
+
+    // Suggestion (channel-agnostic, reads merged totals).
+    // Wrapped by the channel-mix AI verdict — when AI is available the
+    // AI verdict replaces the hardcoded per-channel string with a
+    // multi-channel synthesis. Static suggestion stays as the fallback
+    // so users without AI still see something useful, and as the
+    // baseline content under the "Get AI synthesis" CTA before the
+    // user has clicked it.
+    const _staticSuggestion = renderSuggestion(combined7d);
+    html += (typeof window !== 'undefined' && window.renderChannelMixVerdict)
+      ? window.renderChannelMixVerdict(_staticSuggestion)
+      : _staticSuggestion;
+
+    // Channel-deficit device recommendations — async slot. Surfaces a
+    // CTA card with matching catalog devices when (a) the user has a
+    // real baseline (≥7 logs) and (b) a device-fillable channel is
+    // empty over 30 days. PBM red/NIR are the cleanest cases — solar
+    // exposure can't realistically fill those, so a panel is the
+    // right answer. Catalog + presets are async-loaded; the slot
+    // stays empty if recs are off, region filters everything out, or
+    // the catalog isn't reachable.
+    deficitRecSlotId = `light-deficit-rec-slot-${Date.now()}`;
+    html += `<div id="${deficitRecSlotId}"></div>`;
+
+    // Unified sessions list — sun + device merged chronologically.
+    // Active sun session is pinned at top of page; this list shows
+    // historical (ended) ones. Skip the section header when empty so
+    // a freshly-started session doesn't render an orphan "Sessions"
+    // heading with no rows under it.
+    const _unifiedHtml = renderUnifiedSessionsList();
+    if (_unifiedHtml) {
+      // Header carries the count so the user gets a quick "do I have a
+      // history yet?" answer alongside the section name. Replaces the
+      // earlier orphan tally that sat above the CTAs.
+      const _countLabel = totalSessions === 0 ? '' : ` (${totalSessions})`;
+      html += `<div class="category-header" style="margin-top:24px"><h3>Recent sessions${_countLabel}</h3></div>`;
+      html += _unifiedHtml;
+    }
+  }
+
+  // Devices, environment, tools — auto-collapsed when empty per v1.7.0a UX review
+  const placeholderId = `light-aux-slot-${Date.now()}`;
+  html += `<div id="${placeholderId}"></div>`;
+
+  main.innerHTML = html;
+
+  // Populate the channel-deficit device-rec slot. Same baseline gate as
+  // sun-context.js: ≥7 logged events of any kind. Device-fillable
+  // channels only — sun-derived deficits (vit_d, circadian, etc.) get
+  // suggested actions via renderSuggestion above; we don't try to sell
+  // a panel as a sun substitute.
+  if (deficitRecSlotId && totalSessions >= 7 && typeof window.renderChannelDeficitDeviceRecs === 'function'
+      && typeof window.loadCatalog === 'function'
+      && typeof window.loadLightDevicePresets === 'function') {
+    const slot = document.getElementById(deficitRecSlotId);
+    if (slot) {
+      const DEVICE_CHANNELS = [
+        { key: 'pbm_red', label: 'red 660 nm (PBM)' },
+        { key: 'pbm_nir', label: 'near-IR 810/850 nm (PBM)' },
+      ];
+      const empty = DEVICE_CHANNELS.filter(c => (combined30d[c.key] || 0) === 0);
+      if (empty.length) {
+        Promise.all([window.loadCatalog(), window.loadLightDevicePresets()])
+          .then(([catalog, presetData]) => {
+            if (!catalog || !presetData?.presets) return;
+            const blocks = empty
+              .map(c => window.renderChannelDeficitDeviceRecs(catalog, c.key, presetData.presets, { label: c.label }))
+              .filter(Boolean);
+            if (blocks.length && slot.isConnected) slot.innerHTML = blocks.join('');
+          })
+          .catch(() => { /* recs are best-effort */ });
+      }
+    }
+  }
+
+  if (typeof window.renderDevicesSection === 'function') {
+    Promise.resolve(window.renderDevicesSection()).then((devHtml) => {
+      const slot = document.getElementById(placeholderId);
+      if (slot) {
+        const devices = (window.getDevices && window.getDevices()) || [];
+        const env = (window.getLightEnvironment && window.getLightEnvironment()) || null;
+        const hasRooms = !!(env?.rooms?.length || env?.screens?.length);
+        const measurements = (window.getMeasurements && window.getMeasurements()) || [];
+        let aux = devices.length > 0 ? devHtml : renderCollapsedSubsection('Light devices', '+ Add device', "window.openAddDeviceDialog && window.openAddDeviceDialog()", 'Therapy panels, SAD lamps, dawn simulators — log them here and your sessions feed the same channels as outdoor sun.');
+        aux += hasRooms ? ((window.renderEnvironmentSection && window.renderEnvironmentSection()) || '') : renderCollapsedSubsection('Light environment', '+ Map a room', "window.addLightEnvRoom && window.addLightEnvRoom()", 'LEDs, fluorescents, screens — most users spend 8–14 hours/day under them. Map your rooms so the AI sees the half of your day spent inside.');
+        aux += measurements.length > 0
+          ? ((window.renderLightTools && window.renderLightTools()) || '')
+          : renderCollapsedSubsection('Light tools', '🛠 Open light tools', 'window._expandLightToolsSection && window._expandLightToolsSection()', 'Eight on-device measurement tools — lux, flicker, color temp, glass transmission, sleep darkness, more. Camera frames stay on your phone.', 'light-tools-section-collapsed');
+        // "How we estimate" — single explainer covering MED / IU / channels
+        // / uncertainty. Lives at the bottom of the page (alongside the Sun
+        // data source disclosure) rather than mid-page so it doesn't break
+        // the flow between channel mix and Sessions for users who already
+        // know the math. Collapsed by default.
+        aux += `<details class="light-explainer" style="margin-top:24px">
+          <summary>How we estimate vitamin D, burn risk &amp; channels</summary>
+          <div class="light-explainer-body">
+            <p><strong>Burn dose (% MED).</strong> 1 MED = "minimal erythemal dose," the smallest UV dose that turns your skin slightly pink. Set per Fitzpatrick skin type (Type I = 200 J/m² CIE-erythemal, Type VI = 1000 J/m²). 100% means a sunburn is starting; 70% means stop or cover up soon. Yesterday's dose carries forward — when yesterday + today exceeds 100% the banner flags a back-to-back risk, even if today alone is under threshold.</p>
+            <p><strong>Vitamin D in IU.</strong> Bogh &amp; Wulf 2010 + Holick 2007. Roughly 60 IU per unit of vit-D-action-spectrum-weighted UVB at sea-level zenith (calibrated against dminder + NIWA at UVI 5–7), scaled by your Fitzpatrick type (melanin lowers it). Saturates at the tens-of-thousands-of-IU level per session — at high doses the skin photoisomerizes excess previtamin D back to inert tachysterol/lumisterol. <strong>Below UVI 2 there's no meaningful synthesis</strong> (Webb 2018, ramps in linearly between UVI 2 and 3) — winter mornings, low sun, behind glass all yield zero.</p>
+            <p><strong>The ±50% range.</strong> Estimate is "central × 0.6 to × 1.5" because (a) the spectral reconstruction model is accurate to ~20–25% at noon and degrades off-noon, (b) skin response varies per person ~30%, (c) actual exposed area can differ 10–20% from your selected regions. Treat the band as honest — the central number alone is false precision.</p>
+            <p><strong>Channels.</strong> Sun does six things you can see on this page, each with its own action spectrum: vitamin D synthesis (UVB 290-315nm), circadian/melanopic (peak ~490nm at the eye), cardiovascular nitric-oxide release (UVA-violet 320-440nm), mood/α-MSH on the skin (UVA + UVB on keratinocytes), violet-eye dopamine (360-400nm at the eye), and near-infrared cellular repair (660-850nm). Sun and therapy panels both feed these channels by wavelength. Therapy panels also drive two device-only channels — narrowband red 660nm and near-infrared 810/850nm — surfaced on the device card rather than the solar pill row.</p>
+            <p><strong>Atmosphere data.</strong> Open-Meteo by default — UV index, cloud cover, AQI, plus a fixed 300 DU stratospheric ozone (Open-Meteo's free tier only exposes ground-level pollution ozone). Each session captures one atmosphere snapshot at start and reuses it; the global fetch cache is 1 hour, the dashboard "Conditions now" strip auto-refreshes every 5 minutes. For higher fidelity, switch to a self-hosted CAMS-mirrored source via the <strong>Sun data source</strong> panel below. All math runs on-device — your location is rounded to 0.1° (~11 km) before any network call unless you change the privacy slider.</p>
+            <p><strong>Want the math?</strong> See <a href="/docs/contributor/sun-spectrum-model" target="_blank" rel="noopener">the contributor doc</a> for the Bird-Riordan reconstruction, action-spectrum table, and per-channel citations.</p>
+          </div>
+        </details>`;
+        // Sun data source — collapsed by default. Most users stay on the
+        // Open-Meteo default; the panel matters when self-hosting CAMS or
+        // disabling network calls entirely. Lives here (per-feature config)
+        // rather than Settings → Privacy.
+        if (typeof window.renderSunDataSourceSettings === 'function') {
+          aux += `<details class="light-data-source-details" style="margin-top:24px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0">
+            <summary style="padding:12px 16px;cursor:pointer;font-size:13px;color:var(--text-secondary);user-select:none">⚙ Sun data source</summary>
+            <div style="padding:0 16px 16px 16px">${window.renderSunDataSourceSettings()}</div>
+          </details>`;
+        }
+        slot.outerHTML = aux;
+      }
+    }).catch(() => {});
+  }
+}
+
+// Render a "soft empty" sub-section header on the Light & Sun page when the
+// user hasn't engaged with that section yet. Avoids the "wall of empty
+// sections" the v1.7.0a UX review flagged.
+function renderCollapsedSubsection(title, ctaLabel, ctaJs, hint, extraClass = '') {
+  return `<div class="light-collapsed-section ${extraClass}">
+    <div class="light-collapsed-row">
+      <strong class="light-collapsed-title">${escapeHTML(title)}</strong>
+      <button class="import-btn import-btn-secondary light-collapsed-cta" onclick="${ctaJs}">${escapeHTML(ctaLabel)}</button>
+    </div>
+    <p class="light-collapsed-hint">${escapeHTML(hint)}</p>
+  </div>`;
+}
+
+// Expand the collapsed Light tools placeholder into the full 8-card grid.
+// Named function so the inline onclick can stay short and quote-safe.
+function _expandLightToolsSection() {
+  const collapsed = document.querySelector('.light-tools-section-collapsed');
+  if (!collapsed || typeof window.renderLightTools !== 'function') return;
+  const wrap = document.createElement('div');
+  wrap.innerHTML = window.renderLightTools() || '';
+  if (wrap.firstElementChild) collapsed.replaceWith(wrap.firstElementChild);
+}
+
+function mergeTotals(a, b) {
+  const out = { ...a };
+  for (const [k, v] of Object.entries(b || {})) out[k] = (out[k] || 0) + v;
+  return out;
+}
+function mergeTotalsLocal(a, b) { return mergeTotals(a, b); }
+
+// Mini 7-day sparkline rendered as inline SVG. Bars are heightless when a
+// day's combined dose is sub-meaningful (~5% of daily target) — a faint
+// stub so the day position stays readable without inflating an empty
+// week. Replaces the prior ●○○○ dots metaphor which (a) implied a
+// "fillable container" mental model that contradicts the daily-beats-
+// banking framing and (b) had ~4 bits of resolution loss vs the
+// continuous channel-au value.
+//
+// Width: 7 bars × 5px + 6 gaps × 2px = 47px in viewBox. Renders crisply
+// at any pill height because we use viewBox + width 100%.
+function _channelSparkline(channelKey, totals = null) {
+  if (!window.dailyChannelBreakdown) return '';
+  const days = window.dailyChannelBreakdown(channelKey, 7);
+  const meta = (window.CHANNEL_DISPLAY || {})[channelKey] || {};
+  const dailyTarget = meta.dailyTarget || 0;
+  const observedMax = Math.max(0, ...days.map(d => d.sun + d.device));
+  const max = Math.max(observedMax, dailyTarget * 1.05, 0.001);
+  const W = 47, H = 14, barW = 5, gap = 2;
+  const colorFor = (total) => {
+    if (dailyTarget <= 0 || total < dailyTarget * 0.05) return null; // faint stub
+    if (total >= dailyTarget) return 'var(--green)';
+    if (total >= dailyTarget * 0.30) return 'var(--accent)';
+    return 'var(--accent)';
+  };
+  const opacityFor = (total) => {
+    if (dailyTarget <= 0 || total < dailyTarget * 0.05) return 0.35;
+    if (total >= dailyTarget) return 1.0;
+    if (total >= dailyTarget * 0.30) return 0.85;
+    return 0.55;
+  };
+  const bars = days.map((d, i) => {
+    const x = i * (barW + gap);
+    const total = d.sun + d.device;
+    const isStub = !colorFor(total);
+    const barH = isStub ? 1.5 : Math.max(1.5, (total / max) * H);
+    const y = H - barH;
+    const fill = colorFor(total) || 'var(--text-muted)';
+    return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" fill="${fill}" opacity="${opacityFor(total)}" rx="0.6"/>`;
+  }).join('');
+  return `<svg class="light-pill-sparkline" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" aria-hidden="true">${bars}</svg>`;
+}
+
+// "X days" label for the pill — count of days that hit the channel's
+// meaningful-dose threshold. Returns "—" when no day qualified.
+function _channelDayCount(channelKey) {
+  if (!window.dailyChannelBreakdown) return { txt: '—', n: 0 };
+  const days = window.dailyChannelBreakdown(channelKey, 7);
+  const meta = (window.CHANNEL_DISPLAY || {})[channelKey] || {};
+  const target = meta.dailyTarget || 0;
+  const threshold = (typeof _CHANNEL_DAY_THRESHOLD !== 'undefined' && _CHANNEL_DAY_THRESHOLD[channelKey]) || 0.30;
+  const floor = target * threshold;
+  let n = 0;
+  for (const d of days) if ((d.sun + d.device) >= floor) n++;
+  // "4/7" reads as a fraction at a glance — much clearer than "4d",
+  // which users were parsing as "4 days ago" instead of "4 of 7 days
+  // this week hit target". Tooltip + sr-only label still say it the
+  // long way for accessibility.
+  return { txt: n === 0 ? '—' : `${n}/7`, n };
+}
+
+// Unified channel pill row — same vocabulary as the dashboard strip,
+// reused on the Light page where each pill is a click-to-expand entry into
+// a per-channel drill-down panel (full science, 7d/30d tier comparison,
+// suggestion). Empty state renders the same row with all-empty
+// sparklines; bars fill in as data accumulates. One renderer for both
+// states.
+function renderChannelPills(totals7d, totals30d) {
+  const ch = window.CHANNEL_DISPLAY || {};
+  // Tier classifiers: weekly for v7 (the canonical "this week" headline),
+  // and a 30-day equivalent for v30 by scaling the threshold band to the
+  // longer window. Mixing daily-target classification on a multi-day total
+  // double-counts and wrecks the trend arrow (t30 ALWAYS scored higher
+  // than t7 because totals scale with window even when the daily rate is
+  // identical, so the trend read "down" on every flat pattern).
+  const tlabel = window.tierLabel || (() => 'none');
+  const tier7 = window.weeklyChannelTier || ((v, k) => 0);
+  const tier30 = (v, k) => {
+    const target = ((ch[k] && ch[k].dailyTarget) || 1000) * 30;
+    if (!Number.isFinite(v) || v <= 0) return 0;
+    const r = v / target;
+    if (r < 0.20) return 1;
+    if (r < 0.55) return 2;
+    if (r < 1.00) return 3;
+    return 4;
+  };
+  const order = ['vitamin_d', 'circadian', 'nir_solar', 'no_cv', 'pomc', 'violet_eye'];
+  let html = `<div class="light-pills-row light-pills-interactive">`;
+  for (const k of order) {
+    const meta = ch[k] || {};
+    const v7 = totals7d[k] || 0;
+    const v30 = totals30d[k] || 0;
+    const t7 = tier7(v7, k);
+    const t30 = tier30(v30, k);
+    const trendDir = t7 > t30 ? 'up' : t7 < t30 ? 'down' : 'flat';
+    const dc = _channelDayCount(k);
+    const tip = `${meta.what || ''} — ${dc.n} of 7 days hit target this week.`;
+    const detailId = `light-pill-detail-${k}`;
+    html += `<button type="button" class="light-pill light-pill-tier-${t7} light-pill-interactive" data-channel="${escapeAttr(k)}" data-trend="${trendDir}" aria-expanded="false" aria-controls="${detailId}" title="${escapeHTML(tip)}" onclick="window._toggleChannelDetail && window._toggleChannelDetail('${escapeAttr(k)}')">
+      <span class="light-pill-icon" aria-hidden="true">${meta.icon || '·'}</span>
+      <span class="light-pill-label">${escapeHTML(meta.label || k)}</span>
+      ${_channelSparkline(k)}
+      <span class="light-pill-daycount">${escapeHTML(dc.txt)}</span>
+      <span class="sr-only">${tlabel(t7)}, ${dc.n} of 7 days hit target this week, trending ${trendDir} vs last 30 days</span>
+    </button>`;
+  }
+  html += `</div>`;
+  // The drill-down slot lives below the row. Only one channel is expanded
+  // at a time — toggling collapses any other open detail.
+  html += `<div class="light-channel-detail-slot" data-channel-detail-slot></div>`;
+  return html;
+}
+
+// Per-channel scientific citations + action spectrum. Surfaced inside the
+// drill-down panel so biohackers can audit which biology each pill encodes.
+// Per-channel citations curated for fit + accessibility. Each entry is
+// { cite, href, why }: the citation string, an open-access landing page
+// (PubMed PMID or DOI), and a one-line "why this paper matters" tag so
+// users can self-select what to read instead of staring at a list of
+// titles. Selection priority: directly on-channel > foundational
+// mechanism > population/RCT confirmation. Avoid tangential papers
+// (e.g. measurement-methodology unless the engine uses that standard).
+const CHANNEL_CITATIONS = {
+  vitamin_d: {
+    spectrum: 'Pre-vitamin-D action spectrum (CIE 174:2006), peak ~298 nm UVB',
+    refs: [
+      { cite: 'Webb AR & Engelsen O (2006). "Calculated ultraviolet exposure levels for a healthy vitamin D status." Photochem Photobiol 82:1697',
+        href: 'https://pubmed.ncbi.nlm.nih.gov/16958558/',
+        why: 'Dose-response calculations that justify the UVI ≥ 2-3 threshold the engine uses' },
+      { cite: 'Holick MF (2007). "Vitamin D Deficiency." NEJM 357:266',
+        href: 'https://www.nejm.org/doi/full/10.1056/NEJMra070553',
+        why: 'Most-cited modern clinical review of the vitamin D pathway, including the per-session photoisomerization plateau (skin converts excess previtamin-D to inert tachysterol/lumisterol at high doses)' },
+      { cite: 'Bogh MK & Wulf HC (2010). "Vitamin D production after UVB exposure depends on baseline 25(OH)D and total cholesterol." J Invest Dermatol 130:546',
+        href: 'https://pubmed.ncbi.nlm.nih.gov/19812604/',
+        why: 'Per-session IU yield variability — why the model bands at ±20-45% per zenith and biological response adds another 2-3×' },
+    ],
+  },
+  circadian: {
+    spectrum: 'Melanopic action spectrum (CIE S 026/E:2018), peak ~490 nm',
+    refs: [
+      { cite: 'Brown TM et al. (2022). "Recommendations for daytime, evening, and nighttime indoor light exposure." PLOS Biol 20:e3001571',
+        href: 'https://doi.org/10.1371/journal.pbio.3001571',
+        why: 'Current expert-consensus recommendations: ≥250 melanopic lux daytime, <10 evening, <1 night' },
+      { cite: 'Lucas RJ et al. (2014). "Measuring and using light in the melanopsin age." Trends Neurosci 37:1',
+        href: 'https://pubmed.ncbi.nlm.nih.gov/24287308/',
+        why: 'Foundational paper that informed the M-EDI / α-opic lux framework later codified in CIE S 026' },
+      { cite: 'Hattar S et al. (2002). "Melanopsin-containing retinal ganglion cells: architecture, projections, and intrinsic photosensitivity." Science 295:1065',
+        href: 'https://pubmed.ncbi.nlm.nih.gov/11834834/',
+        why: 'Discovery of melanopsin and the ipRGC photoreceptor — the why-this-channel-exists paper' },
+    ],
+  },
+  nir_solar: {
+    spectrum: 'Cytochrome-c-oxidase absorption (660-850 nm windows). Solar NIR and narrowband PBM share the same chromophore — sunlight just delivers a broadband version of what panels do.',
+    refs: [
+      { cite: 'Hamblin MR (2018). "Mechanisms and Mitochondrial Redox Signaling in Photobiomodulation." Photochem Photobiol 94:199',
+        href: 'https://pubmed.ncbi.nlm.nih.gov/29164625/',
+        why: 'Comprehensive review of how 600–1000 nm light reaches mitochondrial cytochrome c oxidase and triggers redox signaling — the same pathway whether the photons come from sunlight or a panel' },
+      { cite: 'Hamblin MR (2017). "Mechanisms and applications of the anti-inflammatory effects of photobiomodulation." AIMS Biophys 4:337',
+        href: 'https://pubmed.ncbi.nlm.nih.gov/28748217/',
+        why: 'Mechanism review focused on the anti-inflammatory effects — applies equally to narrowband panels and the NIR component of broadband solar' },
+      { cite: 'Karu TI (2010). "Multiple roles of cytochrome c oxidase in mammalian cells under action of red and IR-A radiation." IUBMB Life 62:607',
+        href: 'https://pubmed.ncbi.nlm.nih.gov/20681024/',
+        why: 'Cytochrome c oxidase as the primary photoacceptor — the molecular target underlying every NIR effect' },
+    ],
+  },
+  no_cv: {
+    spectrum: 'UVA + violet (320-440 nm) on bare skin → photo-released NO',
+    refs: [
+      { cite: 'Liu D et al. (2014). "UVA irradiation of human skin vasodilates arterial vasculature and lowers blood pressure independently of nitric oxide synthase." J Invest Dermatol 134:1839',
+        href: 'https://pubmed.ncbi.nlm.nih.gov/24445737/',
+        why: 'Controlled mechanistic crossover trial showing UVA on skin lowers BP via photo-released NO from skin stores (NOT via vit-D)' },
+      { cite: 'Lindqvist PG et al. (2016). "Avoidance of sun exposure as a risk factor for major causes of death." J Intern Med 280:375',
+        href: 'https://pubmed.ncbi.nlm.nih.gov/26992108/',
+        why: '20-year Swedish cohort: sun-avoidance carries all-cause mortality risk comparable to smoking' },
+      { cite: 'Feelisch M et al. (2010). "Is sunlight good for our heart?" Eur Heart J 31:1041',
+        href: 'https://pubmed.ncbi.nlm.nih.gov/20215123/',
+        why: 'Foundational hypothesis paper laying out the UVA→NO→cardiovascular mechanism' },
+    ],
+  },
+  pomc: {
+    spectrum: 'UVA + UVB on skin keratinocytes → POMC → α-MSH/β-endorphin',
+    refs: [
+      { cite: 'Fell GL et al. (2014). "Skin β-endorphin mediates addiction to UV light." Cell 157:1527',
+        href: 'https://pubmed.ncbi.nlm.nih.gov/24949966/',
+        why: 'Landmark Cell paper showing UV → keratinocyte β-endorphin → opioid-receptor-mediated mood/addictive response' },
+      { cite: 'Slominski A et al. (2012). "Sensing the environment: regulation of local and global homeostasis by the skin\'s neuroendocrine system." Adv Anat Embryol Cell Biol 212:1',
+        href: 'https://pubmed.ncbi.nlm.nih.gov/22894052/',
+        why: 'Comprehensive review of skin as a neuroendocrine organ — POMC, α-MSH, ACTH, cortisol all expressed in skin' },
+      { cite: 'Cui R et al. (2007). "Central role of p53 in the suntan response and pathologic hyperpigmentation." Cell 128:853',
+        href: 'https://pubmed.ncbi.nlm.nih.gov/17350573/',
+        why: 'p53 → POMC → α-MSH → melanin pathway: the molecular mechanism behind the tan signal' },
+    ],
+  },
+  violet_eye: {
+    spectrum: 'Violet 360-400 nm at the eye → OPN5/neuropsin + retinal dopamine release (cone-mediated). Distinct from the ipRGC/melanopic 490-nm circadian pathway.',
+    refs: [
+      { cite: 'Torii H et al. (2017). "Violet light exposure can be a preventive strategy against myopia progression." EBioMedicine 15:210',
+        href: 'https://pubmed.ncbi.nlm.nih.gov/28063778/',
+        why: 'Foundational paper linking 360-400 nm violet light at the eye to slowed myopia progression in children' },
+      { cite: 'Rose KA et al. (2008). "Outdoor activity reduces the prevalence of myopia in children." Ophthalmology 115:1279',
+        href: 'https://pubmed.ncbi.nlm.nih.gov/18294691/',
+        why: 'Cohort of >4000 kids (1,765 six-year-olds + 2,367 twelve-year-olds): time outdoors (not near-work) is the protective factor against myopia' },
+      { cite: 'He M et al. (2015). "Effect of Time Spent Outdoors at School on the Development of Myopia Among Children in China: A Randomized Clinical Trial." JAMA 314:1142',
+        href: 'https://pubmed.ncbi.nlm.nih.gov/26372583/',
+        why: 'JAMA RCT in ~1,900 first-graders: 40 extra outdoor min/day cut new-myopia incidence by 9 percentage points (39.5% → 30.4%, ~23% relative reduction)' },
+    ],
+  },
+};
+
+function _renderChannelCitations(channelKey) {
+  const cit = CHANNEL_CITATIONS[channelKey];
+  if (!cit) return '';
+  const meta = (window.CHANNEL_DISPLAY || {})[channelKey] || {};
+  const channelName = meta.label || channelKey;
+  const refs = cit.refs.map(({ cite, href, why }) => `<li>
+    <a href="${escapeAttr(href)}" target="_blank" rel="noopener">${escapeHTML(cite)}</a>
+    ${why ? `<div class="light-channel-cit-why">${escapeHTML(why)}</div>` : ''}
+  </li>`).join('');
+  // "Suggest a better study" — same pattern as recommendations.js. Pre-
+  // fills a GitHub issue with the channel name + current reference list
+  // so the maintainer has context when triaging the suggestion. Open in
+  // a new tab so reading the panel isn't interrupted.
+  const issueTitle = encodeURIComponent(`[Light & Sun] ${channelName}: better study / correction`);
+  const currentList = cit.refs.map(r => `- ${r.cite}\n  ${r.href}`).join('\n');
+  const issueBody = encodeURIComponent(
+    `**Channel:** ${channelName} (\`${channelKey}\`)\n` +
+    `**Action spectrum:** ${cit.spectrum}\n\n` +
+    `**Current references:**\n${currentList}\n\n` +
+    `**What's wrong / what's better:**\n\n` +
+    `**Suggested study (with link):**\n\n` +
+    `**Why this is a better fit (one line):**\n`
+  );
+  const suggestLink = `<div class="light-channel-cit-suggest"><a href="https://github.com/elkimek/get-based/issues/new?title=${issueTitle}&body=${issueBody}&labels=light-channel-citations" target="_blank" rel="noopener">Suggest a better study →</a></div>`;
+  return `<details class="light-channel-cit">
+    <summary>Action spectrum &amp; citations</summary>
+    <p class="light-channel-cit-spec"><strong>Spectrum:</strong> ${escapeHTML(cit.spectrum)}</p>
+    <ul class="light-channel-cit-refs">${refs}</ul>
+    ${suggestLink}
+  </details>`;
+}
+
+// 7-day stacked bar chart: per-day sun + device totals for one channel.
+// Always renders (even all-zero days) so the user has a baseline visual
+// reference. Includes a dashed target line at (dailyTarget / 7) so the
+// per-day chart shows what "hitting your weekly target evenly" looks
+// like. Numeric labels above each bar surface the actual numbers when
+// non-zero.
+function _renderChannelWeekChart(channelKey) {
+  if (!window.dailyChannelBreakdown) return '';
+  const days = window.dailyChannelBreakdown(channelKey, 7);
+  const ch = window.CHANNEL_DISPLAY || {};
+  const meta = ch[channelKey] || {};
+  const dailyTarget = meta.dailyTarget || 0;
+  const dailyTargetSlice = dailyTarget; // chart is per-day, so target IS the daily target
+  const observedMax = Math.max(0, ...days.map(d => d.sun + d.device));
+  // Anchor the chart to whichever is bigger — the highest day or the
+  // target-per-day line. Without this, very-low-dose weeks compress
+  // the target off the top of the chart and lose context.
+  const max = Math.max(observedMax, dailyTargetSlice * 1.2, 0.001);
+
+  const W = 280, H = 96, padX = 18, padTop = 14, padBottom = 16;
+  const innerH = H - padTop - padBottom;
+  const barW = (W - 2 * padX) / 7;
+  const barInner = Math.max(10, barW * 0.7);
+  const dayLetter = (date) => 'SMTWTFS'[date.getDay()];
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  // Per-day number formatter — converts channel-au into the channel's
+  // natural unit so the chart labels match the hero's unit. Channel-au
+  // by itself is dimensionless ("576K of what?"); always show something
+  // human-readable.
+  //
+  // Returns "" for zero/sub-meaningful values so the chart doesn't get
+  // peppered with "0%" labels on empty days.
+  const fmt = (n) => {
+    if (!Number.isFinite(n) || n < 0.5) return '';
+    if (channelKey === 'vitamin_d' && window.vitaminDIU) {
+      // No per-day fitz/uvi context; use Fitz III + assume threshold met
+      // as a chart-only approximation. Hero uses the per-session-correct
+      // rollingVitaminDIU; chart reads as relative IU per day.
+      const iu = window.vitaminDIU(n, 'III', 7);
+      if (iu < 1) return '';
+      if (iu >= 1000) return (iu / 1000).toFixed(1) + 'k';
+      if (iu >= 100) return String(Math.round(iu / 10) * 10);
+      return String(Math.round(iu));
+    }
+    if (channelKey === 'nir_solar' && window.pbmJoulesPerCm2) {
+      const j = window.pbmJoulesPerCm2(n);
+      if (j < 0.05) return '';
+      if (j >= 10) return String(Math.round(j));
+      if (j >= 1) return j.toFixed(1);
+      return j.toFixed(2);
+    }
+    // Unitless channels — show percent-of-daily-target so the day-vs-day
+    // comparison reads as % of typical day, not raw channel-au.
+    if (dailyTarget > 0) {
+      const pct = Math.round(100 * n / dailyTarget);
+      if (pct === 0) return '';
+      return `${pct}%`;
+    }
+    return '';
+  };
+
+  // Empty-day placeholder bar so the chart never reads as a giant blank.
+  const placeholderH = 3;
+
+  // Color bar by how the day's dose stacks up against the daily target.
+  // Visual at-a-glance: green = hit/exceeded daily, accent = meaningful,
+  // muted = marginal. Encourages reading the chart as "did I check this
+  // box today?" instead of "what big number did I rack up?".
+  const dayThreshold = _CHANNEL_DAY_THRESHOLD[channelKey] ?? 0.30;
+  const colorForDay = (total) => {
+    if (dailyTarget <= 0 || total < dailyTarget * 0.05) return { fill: 'var(--text-muted)', op: 0.40 };
+    if (total >= dailyTarget) return { fill: 'var(--green)', op: 1.0 };
+    if (total >= dailyTarget * dayThreshold) return { fill: 'var(--accent)', op: 0.85 };
+    return { fill: 'var(--accent)', op: 0.45 };
+  };
+
+  const bars = days.map((d, i) => {
+    const x = padX + i * barW + (barW - barInner) / 2;
+    const total = d.sun + d.device;
+    const h = total > 0 ? (total / max) * innerH : placeholderH;
+    const sunH = total > 0 ? (d.sun / max) * innerH : 0;
+    const devH = total > 0 ? (d.device / max) * innerH : 0;
+    const y = padTop + innerH - h;
+    const isToday = d.date.getTime() === today.getTime();
+    const labelTxt = total > 0 ? fmt(total) : '';
+    const { fill: barFill, op: barOp } = colorForDay(total);
+    // Hit-target check mark — greener visual cue when the day cleared the
+    // daily target line. Reduces the urge to chase higher percentages
+    // ("more is better") past the saturation point.
+    const checkMark = (dailyTarget > 0 && total >= dailyTarget) ? `<text x="${x + barInner / 2}" y="${y - 12}" text-anchor="middle" font-size="11" fill="var(--green)" font-weight="700">✓</text>` : '';
+    return `<g>
+      ${total > 0 ? '' : `<rect x="${x}" y="${padTop + innerH - placeholderH}" width="${barInner}" height="${placeholderH}" fill="var(--text-muted)" opacity="0.20" rx="1"/>`}
+      ${devH > 0 ? `<rect x="${x}" y="${y}" width="${barInner}" height="${devH}" fill="${barFill}" opacity="${barOp * 0.55}" rx="1"/>` : ''}
+      ${sunH > 0 ? `<rect x="${x}" y="${y + devH}" width="${barInner}" height="${sunH}" fill="${barFill}" opacity="${barOp}" rx="1"/>` : ''}
+      ${checkMark}
+      ${labelTxt && !checkMark ? `<text x="${x + barInner / 2}" y="${y - 2}" text-anchor="middle" font-size="9" fill="var(--text-secondary)">${labelTxt}</text>` : ''}
+      <text x="${x + barInner / 2}" y="${H - 3}" text-anchor="middle" font-size="10" fill="${isToday ? 'var(--text-primary)' : 'var(--text-muted)'}" font-weight="${isToday ? '700' : '400'}">${dayLetter(d.date)}</text>
+    </g>`;
+  }).join('');
+
+  // Target line — dashed accent, drawn under the bars so the bar fills sit
+  // on top of it visually. Surfaces the "what hitting the weekly target
+  // evenly looks like" reference. Only meaningful when target > 0.
+  const targetLine = dailyTargetSlice > 0
+    ? `<line x1="${padX}" x2="${W - padX}" y1="${padTop + innerH - (dailyTargetSlice / max) * innerH}" y2="${padTop + innerH - (dailyTargetSlice / max) * innerH}" stroke="var(--text-muted)" stroke-width="1" stroke-dasharray="3 3" opacity="0.6"/>
+       <text x="${W - padX + 2}" y="${padTop + innerH - (dailyTargetSlice / max) * innerH + 3}" font-size="9" fill="var(--text-muted)" text-anchor="start">target</text>`
+    : '';
+
+  // SR readable summary
+  const dayName = (date) => ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][date.getDay()];
+  const srRows = days.map(d => {
+    const total = d.sun + d.device;
+    if (total < 0.0001) return `${dayName(d.date)}: no exposure`;
+    if (d.device > 0 && d.sun > 0) return `${dayName(d.date)}: sun ${fmt(d.sun)}, device ${fmt(d.device)}`;
+    if (d.sun > 0) return `${dayName(d.date)}: sun ${fmt(d.sun)}`;
+    return `${dayName(d.date)}: device ${fmt(d.device)}`;
+  }).join('. ');
+
+  return `<div class="light-channel-weekchart" title="Last 7 days · solid = sun, faded = device · dashed line = even-pace daily target">
+    <div class="light-channel-weekchart-label">7-day rhythm <span class="light-channel-weekchart-legend"><span class="lc-leg-sun"></span> sun · <span class="lc-leg-dev"></span> device · <span class="lc-leg-tgt"></span> target</span></div>
+    <svg viewBox="0 0 ${W + 32} ${H}" width="100%" height="${H}" aria-label="7-day per-day exposure: ${escapeAttr(srRows)}" role="img">
+      <desc>${escapeHTML(srRows)}</desc>
+      ${targetLine}
+      ${bars}
+    </svg>
+  </div>`;
+}
+
+// Threshold (fraction of daily target) above which a day counts as
+// "meaningful exposure" toward this channel. Stricter for the eye-bound
+// circadian/violet channels because the biological response requires
+// real entrainment-strength dose, not a brief glance.
+const _CHANNEL_DAY_THRESHOLD = {
+  vitamin_d:  0.30,
+  nir_solar:  0.30,
+  no_cv:      0.30,
+  pomc:       0.30,
+  circadian:  0.50,
+  violet_eye: 0.50,
+};
+
+// Count days in the breakdown where the day's combined dose hit at least
+// `threshold × dailyTarget`. Sub-meaningful days don't count — partial
+// glance light isn't biologically equivalent to a real dose.
+function _meaningfulDayCount(days, dailyTarget, threshold) {
+  if (!Array.isArray(days) || dailyTarget <= 0) return 0;
+  const floor = threshold * dailyTarget;
+  let n = 0;
+  for (const d of days) {
+    if ((d.sun + d.device) >= floor) n++;
+  }
+  return n;
+}
+
+// Hero stat for a channel — leads with DAILY CONSISTENCY ("3 of 7
+// days") instead of weekly cumulative. Health-wise, daily exposure
+// matters more than banking one big day for every channel here:
+// circadian needs daily entrainment, vit-D plateaus per session
+// around 20k IU, NO release dissipates, NIR benefit is dose-per-
+// exposure not banked. The "X of 7 days" framing matches the biology;
+// the cumulative real-unit (IU / J/cm²) when defensible is shown as
+// a sub-line for completeness.
+function _channelHero(channelKey, totalCurrent, totalPrev, days7, daysPrev7) {
+  const meta = (window.CHANNEL_DISPLAY || {})[channelKey] || {};
+  const target = meta.dailyTarget || 0;
+  const threshold = _CHANNEL_DAY_THRESHOLD[channelKey] ?? 0.30;
+  const fmtIntK = (n) => {
+    if (n < 10) return n.toFixed(1);
+    if (n < 1000) return String(Math.round(n));
+    if (n < 10000) return (n / 1000).toFixed(1) + 'k';
+    return (n / 1000).toFixed(0) + 'k';
+  };
+
+  const dayCountCur  = _meaningfulDayCount(days7,     target, threshold);
+  const dayCountPrev = _meaningfulDayCount(daysPrev7, target, threshold);
+
+  // Cumulative real-unit summary (always computed; only shown if defensible).
+  let cumulative = '';
+  if (channelKey === 'vitamin_d' && window.rollingVitaminDIU) {
+    const iu = window.rollingVitaminDIU(7);
+    if (iu >= 30) cumulative = `· ~${fmtIntK(iu)} IU total`;
+  } else if (channelKey === 'nir_solar' && window.pbmJoulesPerCm2) {
+    const j = window.pbmJoulesPerCm2(totalCurrent);
+    if (j >= 0.1) cumulative = `· ${j >= 10 ? Math.round(j) : j.toFixed(1)} J/cm² total`;
+  }
+
+  let primary = '';
+  let primarySub = '';
+  if (totalCurrent < 0.5 && dayCountCur === 0) {
+    primary = '—';
+    primarySub = 'no exposure logged this week';
+  } else {
+    primary = `${dayCountCur} of 7 days`;
+    // Channel-aware sub-label — what counts as "meaningful exposure"
+    // varies per channel, but the framing stays consistent.
+    const SUB_LABELS = {
+      vitamin_d:  'with meaningful UVB synthesis',
+      nir_solar:  'with meaningful NIR exposure',
+      circadian:  'with strong morning/midday daylight in your eyes',
+      no_cv:      'with meaningful UVA on bare skin',
+      pomc:       'with meaningful sun on bare skin',
+      violet_eye: 'with strong outdoor light reaching your eyes',
+    };
+    const subBase = SUB_LABELS[channelKey] || 'with meaningful exposure';
+    primarySub = `${subBase} ${cumulative}`.trim();
+  }
+
+  // Trend = day-count delta vs last week. Same unit (days) so comparison
+  // reads naturally without conversion gymnastics.
+  let trend = '';
+  if (dayCountCur > 0 || dayCountPrev > 0) {
+    const delta = dayCountCur - dayCountPrev;
+    if (delta >= 1) {
+      trend = `<span class="light-channel-hero-trend up">↑ ${delta} more day${delta === 1 ? '' : 's'} than last week</span>`;
+    } else if (delta <= -1) {
+      trend = `<span class="light-channel-hero-trend down">↓ ${-delta} fewer day${delta === -1 ? '' : 's'} than last week</span>`;
+    } else if (dayCountCur > 0) {
+      trend = `<span class="light-channel-hero-trend flat">~ same day count as last week</span>`;
+    } else {
+      trend = `<span class="light-channel-hero-trend down">↓ no qualifying days this week (had ${dayCountPrev} last week)</span>`;
+    }
+  }
+
+  return `<div class="light-channel-hero">
+    <div class="light-channel-hero-primary">${escapeHTML(primary)}</div>
+    <div class="light-channel-hero-sub">${escapeHTML(primarySub)}</div>
+    ${trend}
+  </div>`;
+}
+
+// Caption explaining why daily exposure beats banking one big day.
+// Channel-specific so the reason is biologically grounded, not generic.
+function _renderDailyBeatsBankingNote(channelKey) {
+  const NOTES = {
+    vitamin_d:  'Skin photoisomerizes excess back to inactive isomers around 20k IU per session — daily 10-min sessions outperform one big day (Holick 2007, Webb 2018).',
+    nir_solar:  'Mitochondrial benefit is dose-dependent per exposure, not banked — daily 20-min walks deliver more cumulative cellular signal than one long session.',
+    circadian:  'Body clock entrainment depends on daily timing of morning light — one banked day doesn\'t prevent the next day\'s drift toward later sleep onset.',
+    no_cv:      'UVA-driven nitric oxide release happens during exposure and dissipates over hours — daily refreshes the vasodilatory + BP-lowering signal.',
+    pomc:       'POMC pathway tone resets between sessions — daily sun maintains α-MSH (tan signal) and β-endorphin (mood) baseline rather than spiking and crashing.',
+    violet_eye: 'Violet-eye dopamine release is per-exposure — daily outdoor minutes accumulate the myopia-protective + alertness signal that one long day can\'t bank.',
+  };
+  const txt = NOTES[channelKey];
+  if (!txt) return '';
+  return `<p class="light-channel-banking-note"><strong>Daily beats banking.</strong> ${escapeHTML(txt)}</p>`;
+}
+
+// Source-mix mini bar — what fraction of the week's dose came from sun
+// vs from devices. Surfaces hidden context (e.g. "your circadian channel
+// is 90% from your dawn simulator, 10% from outdoor sun").
+function _renderChannelSourceMix(sun, dev) {
+  const total = sun + dev;
+  if (total < 0.5) return '';
+  const sunPct = Math.round(100 * sun / total);
+  const devPct = 100 - sunPct;
+  // Hide when one source is essentially zero — no useful "mix" to show.
+  if (sunPct >= 99 || sunPct <= 1) return '';
+  return `<div class="light-channel-mix" aria-label="This week's source mix: ${sunPct}% sun, ${devPct}% device">
+    <div class="light-channel-mix-bar">
+      <div class="light-channel-mix-sun" style="flex: ${sunPct}"></div>
+      <div class="light-channel-mix-dev" style="flex: ${devPct}"></div>
+    </div>
+    <div class="light-channel-mix-legend">
+      <span><span class="lc-leg-sun"></span> Sun ${sunPct}%</span>
+      <span><span class="lc-leg-dev"></span> Device ${devPct}%</span>
+    </div>
+  </div>`;
+}
+
+// Channel-specific "next move" — a concrete recipe the user can act on
+// right now. Picks the best CTA based on channel + tier + available
+// devices + current sun conditions.
+function _channelNextMove(channelKey, t7, totalCurrent, devices, atm) {
+  const matchingDevice = (devices || []).find(d => Array.isArray(d.channels) && d.channels.includes(channelKey));
+  const dev = matchingDevice ? `${matchingDevice.brand} ${matchingDevice.model}` : '';
+  const uvi = atm?.uvIndex ?? null;
+  const peakTime = atm?.daily?.peakAt || null;
+  const peakUVI = atm?.daily?.uvIndexMax ?? null;
+  const peakHHMM = peakTime ? new Date(peakTime).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : null;
+
+  // Per-channel recipes — each returns a concrete, time-aware suggestion.
+  const recipes = {
+    vitamin_d: {
+      empty: `UVB on bare skin makes vitamin D — needs UVI ≥ 3 and no glass. ${peakHHMM && peakUVI >= 3 ? `Today's UV peaks at <strong>${peakHHMM}</strong> (UVI ${peakUVI.toFixed(1)}). 15-20 min in shorts at peak ≈ 1,000-2,000 IU.` : 'Glass blocks UVB; window-side sun yields zero.'}${matchingDevice ? ` Or a session on your ${dev}.` : ''}`,
+      low:   `${peakHHMM && peakUVI >= 3 ? `UV peaks at <strong>${peakHHMM}</strong> (UVI ${peakUVI.toFixed(1)}). One more 15-20 min midday session this week tips you to good range.` : 'A midday session on a clear day would tip you up.'}${matchingDevice ? ` Or a longer session on your ${dev}.` : ''}`,
+      mod:   `Solid weekly base. ${peakHHMM ? `Today's peak: ${peakHHMM} (UVI ${peakUVI?.toFixed(1) || '?'}).` : 'Keep your current rhythm.'} One more session this week reaches strong.`,
+      good:  `Strong week. Consistency matters more than intensity from here — same rhythm next week maintains 25(OH)D.`,
+      strong:`Above typical-week target. Pull back if you're seeing pinkness; otherwise this is a solid trajectory for serum 25(OH)D.`,
+    },
+    circadian: {
+      empty: `Get morning daylight in your eyes — ideally outdoors before work, no sunglasses, no glass. 10-30 min in the first 2 hours after sunrise = strongest entrainment.${matchingDevice ? ` Or 30 min on your ${dev} on overcast days.` : ''}`,
+      low:   `Add a 15-20 min outdoor walk in your morning routine. Even cloudy mornings deliver 10-50× more melanopic light than indoor lighting.${matchingDevice ? ` Or a session on your ${dev}.` : ''}`,
+      mod:   `Healthy entrainment dose. Mornings have the biggest effect on sleep onset that night — keep prioritizing AM over midday.`,
+      good:  `Strong circadian signal. Consistent daily timing matters more than total dose at this point.`,
+      strong:`Strong consistent entrainment. Watch for evening light contamination (cool LEDs after sunset) which can blunt melatonin even with strong AM exposure.`,
+    },
+    nir_solar: {
+      empty: `Solar NIR is half of sunlight (600-1400 nm). 30-60 min outdoors at any time of day delivers a meaningful dose; window glass blocks ~70% of long NIR.${matchingDevice ? ` Or a 10-20 min session on your ${dev}.` : ''}`,
+      low:   `Add an outdoor walk this week — sunrise/sunset light is NIR-rich and won't push burn dose.${matchingDevice ? ` Or 15 min on your ${dev}.` : ''}`,
+      mod:   `Solid base. NIR doesn't need to be midday — golden-hour light delivers comparable dose without UVB burn risk.`,
+      good:  `Strong weekly NIR. Mitochondrial repair signal is well-saturated for this week.`,
+      strong:`Above typical-week NIR. No upper safety concern from broadband NIR — this is a maintenance pattern.`,
+    },
+    no_cv: {
+      empty: `UVA on bare skin (320-400 nm) photo-releases nitric oxide from skin stores. ${peakHHMM && peakUVI >= 3 ? `15-30 min outdoors anytime UV is up — today peaks at <strong>${peakHHMM}</strong> (UVI ${peakUVI.toFixed(1)}).` : 'Open-sky exposure during daylight hours.'} Sunscreen partially blocks UVA — bare-skin sessions count more.`,
+      low:   `Add a 20-30 min outdoor session this week with face + arms uncovered. UVA accumulates throughout the day, not just at solar noon.`,
+      mod:   `Healthy weekly UVA dose — sustained NO release supports BP + arterial function (Liu 2014).`,
+      good:  `Strong NO/cardiovascular signal. Good aggregate UVA exposure for vasodilatory benefit.`,
+      strong:`Above typical-week UVA. Be mindful of cumulative photoaging if this is a daily pattern; UVA is the long-wavelength culprit.`,
+    },
+    pomc: {
+      empty: `UVA + UVB on skin keratinocytes triggers POMC → α-MSH (tan signal) + β-endorphin (the "feels good in the sun" effect). Same recipe as cardiovascular — open-sky daylight on bare skin.`,
+      low:   `Same path as vit-D and NO/CV: midday outdoor sessions on bare skin. One more session this week tips you up.`,
+      mod:   `Healthy weekly POMC pathway activation.`,
+      good:  `Solid mood-hormone weekly signal.`,
+      strong:`Above typical-week POMC stimulus.`,
+    },
+    violet_eye: {
+      empty: `Outdoor violet 360-440 nm hits ipRGC sensors in the eye — different from "bright window light," which window glass attenuates. 15-30 min outdoors with eyes uncovered (no sunglasses, no glass) builds the dopamine signal linked to myopia control + alertness.`,
+      low:   `Add an outdoor walk with eyes uncovered (no sunglasses) this week. Even 10 min counts — this channel saturates quickly.`,
+      mod:   `Healthy weekly outdoor-violet dose.`,
+      good:  `Solid violet-eye signal — keep eyes uncovered during morning outdoor time for the strongest effect.`,
+      strong:`Above typical-week. Sunglasses are still appropriate at high UVI for eye safety; the violet signal banks well below sunburn risk levels.`,
+    },
+  };
+  const r = recipes[channelKey] || {};
+  let txt = '';
+  if (t7 === 0) txt = r.empty || '';
+  else if (t7 === 1) txt = r.low || '';
+  else if (t7 === 2) txt = r.mod || '';
+  else if (t7 === 3) txt = r.good || '';
+  else txt = r.strong || '';
+  if (!txt) return '';
+  // Action button — channel-keyed; sun channels lead with "Log a sun
+  // session", device-only channels lead with the device dialog. Mixed
+  // channels surface both.
+  const showSun = true; // every channel can be filled with sun
+  const showDev = !!matchingDevice;
+  const buttons = `
+    ${showSun ? `<button type="button" class="import-btn import-btn-primary light-channel-cta-btn" onclick="window.quickLogSunSession && window.quickLogSunSession()">☀ Log a sun session</button>` : ''}
+    ${showDev ? `<button type="button" class="import-btn import-btn-secondary light-channel-cta-btn" onclick="window.quickLogDeviceSession && window.quickLogDeviceSession()">🔴 Log device session</button>` : ''}`;
+  return `<section class="light-channel-nextmove">
+    <div class="light-channel-nextmove-label">Next move</div>
+    <p class="light-channel-nextmove-text">${txt}</p>
+    <div class="light-channel-nextmove-actions">${buttons}</div>
+  </section>`;
+}
+
+// Build the drill-down panel HTML for a single channel. Renders into the
+// `[data-channel-detail-slot]` container when the user taps a pill.
+//
+// Layout (top → bottom):
+//   1. Header: icon + title + tier pill + close
+//   2. Hero stat: real-unit aggregate this week (or empty-state)
+//   3. What it does: one-sentence description
+//   4. Source mix bar: sun vs device split (when both contribute)
+//   5. 7-day chart with target line + numeric labels
+//   6. Next move: channel-specific concrete recipe + action button
+//   7. Action spectrum + paper citations (expandable)
+function _renderChannelDetailPanel(channelKey) {
+  const ch = window.CHANNEL_DISPLAY || {};
+  const meta = ch[channelKey] || {};
+  // Drill-down hero stat is a 7-day total — classify against the weekly
+  // target so the badge agrees with the pill (and the AI rollup).
+  const tier = window.weeklyChannelTier || (() => 0);
+  const tlabel = window.tierLabel || (() => 'none');
+  const sunTot7 = (window.rollingChannelTotals && window.rollingChannelTotals(7)) || {};
+  const devTot7 = (window.rollingDeviceTotals && window.rollingDeviceTotals(7)) || {};
+  const sun7 = sunTot7[channelKey] || 0;
+  const dev7 = devTot7[channelKey] || 0;
+  const totalCurrent = sun7 + dev7;
+  const t7 = tier(totalCurrent, channelKey);
+
+  // Previous-week total via 14-day breakdown (first 7 days = the
+  // preceding week, last 7 days = current week). Lets the hero show
+  // a real "vs last week" delta instead of a vague tier-vs-tier arrow.
+  let totalPrev = 0;
+  let days7 = [];
+  let daysPrev7 = [];
+  try {
+    if (window.dailyChannelBreakdown) {
+      const days14 = window.dailyChannelBreakdown(channelKey, 14);
+      daysPrev7 = days14.slice(0, 7);
+      days7 = days14.slice(7);
+      totalPrev = daysPrev7.reduce((s, d) => s + d.sun + d.device, 0);
+    }
+  } catch (e) {}
+
+  const devices = (window.getDevices && window.getDevices()) || [];
+
+  // Pull the Conditions Now atm if in cache so the next-move can quote
+  // today's UV-peak time — way more actionable than "spend time outdoors."
+  const atm = _conditionsCache?.atm || null;
+
+  // Tier pill at top — same color scheme as the in-row chip; gives
+  // immediate visual signal of where the user stands without scrolling.
+  const tierColors = ['muted', 'tier1', 'tier2', 'tier3', 'tier4'];
+  const tierPill = `<span class="light-channel-detail-tierpill ${tierColors[t7]}">${escapeHTML(tlabel(t7))} this week</span>`;
+
+  return `<div class="light-channel-detail" id="light-pill-detail-${escapeAttr(channelKey)}" role="region" aria-label="${escapeHTML(meta.label || channelKey)} detail">
+    <header class="light-channel-detail-head">
+      <span class="light-channel-detail-icon" aria-hidden="true">${meta.icon || '·'}</span>
+      <h4 class="light-channel-detail-title">${escapeHTML(meta.label || channelKey)}</h4>
+      ${tierPill}
+      <button type="button" class="light-channel-detail-close" aria-label="Close ${escapeAttr(meta.label || channelKey)} detail" onclick="window._toggleChannelDetail && window._toggleChannelDetail('${escapeAttr(channelKey)}')">×</button>
+    </header>
+
+    ${_channelHero(channelKey, totalCurrent, totalPrev, days7, daysPrev7)}
+
+    <p class="light-channel-detail-body">${escapeHTML(meta.what || '')}</p>
+
+    ${_renderChannelSourceMix(sun7, dev7)}
+
+    ${_renderChannelWeekChart(channelKey)}
+
+    ${_renderDailyBeatsBankingNote(channelKey)}
+
+    ${_channelNextMove(channelKey, t7, totalCurrent, devices, atm)}
+
+    ${_renderChannelCitations(channelKey)}
+  </div>`;
+}
+
+// Navigate to the Light & Sun page and auto-expand the channel's
+// drill-down panel. Used when the user taps a dashboard pill — gives
+// them one-click access to the science / 30d trend / suggestion
+// instead of forcing them to find the same pill on the Light page
+// after navigation. Already on Light? Just toggle in place.
+function _openChannelOnLightPage(channelKey) {
+  // Helper: scroll the expanded panel into view + briefly flash so the
+  // user notices when they're already on the Light page (no navigation
+  // landing-on-target cue) and the panel may be far below the fold.
+  const flashPanel = () => {
+    const panel = document.getElementById(`light-pill-detail-${channelKey}`);
+    if (!panel) return;
+    if (panel.scrollIntoView) panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    panel.classList.add('light-channel-detail-flash');
+    setTimeout(() => panel.classList.remove('light-channel-detail-flash'), 1500);
+  };
+  if (state.currentView === 'light') {
+    _toggleChannelDetail(channelKey);
+    // Scroll + flash on the next frame after the panel renders.
+    requestAnimationFrame(() => requestAnimationFrame(flashPanel));
+    return;
+  }
+  if (window.navigate) window.navigate('light');
+  // Light page renders synchronously; the pill row is in the DOM by
+  // the next animation frame. Defer the toggle so the section exists.
+  // Two rAFs to make sure the async devices/env/tools slot doesn't
+  // race the toggle.
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    _toggleChannelDetail(channelKey);
+    flashPanel();
+  }));
+}
+
+// Toggle a per-channel detail panel below the pill row. One channel
+// expanded at a time — opening another collapses the previous one.
+// Re-clicking the same pill collapses it.
+function _toggleChannelDetail(channelKey) {
+  const slot = document.querySelector('[data-channel-detail-slot]');
+  if (!slot) return;
+  const row = slot.previousElementSibling; // the pill row
+  const pills = row ? row.querySelectorAll('.light-pill') : [];
+  const currentlyOpen = slot.dataset.openChannel || '';
+  // Reset every pill's aria-expanded
+  for (const p of pills) p.setAttribute('aria-expanded', 'false');
+  if (currentlyOpen === channelKey) {
+    // Re-tap → collapse
+    slot.innerHTML = '';
+    slot.dataset.openChannel = '';
+    return;
+  }
+  slot.innerHTML = _renderChannelDetailPanel(channelKey);
+  slot.dataset.openChannel = channelKey;
+  // Mark the matching pill expanded; move focus into the panel for SR users
+  for (const p of pills) {
+    if (p.dataset.channel === channelKey) {
+      p.setAttribute('aria-expanded', 'true');
+      const panel = slot.firstElementChild;
+      if (panel) panel.setAttribute('tabindex', '-1');
+      requestAnimationFrame(() => panel && panel.focus({ preventScroll: false }));
+      break;
+    }
+  }
+}
+
+// Unified sessions list — sun + device sessions merged into a single
+// chronological feed. Sun rows reuse renderSunSessionRow from sun.js
+// so the rich treatment (channel chips, burn-risk meta, click-to-open
+// detail modal) is consistent whether the user has only sun, only
+// device, or both kinds of sessions. Device rows render inline since
+// they have a simpler shape (no per-channel chips on the device-side
+// — those would be the SAME chips on every row, not informative).
+// Default cap on the historical sessions list. Without this, a year of
+// daily sessions becomes a 365-row scroll — useful information drowns
+// in chronology. Cap at 10 most recent and offer a single toggle to
+// expand to the full history. Module-scoped flag persists for the tab
+// session (resets on reload) — small enough to be ergonomic, opinionated
+// enough to keep the page tight by default.
+const SESSIONS_DEFAULT_CAP = 10;
+let _showAllSessions = false;
+
+function renderUnifiedSessionsList() {
+  // Active sun session is pinned at the top of the page (showLight
+  // renders it before the quicklog row), so filter it out of the
+  // historical-sessions list to avoid the same row appearing twice.
+  const sunSessions = ((window.getSessions && window.getSessions()) || []).filter(s => !!s.endedAt);
+  // Active device sessions are pinned above (renderActiveDeviceSessionCard);
+  // filter them out here so the same row doesn't render twice.
+  const devSessions = ((window.getDeviceSessions && window.getDeviceSessions()) || []).filter(s => !!s.endedAt);
+
+  // Build the unified, sorted row list once — regardless of whether we
+  // have only sun, only devices, or both. Lets the cap + toggle apply
+  // uniformly across all three shapes.
+  const rows = [];
+  for (const s of sunSessions) rows.push({ kind: 'sun', startedAt: s.startedAt || 0, sess: s });
+  for (const s of devSessions) rows.push({ kind: 'device', startedAt: s.startedAt || 0, sess: s });
+  if (rows.length === 0) return '';
+  rows.sort((a, b) => b.startedAt - a.startedAt);
+
+  const totalCount = rows.length;
+  const visibleRows = _showAllSessions ? rows : rows.slice(0, SESSIONS_DEFAULT_CAP);
+  const hiddenCount = totalCount - visibleRows.length;
+
+  const devices = (window.getDevices && window.getDevices()) || [];
+  const deviceById = Object.fromEntries(devices.map(d => [d.id, d]));
+  const renderSunRow = window.renderSunSessionRow;
+
+  let html = `<div class="sun-sessions-list${devSessions.length ? ' light-sessions-list-unified' : ''}">`;
+  for (const row of visibleRows) {
+    if (row.kind === 'sun' && renderSunRow) {
+      html += renderSunRow(row.sess);
+    } else if (row.kind === 'device') {
+      const sess = row.sess;
+      const dev = deviceById[sess.deviceId];
+      const devName = dev ? `${dev.brand} ${dev.model}` : 'Removed device';
+      const date = formatDate(new Date(row.startedAt).toISOString().slice(0, 10));
+      const dur = sess.durationMin ? `${Math.round(sess.durationMin)} min` : '—';
+      const meta = `${dur} @ ${sess.distanceCm}cm · ${sess.bodyArea || ''}${sess.eyesProtected ? ' · eyes protected' : ''}`;
+      // Mode badge — only on rows for devices that declare modes. The
+      // resolved mode answers "which LED groups fired" at a glance, key
+      // for hybrid panels (Maxi UVB, Trinity) where the same device can
+      // produce wildly different channel doses depending on the touchscreen
+      // preset chosen. Non-moded devices keep the legacy row layout.
+      let modeBadge = '';
+      let modeAria = '';
+      if (dev && Array.isArray(dev.modes) && dev.modes.length > 0) {
+        const resolvedMode = dev.modes.find(m => m.id === sess.mode)
+          || dev.modes.find(m => m.default)
+          || dev.modes[0];
+        if (resolvedMode) {
+          const label = resolvedMode.label || resolvedMode.id;
+          const isDefault = !!resolvedMode.default || dev.modes[0]?.id === resolvedMode.id;
+          // Default-mode rows use a quieter chip; off-default modes get
+          // an accent variant so the user can scan history for "when did
+          // I last run UV?" — the visually-louder rows are the answer.
+          modeBadge = `<span class="light-session-mode-chip${isDefault ? '' : ' light-session-mode-chip-accent'}" title="LED-group mode that fired during this session">${escapeHTML(label)}</span>`;
+          modeAria = ` mode ${label}`;
+        }
+      }
+      const devAriaLabel = `Open ${date} device session details — ${devName}${modeAria}`;
+      html += `<div class="sun-session light-session-row light-session-device" data-id="${escapeAttr(sess.id)}" role="button" tabindex="0" aria-label="${escapeAttr(devAriaLabel)}" onclick="window.openDeviceSessionDetail && window.openDeviceSessionDetail('${escapeAttr(sess.id)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();window.openDeviceSessionDetail && window.openDeviceSessionDetail('${escapeAttr(sess.id)}')}" style="cursor:pointer">
+        <div class="sun-session-head">
+          <span class="light-session-icon" aria-hidden="true">🔴</span>
+          <span class="sun-session-date">${escapeHTML(date)}</span>
+          <span class="sun-session-duration">${escapeHTML(dur)}</span>
+          <span class="light-session-kind">${escapeHTML(devName)}</span>
+          ${modeBadge}
+          <button class="sun-session-delete" onclick="event.stopPropagation();window.deleteDeviceSession && window.deleteDeviceSession('${escapeAttr(sess.id)}')" title="Delete session" aria-label="Delete session">×</button>
+        </div>
+        <div class="sun-session-meta">${escapeHTML(meta)}</div>
+        ${window.renderDeviceSessionAIInline ? window.renderDeviceSessionAIInline(sess) : ''}
+      </div>`;
+    }
+  }
+  html += `</div>`;
+  // Toggle row — only render when there's something to expand/collapse.
+  if (hiddenCount > 0) {
+    html += `<button class="light-sessions-show-more" onclick="window._toggleAllSessions()">Show ${hiddenCount} older session${hiddenCount === 1 ? '' : 's'}</button>`;
+  } else if (_showAllSessions && totalCount > SESSIONS_DEFAULT_CAP) {
+    html += `<button class="light-sessions-show-more" onclick="window._toggleAllSessions()">Show only the ${SESSIONS_DEFAULT_CAP} most recent</button>`;
+  }
+  return html;
+}
+
+// Exposed for the inline onclick on the show-more toggle.
+if (typeof window !== 'undefined') {
+  window._toggleAllSessions = () => {
+    _showAllSessions = !_showAllSessions;
+    if (window.navigate && state.currentView === 'light') window.navigate('light');
+  };
+}
+
+// One-line action suggestion based on the lowest-tier channel.
+function renderSuggestion(totals7d) {
+  // Suggestion picks the lowest-tier channel from a 7-day total, so use
+  // the weekly classifier — otherwise it nudges every channel as "low"
+  // because each one is being compared to a daily target.
+  const tier = window.weeklyChannelTier || (() => 0);
+  const order = ['vitamin_d', 'circadian', 'nir_solar', 'no_cv', 'pomc', 'violet_eye'];
+  const SUGGESTIONS = {
+    vitamin_d:  'Get 10–15 minutes of midday sun on bare skin if your latitude allows — UVB drops sharply after 2 pm.',
+    circadian:  '10 minutes of outdoor light before 9 am tends to be the highest-leverage move for your sleep.',
+    nir_solar:  'Solar near-infrared is highest mid-morning to late afternoon. A walk outside catches the half of sunlight that windows block.',
+    no_cv:      'Afternoon UVA-rich daylight on uncovered skin supports blood-vessel health and circulation.',
+    pomc:       'A few minutes more uncovered daylight on skin engages the mood-hormone cascade.',
+    violet_eye: 'Outdoor 360–400 nm light reaches your eyes only outside — even a few extra minutes helps.',
+  };
+  let worstKey = null, worstTier = 5;
+  for (const k of order) {
+    const t = tier(totals7d[k] || 0, k);
+    if (t < worstTier) { worstTier = t; worstKey = k; }
+  }
+  if (!worstKey || worstTier >= 3) return '';  // hide once everything is at least 'good'
+  return `<div class="light-suggestion">${escapeHTML(SUGGESTIONS[worstKey] || '')}</div>`;
+}
+
+function getSunCoordsHint() {
+  if (typeof window === 'undefined' || !window.getSunCoords) return '';
+  const c = window.getSunCoords();
+  if (!c) {
+    return `<p class="light-intro-hint">Tip: set your country in the profile editor for accurate sun calculations, or <a href="#" onclick="event.preventDefault();window.requestPreciseLocation && window.requestPreciseLocation()">share your precise location</a> once.</p>`;
+  }
+  if (c.source === 'country-band') {
+    return `<p class="light-intro-hint">Calculations use your country (~${c.lat}° lat). <a href="#" onclick="event.preventDefault();window.requestPreciseLocation && window.requestPreciseLocation()">Use precise location</a> for sharper results.</p>`;
+  }
+  return '';
 }
 
 // ═══════════════════════════════════════════════
@@ -43,6 +2517,11 @@ export function navigate(category, data) {
 // ═══════════════════════════════════════════════
 
 export function showDashboard(data) {
+  // Resume the live-session ticker if a session was started before this
+  // page loaded — keeps the dashboard Light Today strip ticking after a
+  // hard reload mid-session.
+  if (window._resumeActiveTickerIfNeeded) try { window._resumeActiveTickerIfNeeded(); } catch (e) {}
+  if (window.ensureActiveDeviceTicker) try { window.ensureActiveDeviceTicker(); } catch (e) {}
   if (!data) data = getActiveData();
   const main = document.getElementById("main-content");
   const hasData = data.dates.length > 0 || Object.values(data.categories).some(c => c.singlePoint && c.singleDate);
@@ -51,18 +2530,30 @@ export function showDashboard(data) {
   const importFab = document.getElementById('import-fab');
   if (importFab) importFab.classList.toggle('hidden', !hasData);
 
+  // ── Demo-load in flight: short-lived placeholder while
+  //    importDataJSON parses the demo blob (typically 2–3s). Without
+  //    this the empty Welcome hero flashes for the duration. The flag
+  //    is set in loadDemoData() and cleared on import success/failure.
+  if (!hasData && window._demoLoadingProfileId === state.currentProfile) {
+    main.innerHTML = `<div class="welcome-hero" aria-busy="true" role="status" aria-live="polite">
+      <h2>Loading demo data…</h2>
+      <p class="welcome-hero-subtitle">Setting up the demo profile — this takes a few seconds the first time.</p>
+    </div>`;
+    return;
+  }
+
   // ── Empty state: welcome hero + collapsed context ──
   if (!hasData) {
     let html = `<div class="welcome-hero">
       <h2>Welcome to getbased</h2>
-      <p class="welcome-hero-subtitle">Lab work + wearables, in one dashboard</p>
+      <p class="welcome-hero-subtitle">Health intelligence that's actually yours — five lenses on your biology, one private dashboard.</p>
       <div class="drop-zone" id="drop-zone">
         <div class="drop-zone-icon">\uD83D\uDCC4</div>
         <div class="drop-zone-text">Drop PDF, image, JSON, or DNA raw data file here, or click to browse</div>
         <div class="drop-zone-hint">AI-powered — works with any lab report (PDF, photo, screenshot) or getbased JSON export</div>
         ${!hasAIProvider() ? `<div class="drop-zone-api-hint">${isAIPaused() ? 'AI features are paused — <a href="#" onclick="event.preventDefault();event.stopPropagation();window.openSettingsModal(\'ai\')">re-enable in Settings</a>' : 'Requires an AI connection — <a href="#" onclick="event.preventDefault();event.stopPropagation();closeChatPanel();window.openSettingsModal(\'ai\')">set up in 30 seconds</a>'}</div>` : ''}</div>
       <div class="welcome-wearable-hint">
-        ⧬ Got an Oura, Withings, Fitbit, Polar, or Apple Health export? <a href="#" onclick="event.preventDefault();window.openSettingsModal('wearables')">Connect it</a> to see HRV, sleep, recovery, and body composition trends alongside your blood work.
+        ⧬ Got an Oura, Withings, Fitbit, Polar, or Apple Health export? <a href="#" onclick="event.preventDefault();window.openSettingsModal('wearables')">Connect it</a> to see HRV, sleep, recovery, and body composition trends alongside your other lenses.
       </div>
       <div class="onboarding-divider">
         <span class="onboarding-divider-line"></span>
@@ -82,6 +2573,11 @@ export function showDashboard(data) {
         </button>
       </div>
     </div>`;
+    // Light Today strip renders here too \u2014 users who log sun sessions
+    // before importing labs should still see their channel pills on the
+    // dashboard. renderLightTodayStrip() returns '' when no sessions and
+    // not in a solar window, so it's safe to always call.
+    html += renderLightTodayStrip();
     // Wearable strip renders even without lab data \u2014 users who connect Oura
     // etc. before importing any PDFs should still see their HRV / sleep /
     // RHR trends. renderWearableStrip() returns '' when no wearables are
@@ -102,7 +2598,7 @@ export function showDashboard(data) {
 
   // ── Has data: full dashboard ──
   let html = `<div class="category-header"><h2>Dashboard Overview</h2>
-    <p>Summary of all blood work results across ${data.dates.length} collection date${data.dates.length !== 1 ? 's' : ''}</p></div>`;
+    <p>Summary of all results across ${data.dates.length} collection date${data.dates.length !== 1 ? 's' : ''}</p></div>`;
   // Drop zone hidden element for drag-drop + file input (no visible space on dashboard)
   html += `<div class="drop-zone drop-zone-hidden" id="drop-zone"></div>`;
 
@@ -118,6 +2614,9 @@ export function showDashboard(data) {
 
   // ── 3b. Focus Card (always render if data exists — shows cached insight even when AI is paused) ──
   html += renderFocusCard();
+
+  // ── 3b1. Light Today strip (Light & Sun lens — appears once sessions exist or in solar windows) ──
+  html += renderLightTodayStrip();
 
   // ── 3c. Wearable strip (Oura · Withings · Ultrahuman · WHOOP · Fitbit · Apple Health) ──
   html += renderWearableStrip();
@@ -419,6 +2918,12 @@ export async function loadFocusCard() {
   const fp = getFocusCardFingerprint();
   if (cached && cached.text) {
     el.innerHTML = `<span class="focus-card-text">${applyInlineMarkdown(cached.text)}</span>`;
+    // Hand-authored prefill (demo profiles only) ships without a
+    // fingerprint — never auto-refresh. The manual ↻ button still
+    // works because refreshFocusCard clears the cache entirely.
+    // Real users always have a fingerprint set by loadFocusCard's
+    // own write path below, so this branch never matches them.
+    if (!cached.fingerprint) return;
     if (cached.fingerprint === fp || !hasAIProvider()) return;
   }
   if (!hasAIProvider()) {
@@ -1607,24 +4112,26 @@ export function deleteMarkerValue(id, date) {
   if (!state.importedData.entries) return;
   const entry = state.importedData.entries.find(e => e.date === date);
   if (!entry || entry.markers[dotKey] === undefined) return;
-  delete entry.markers[dotKey];
-  // Clean up provenance and manual tracking
-  if (entry.markerSources) delete entry.markerSources[dotKey];
-  if (state.importedData.manualValues) delete state.importedData.manualValues[dotKey + ':' + date];
-  // Clean up insulin dual-mapping
-  if (dotKey === 'hormones.insulin') { delete entry.markers['diabetes.insulin_d']; if (entry.markerSources) delete entry.markerSources['diabetes.insulin_d']; recalculateHOMAIR(entry); }
-  // Remove entry entirely if no markers left
-  if (Object.keys(entry.markers).length === 0) {
-    state.importedData.entries = state.importedData.entries.filter(e => e.date !== date);
-  }
-  saveImportedData();
-  window.buildSidebar();
-  updateHeaderDates();
-  // Re-open the detail modal to show updated values
-  const activeNav = document.querySelector(".nav-item.active");
-  navigate(activeNav ? activeNav.dataset.category : "dashboard");
-  showDetailModal(id);
-  showNotification(`Removed value from ${date}`, 'info');
+  showConfirmDialog(`Delete this value (${date})? This can't be undone.`, () => {
+    delete entry.markers[dotKey];
+    // Clean up provenance and manual tracking
+    if (entry.markerSources) delete entry.markerSources[dotKey];
+    if (state.importedData.manualValues) delete state.importedData.manualValues[dotKey + ':' + date];
+    // Clean up insulin dual-mapping
+    if (dotKey === 'hormones.insulin') { delete entry.markers['diabetes.insulin_d']; if (entry.markerSources) delete entry.markerSources['diabetes.insulin_d']; recalculateHOMAIR(entry); }
+    // Remove entry entirely if no markers left
+    if (Object.keys(entry.markers).length === 0) {
+      state.importedData.entries = state.importedData.entries.filter(e => e.date !== date);
+    }
+    saveImportedData();
+    window.buildSidebar();
+    updateHeaderDates();
+    // Re-open the detail modal to show updated values
+    const activeNav = document.querySelector(".nav-item.active");
+    navigate(activeNav ? activeNav.dataset.category : "dashboard");
+    showDetailModal(id);
+    showNotification(`Removed value from ${date}`, 'info');
+  });
 }
 
 export function deleteCustomMarker(id) {
@@ -2180,6 +4687,17 @@ function deleteMarkerNote(dotKey, id) {
 Object.assign(window, {
   navigate,
   showDashboard,
+  showLight,
+  _expandLightToolsSection,
+  _toggleChannelDetail,
+  _openChannelOnLightPage,
+  renderLightTodayStrip,
+  renderLightChannelsLive,
+  renderConditionsNow,
+  _refreshConditionsNow,
+  _inspectConditionsNow,
+  _setManualUvi,
+  _clearManualUvi,
   renderFocusCard,
   buildFocusContext,
   loadFocusCard,

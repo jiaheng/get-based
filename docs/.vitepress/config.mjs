@@ -74,7 +74,16 @@ export default defineConfig({
           text: 'AI Features',
           items: [
             { text: 'AI Chat', link: '/guide/ai-chat' },
+            { text: 'AI Overview — What\'s AI-powered', link: '/guide/ai-overview' },
             { text: 'Biological Age', link: '/guide/phenoage' }
+          ]
+        },
+        {
+          text: 'Light & Sun',
+          items: [
+            { text: 'Sun Sessions', link: '/guide/sun-sessions' },
+            { text: 'Light Environment', link: '/guide/light-environment' },
+            { text: 'Light Tools', link: '/guide/light-tools' }
           ]
         },
         {
@@ -101,7 +110,8 @@ export default defineConfig({
             { text: 'Data Pipeline', link: '/contributor/data-pipeline' },
             { text: 'Testing', link: '/contributor/testing' },
             { text: 'Deployment', link: '/contributor/deployment' },
-            { text: 'Storage Schema', link: '/contributor/storage-schema' }
+            { text: 'Storage Schema', link: '/contributor/storage-schema' },
+            { text: 'Sun Spectrum Model', link: '/contributor/sun-spectrum-model' }
           ]
         }
       ]

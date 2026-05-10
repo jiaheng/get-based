@@ -5,6 +5,19 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.6.0', date: '2026-05-04', title: '☀ Light & Sun — the lens for everything sunlight does to you',
+    items: [
+      '<b>☀ Light & Sun lens.</b> Sunlight does a lot more than make vitamin D. Track your exposure across six biological channels — Vitamin D, Body clock, Cardiovascular, Mood & hormones, Cellular repair, and Outdoor eye light — and correlate them with your labs and wearable data over time. One-tap session logging: tap when you go outside, tap again when you come back. Plain-English summary on stop with computed vit-D yield and burn-dose status.',
+      '<b>Sun-safety guardrails.</b> Live alert at 70% + 100% of your daily burn dose. A photosensitizing-medication checkbox drops your threshold (tetracyclines, isotretinoin, NSAIDs, St John\'s Wort, others). Cumulative carry-over warning when yesterday + today push you over. High-altitude flag for locations above 1500m.',
+      '<b>Light therapy devices, first-class.</b> Pick from a preset library (Joovv panels, Mito Red, Sperti UVB, Verilux dawn simulators, full-spectrum bulbs) or add a custom device. Therapy sessions feed the same channels as outdoor sun.',
+      '<b>Indoor light + screens.</b> Map the rooms you spend time in and the screens you stare at. Each audit question carries a one-line photobiology explainer below it. Indoor light deficits feed back into your channel mix.',
+      '<b>Eight on-device measurement tools.</b> Lux meter, flicker detector, color-temperature meter, light classifier, glass-transmission test, sleep darkness meter, sunrise/sunset logger, eye-level audit walkthrough. Camera frames stay on your device.',
+      '<b>AI sees your sun.</b> Every chat now carries your active deficits, device library, week\'s per-channel exposure, and burn-dose state. After ≥4 weeks of overlapping sessions and labs, channel-by-biomarker correlations join the AI context automatically.',
+      '<b>Faster, cleaner cross-device sync.</b> Each push ships only what changed (per-row deltas, gzipped) instead of one fat blob. Concurrent edits from phone and desktop merge cleanly. Self-serve relay-storage compaction lives in the Sync diagnose modal — no more "storage full, ping the maintainer."',
+      '<b>Five Lenses framing.</b> getbased is now organized around five lenses on your biology — 🩸 <b>Labs</b>, 🧬 <b>Genome</b>, ⌚ <b>Body</b>, ☀ <b>Light</b>, 🧠 <b>Insight</b>. Every lens informs every other; the AI synthesizes across all of them.',
+    ]
+  },
+  {
     version: '1.5.4', date: '2026-05-07', title: 'Bugfixes & improvements',
     items: [
       '<b>Don\'t want wearables?</b> Settings → Wearables → "Wearable integrations" toggles them off. The strip stays for your manual weight, BP, and pulse entries.',
@@ -490,62 +503,6 @@ const CHANGELOG = [
     ]
   },
   {
-    version: '1.7.5', date: '2026-03-13', title: 'Smarter Imports',
-    items: [
-      'PDF import now captures every numeric result — no more silently dropped markers',
-      'Better handling of European lab reports — specimen prefixes and local naming conventions recognized',
-      'CRP and hs-CRP tracked as separate markers — PhenoAge correctly requires hs-CRP',
-      'Import progress pill shows live status when you scroll away or switch views',
-      'Rename any marker from its detail view',
-      'PhenoAge and other calculated markers tell you exactly which inputs are missing',
-      'Slow AI models no longer get false timeout errors',
-    ]
-  },
-  {
-    version: '1.7.3', date: '2026-03-13', title: 'Privacy & Self-Hosting',
-    items: [
-      'Bundled Chart.js, pdf.js, and fonts locally — no more external CDN calls',
-      'Self-hosted analytics — replaced third-party Umami Cloud with own instance',
-      'Updated landing page privacy copy to accurately reflect what the app does',
-    ]
-  },
-  {
-    version: '1.7.2', date: '2026-03-12', title: 'Issue Fixes & Category Customization',
-    items: [
-      'Rename categories and change icons with a built-in emoji picker',
-      'Pause AI features globally — toggle in Settings → AI tab',
-      'Fatty acid cards and table/heatmap rows now open the detail modal',
-      'Two-step range revert: manual edit → lab range → schema default',
-      'PhenoAge biological age calculation',
-      'Urea renamed to "Urea (BUN)" for clarity',
-      'Updated default category icons (Hormones, Electrolytes, Lipids, Diabetes, Hematology, WBC)',
-      'Toggle sliders replace checkboxes in Settings Privacy section',
-    ]
-  },
-  {
-    version: '1.7.1', date: '2026-03-11', title: 'Open-Ended Ranges & Bug Fixes',
-    items: [
-      'Open-ended reference ranges — clear min or max to set one-sided ranges (e.g. eGFR >59), charts show solid threshold line',
-      'Fixed "Ask AI about this marker" sending wrong reference range when optimal/both mode was active',
-      'Fixed edited ranges showing "lab" badge instead of "edited", with revert support for both',
-      'Fixed percentage biomarkers (Neutrophils %, etc.) importing with wrong reference ranges',
-      'Custom markers without ranges now show a clickable placeholder to add them',
-      'Fixed OpenRouter custom model pricing not updating — now fetches real pricing on Enter',
-      'Fixed thinking model JSON errors — <think> tags stripped before parsing, longer error display',
-      'Review & Edit panel: scroll position preserved, diff view is read-only until Edit clicked',
-      'Multiple PDF imports on the same date now tracked — Settings shows all filenames',
-      'Clearer error for insufficient API credits (402)',
-    ]
-  },
-  {
-    version: '1.7.0', date: '2026-03-10', title: 'Specialty Labs & Custom Markers',
-    items: [
-      'Improved specialty lab support — better detection and categorization for OAT, fatty acid, and combination reports',
-      'Delete custom biomarkers — click any custom marker and use "Delete this marker" at the bottom',
-      'Set optimal ranges when creating new biomarkers via the "+" button',
-    ]
-  },
-  {
     version: '1.6.2', date: '2026-03-10', title: 'Create Custom Biomarkers',
     items: [
       'Manually create new biomarkers — "+" button next to Categories in the sidebar',
@@ -580,22 +537,6 @@ const CHANGELOG = [
     ]
   },
   {
-    version: '1.6.0', date: '2026-03-09', title: 'Chat Onboarding & Cycle Overhaul',
-    items: [
-      'New visitors get a friendly chat walkthrough — set up your profile, connect AI, and fill context cards step by step',
-      'Menstrual cycle setup integrated into onboarding — regular periods, perimenopause, menopause, pregnancy, breastfeeding',
-      'Cycle status field throughout the app — stats, period log, and phase features adapt to your status',
-      'LH, FSH, and prolactin added to hormone markers with phase-aware reference ranges for LH and FSH',
-      'Hormonal contraception auto-detected — phase ranges and chart bands disabled when on hormonal BC',
-      'Flow strength now auto-calculated from your period log entries',
-      'Contraceptive field replaced with structured dropdown (hormonal and non-hormonal options)',
-      'Expanded period symptoms to 17 options including hot flashes, night sweats, anxiety, and clots',
-      'Perimenopause detection now checks for vasomotor symptoms and skipped cycles',
-      'Quick-add supplements and medications during onboarding',
-      'First-time visitors see the chat guide instead of the app tour',
-    ]
-  },
-  {
     version: '1.5.3', date: '2026-03-08', title: 'Import & Editing Improvements',
     items: [
       'When importing a PDF, you can now exclude individual results and see the lab\'s reference ranges before confirming',
@@ -614,27 +555,6 @@ const CHANGELOG = [
       'Create custom AI personas with a cleaner editor and auto-generated emoji',
       'New "Unconventional Views" option when creating AI personas',
       'Imported vs manually entered values are now labeled in Settings',
-    ]
-  },
-  {
-    version: '1.5.1', date: '2026-03-07', title: 'EMF Improvements & Mobile',
-    items: [
-      'EMF: sleeping vs daytime SBM-2015 thresholds — severity adjusts per room type',
-      'EMF: AI interpretation modal — stream analysis of single assessments or before/after comparisons, saved with assessment',
-      'EMF: meter presets with autocomplete, room photos (up to 6 per room), before/after comparison view',
-      'Mobile: hamburger menu with slide-out sidebar replaces stacked category pills',
-      'Mobile: cleaner header — hides dates, range toggle, feedback, and donate on small screens',
-      'Desktop: header groups with subtle dividers between profile, data, and actions',
-    ]
-  },
-  {
-    version: '1.5.0', date: '2026-03-06', title: 'EMF Assessment',
-    items: [
-      'Environment card: Baubiologie EMF assessment sub-module — track electromagnetic field measurements room by room',
-      'SBM-2015 severity grading (No Concern → Extreme Concern) for 5 measurement types: AC electric, AC magnetic, RF/microwave, dirty electricity, DC magnetic',
-      'Import EMF consultant reports via PDF — AI extracts rooms, measurements, sources, and mitigations',
-      'Printable consultant template for on-site assessments (download from EMF editor)',
-      'EMF data included in AI chat context, JSON export/import, and environment summary',
     ]
   },
   {
@@ -662,20 +582,6 @@ const CHANGELOG = [
       'Fix: PII review diff highlighting works properly with thinking models',
       'Improved PII review editing — cursor lands where you click, highlights persist after edits',
       'Better matching for US lab markers like BUN',
-    ]
-  },
-  {
-    version: '1.4.0', date: '2026-03-05', title: 'Image Attachments',
-    items: [
-      'Chat: attach images via paperclip button, paste, or drag-and-drop \u2014 AI can see photos of lab reports, supplement labels, food logs, and more',
-      'Chat: up to 5 images per message, resized for optimal quality vs token cost',
-      'PDF import: scanned/image-heavy PDFs now detected automatically with image mode fallback \u2014 renders pages as screenshots for AI analysis',
-      'PDF import: "Force image mode" link in drop zone for known scans',
-      'Vision support detection: attach button auto-hidden for non-vision models',
-      'HD mode toggle: switch between standard (1024px) and high-resolution (2048px) image quality',
-      'Image quality warnings: detects blurry, dark, or overexposed photos before sending',
-      'Chat: smooth typewriter streaming replaces chunky text updates',
-      'Chat: conversation window expanded from 10 to 30 messages for better context',
     ]
   },
   {

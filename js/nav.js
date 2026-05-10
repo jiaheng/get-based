@@ -5,6 +5,29 @@ import { escapeHTML, escapeAttr, hashString } from './utils.js';
 import { getActiveData, countFlagged, filterDatesByRange } from './data.js';
 import { getProfiles } from './profile.js';
 
+// Render a conditional sidebar entry (e.g. Light & Sun, Wearables, Cycle, EMF, Genetics).
+// Appears only when the predicate yields data. Soft-promote via scroll-selector +
+// optional expand callback; hard-promote via dedicated `navigate` target.
+function _renderConditionalNavItem({ key, icon, label, navigate = 'dashboard', badge, scrollSelector, expandFn }) {
+  let onclick;
+  if (scrollSelector) {
+    // Escape backslashes BEFORE quotes — otherwise a selector containing
+    // a literal `\'` would survive as `\\'` (backslash + quote) and break
+    // out of the JS string. CodeQL flags this even though scrollSelector
+    // is a hardcoded module constant, never user input.
+    const sel = scrollSelector.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const expand = expandFn ? `;const b=el.querySelector('${expandFn.selector || '.collapsed'}');if(b&&b.classList.contains('hidden'))window.${expandFn.name}&&window.${expandFn.name}()` : '';
+    onclick = `window.navigate('${navigate}');setTimeout(()=>{const el=document.querySelector('${sel}');if(el){const y=el.getBoundingClientRect().top+window.scrollY-60;window.scrollTo({top:y,behavior:'smooth'})${expand};}},100)`;
+  } else if (navigate.startsWith('fn:')) {
+    onclick = navigate.slice(3); // raw JS fragment
+  } else {
+    onclick = `window.navigate('${navigate}')`;
+  }
+  const badgeHtml = badge ? `<span class="nav-count">${escapeHTML(String(badge))}</span>` : '';
+  return `<div class="nav-item" data-category="${key}" tabindex="0" role="button" onclick="${onclick}" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">
+    <span class="icon">${icon}</span> ${escapeHTML(label)} ${badgeHtml}</div>`;
+}
+
 function _buildNavItem(key, cat) {
   const markers = Object.values(cat.markers).filter(m => !m.hidden);
   const withData = markers.filter(m => m.values && m.values.some(v => v !== null)).length;
@@ -35,13 +58,80 @@ export function buildSidebar(data) {
   html += `<div class="nav-item" data-category="compare" tabindex="0" role="button" onclick="window.navigate('compare')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();window.navigate('compare')}">
     <span class="icon">\u2194</span> Compare Dates</div>`;
 
-  // Genetics sidebar link (only when data exists)
+  // \u2500\u2500\u2500 Conditional module entries \u2014 only render when the module has data.
+  // Order: most-used first; new modules (Light & Sun) at the top to highlight discovery.
+  // All except Light & Sun soft-promote (scroll + expand on dashboard); Light & Sun
+  // hard-promotes to its dedicated view.
+
+  // \u2600 Light & Sun \u2014 always visible (flagship module). New users
+  // need a discoverable entry point even before logging anything; once
+  // sessions exist, the badge shows this week's count.
+  const sunSessions = state.importedData?.sunSessions || [];
+  const weekStart = Date.now() - 7 * 86400 * 1000;
+  const weekCount = sunSessions.filter(s => (s.endedAt || s.startedAt || 0) >= weekStart).length;
+  html += _renderConditionalNavItem({
+    key: 'light',
+    icon: '\u2600', // monochrome glyph (no FE0F selector) \u2014 matches the rest of the sidebar (\uD83D\uDCCB \uD83C\uDF38 \uD83D\uDCE1 \uD83E\uDDEC)
+    label: 'Light & Sun',
+    navigate: 'light',
+    badge: weekCount > 0 ? (weekCount > 9 ? '9+' : weekCount) : null,
+  });
+
+  // \u231A Wearables \u2014 soft-promote (scroll to wearable strip)
+  const wearableConn = state.importedData?.wearableConnections || {};
+  if (Object.keys(wearableConn).length > 0) {
+    html += _renderConditionalNavItem({
+      key: 'wearables',
+      icon: '\u231A',
+      label: 'Wearables',
+      scrollSelector: '#wearable-strip',
+    });
+  }
+
+  // \uD83D\uDC8A Supplements \u2014 soft-promote
+  const supps = state.importedData?.supplements;
+  if (Array.isArray(supps) && supps.length > 0) {
+    html += _renderConditionalNavItem({
+      key: 'supplements',
+      icon: '\uD83D\uDC8A',
+      label: 'Supplements',
+      scrollSelector: '.supp-timeline-section',
+      badge: supps.length,
+    });
+  }
+
+  // \uD83C\uDF38 Cycle \u2014 female profiles with cycle data
+  const sex = state.profileSex;
+  const mc = state.importedData?.menstrualCycle;
+  if (sex === 'female' && mc) {
+    html += _renderConditionalNavItem({
+      key: 'cycle',
+      icon: '\uD83C\uDF38',
+      label: 'Cycle',
+      scrollSelector: '.cycle-section',
+    });
+  }
+
+  // \uD83D\uDCE1 EMF \u2014 opens editor directly (no dedicated dashboard section)
+  const emfAssessments = state.importedData?.emfAssessment?.assessments;
+  if (Array.isArray(emfAssessments) && emfAssessments.length > 0) {
+    html += _renderConditionalNavItem({
+      key: 'emf',
+      icon: '\uD83D\uDCE1',
+      label: 'EMF',
+      navigate: 'fn:window.openEMFAssessmentEditor&&window.openEMFAssessmentEditor()',
+      badge: emfAssessments.length,
+    });
+  }
+
+  // \uD83E\uDDEC Genetics \u2014 original conditional entry, refactored to use helper
   const genetics = state.importedData?.genetics;
   const hasGeneticsData = genetics && ((genetics.snps && Object.keys(genetics.snps).length > 0) || genetics.mtdna);
   if (hasGeneticsData) {
     const gParts = [];
     if (genetics.snps && Object.keys(genetics.snps).length > 0) gParts.push(Object.keys(genetics.snps).length);
     if (genetics.mtdna) gParts.push(genetics.mtdna.haplogroup);
+    // Genetics has special expand-on-scroll behavior \u2014 keep its inline form
     html += `<div class="nav-item" data-category="genetics" tabindex="0" role="button" onclick="window.navigate('dashboard');setTimeout(()=>{const el=document.getElementById('genetics-section');if(el){const y=el.getBoundingClientRect().top+window.scrollY-60;window.scrollTo({top:y,behavior:'smooth'});const b=el.querySelector('.genetics-body');if(b&&b.classList.contains('hidden'))window.toggleGeneticsCollapse();}},100)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">
       <span class="icon">\uD83E\uDDEC</span> Genetics <span class="nav-count">${gParts.join(' ')}</span></div>`;
   }
@@ -134,7 +224,7 @@ export function filterSidebar() {
   // When searching: show matching items, expand groups with matches, hide empty groups
   items.forEach(el => {
     const cat = el.dataset.category;
-    if (cat === 'dashboard' || cat === 'correlations' || cat === 'compare') { el.style.display = ''; return; }
+    if (cat === 'dashboard' || cat === 'correlations' || cat === 'compare' || cat === 'light' || cat === 'wearables' || cat === 'supplements' || cat === 'cycle' || cat === 'emf' || cat === 'genetics') { el.style.display = ''; return; }
     const label = el.textContent.toLowerCase();
     const markers = (el.dataset.markers || '').toLowerCase();
     el.style.display = (label.includes(query) || markers.includes(query)) ? '' : 'none';

@@ -103,6 +103,18 @@ export function openSettingsModal(tab) {
             </label>
           </div>
         </div>
+        <div class="settings-section">
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <div>
+              <label class="settings-label" style="margin-bottom:2px">Verbose console logging</label>
+              <div style="font-size:11px;color:var(--text-muted)">Adds detailed log output and reveals diagnostic UI in the sync popover. No data leaves your device.</div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="debug-mode-toggle" ${isDebugMode() ? 'checked' : ''} onchange="setDebugMode(this.checked)">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
       </div>
 
       <div class="settings-group-title">Resources</div>
@@ -149,6 +161,16 @@ export function openSettingsModal(tab) {
           </div>
           <label class="toggle-switch">
             <input type="checkbox" id="ai-ctx-wearables-toggle" ${window.isWearableContextEnabled?.() ? 'checked' : ''} onchange="window.setWearableContextEnabled(this.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:14px">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;color:var(--text-secondary)">Share body regions in Sun &amp; Light context</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Off by default. When on, specific anatomical regions you logged (face, chest, genitals…) are included in chat context and agent slices. Off keeps coverage fraction + preset names but strips the per-region anatomy.</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="ai-ctx-body-regions-toggle" ${window.isBodyRegionsInAIContext?.() ? 'checked' : ''} onchange="window.setBodyRegionsInAIContext(this.checked)">
             <span class="toggle-slider"></span>
           </label>
         </div>
@@ -325,14 +347,8 @@ export function renderPrivacySection() {
         <span class="toggle-slider"></span>
       </label>
     </div>
-    <div style="display:flex;align-items:start;justify-content:space-between;gap:12px;margin-top:8px">
-      <span style="font-size:13px">Verbose console logging<br><span style="font-size:11px;color:var(--text-muted)">Adds detailed log output across the app — useful for debugging or filing issues. No data leaves your device.</span></span>
-      <label class="toggle-switch" style="margin-top:2px">
-        <input type="checkbox" id="debug-mode-toggle" ${isDebugMode() ? 'checked' : ''} onchange="setDebugMode(this.checked)">
-        <span class="toggle-slider"></span>
-      </label>
-    </div>
   </div>
+
   <div class="local-ai-settings" style="margin-top:16px">
     <h4 style="margin:0 0 6px 0;font-size:13px;color:var(--text-primary)">Anonymous Usage Stats</h4>
     <div class="ai-provider-desc" style="margin-bottom:10px">No health data is ever sent. I track cookieless pageviews and outbound clicks on affiliate links so I can tell which integrations actually help users — never which user, what data they were viewing, or any health context.</div>
@@ -344,6 +360,78 @@ export function renderPrivacySection() {
       </label>
     </div>
   </div>`;
+}
+
+function _renderMeteoModeOption(mode, label, desc) {
+  const cur = (typeof window !== 'undefined' && window.getMeteoConfig) ? window.getMeteoConfig().mode : 'auto';
+  const checked = cur === mode;
+  return `<label style="display:flex;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;${checked ? 'background:var(--bg-card);border-color:var(--accent);' : ''}">
+    <input type="radio" name="meteo-mode" value="${mode}" ${checked ? 'checked' : ''} onchange="window._setMeteoMode('${mode}')" style="margin-top:3px">
+    <span>
+      <span style="font-size:13px;font-weight:500;color:var(--text-primary)">${label}</span>
+      <br><span style="font-size:11px;color:var(--text-muted);line-height:1.4">${desc}</span>
+    </span>
+  </label>`;
+}
+
+// Render the Sun Data Source settings block. Lives on the Light & Sun
+// page (called from views.showLight) — moved out of Settings → Privacy
+// in v1.7.x because the URL/bearer/mode fields are feature config, not
+// privacy posture. The `Round location to ~11 km grid` toggle inside is
+// privacy-flavored but stays here for cohesion (one place to configure
+// the data source).
+export function renderSunDataSourceSettings() {
+  const cfg = (typeof window !== 'undefined' && window.getMeteoConfig) ? window.getMeteoConfig() : { mode: 'auto', selfhostUrl: '', selfhostBearer: '', privacyRounding: 0.1 };
+  return `<div class="local-ai-settings" id="sun-data-source-section">
+    <h4 style="margin:0 0 6px 0;font-size:13px;color:var(--text-primary)">☀ Sun data source</h4>
+    <div class="ai-provider-desc" style="margin-bottom:10px">Where the Light &amp; Sun lens fetches UV / ozone / atmosphere data. Lat/lon defaults to your country (no automatic geolocation). Manual entry always works.</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      ${_renderMeteoModeOption('auto', 'Default — best accuracy', 'Real ozone + aerosols from CAMS, clouds + temperature from Open-Meteo, automatically merged. Falls back to Open-Meteo only if CAMS is unreachable. Pick this unless you have a specific reason not to.')}
+      ${_renderMeteoModeOption('open-meteo', 'Open-Meteo only', 'Skip CAMS. Slightly noisier UV math (no real ozone DU), but only one upstream sees your lat/lon. Faster too.')}
+      ${_renderMeteoModeOption('selfhost', 'Self-hosted server', 'You run your own getbased-uvdata box. Lat/lon never leaves your infrastructure. Paste the URL + bearer below.')}
+      ${_renderMeteoModeOption('manual', 'UV meter / manual entry', 'Type the UV index yourself per session — most accurate if you own a UV meter (Solarmeter 6.5R, Hocoma, EMR-Tek). No network calls at all.')}
+    </div>
+    <div id="meteo-selfhost-fields" style="margin-top:10px;${cfg.mode === 'selfhost' ? '' : 'display:none'}">
+      <label style="font-size:12px;color:var(--text-muted)">Server URL</label>
+      <input type="text" class="api-key-input" id="meteo-selfhost-url" value="${escapeAttr(cfg.selfhostUrl || '')}" placeholder="https://meteo.example.com" style="width:100%;margin-top:4px" onchange="window._saveMeteoSelfhost()">
+      <label style="font-size:12px;color:var(--text-muted);margin-top:8px;display:block">Bearer token (optional)</label>
+      <input type="password" class="api-key-input" id="meteo-selfhost-bearer" value="${escapeAttr(cfg.selfhostBearer || '')}" placeholder="••••••••" style="width:100%;margin-top:4px" onchange="window._saveMeteoSelfhost()">
+    </div>
+    <div style="display:flex;align-items:start;justify-content:space-between;gap:12px;margin-top:14px">
+      <span style="font-size:13px">Round location to ~11 km grid before sending<br><span style="font-size:11px;color:var(--text-muted)">Default ON. Stops the data source from seeing your exact address. Disable for slightly sharper UV math.</span></span>
+      <label class="toggle-switch" style="margin-top:2px">
+        <input type="checkbox" id="meteo-privacy-rounding" ${(cfg.privacyRounding ?? 0.1) > 0 ? 'checked' : ''} onchange="window._toggleMeteoRounding(this.checked)">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+  </div>`;
+}
+
+if (typeof window !== 'undefined') {
+  window.renderSunDataSourceSettings = renderSunDataSourceSettings;
+  window._setMeteoMode = (mode) => {
+    if (!window.getMeteoConfig || !window.saveMeteoConfig) return;
+    const cfg = window.getMeteoConfig();
+    cfg.mode = mode;
+    window.saveMeteoConfig(cfg);
+    const fields = document.getElementById('meteo-selfhost-fields');
+    if (fields) fields.style.display = mode === 'selfhost' ? '' : 'none';
+  };
+  window._saveMeteoSelfhost = () => {
+    if (!window.getMeteoConfig || !window.saveMeteoConfig) return;
+    const cfg = window.getMeteoConfig();
+    const url = document.getElementById('meteo-selfhost-url')?.value?.trim() || '';
+    const bearer = document.getElementById('meteo-selfhost-bearer')?.value?.trim() || '';
+    cfg.selfhostUrl = url;
+    cfg.selfhostBearer = bearer;
+    window.saveMeteoConfig(cfg);
+  };
+  window._toggleMeteoRounding = (enabled) => {
+    if (!window.getMeteoConfig || !window.saveMeteoConfig) return;
+    const cfg = window.getMeteoConfig();
+    cfg.privacyRounding = enabled ? 0.1 : 0;
+    window.saveMeteoConfig(cfg);
+  };
 }
 
 export function togglePrivacyConfigure() {

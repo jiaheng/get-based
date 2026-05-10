@@ -186,6 +186,16 @@ export default async function handler(req) {
     return handlePolarTokenRequest(payload, req);
   }
 
+  // ─── CAMS atmosphere relay (getbased-uvdata) ────────────────────
+  // Browser fetches `{meteo: 'cams', latitude, longitude, time}`; we
+  // forward to the maintainer-run getbased-uvdata instance with a
+  // server-injected bearer so the token never reaches the client.
+  // Self-hosters bypass this entirely via the `selfhost` Sun Data
+  // Source mode (URL + bearer entered in Settings → Light & Sun).
+  if (payload.meteo === 'cams') {
+    return handleCamsRelay(payload, req);
+  }
+
   const { url, headers, body, method: upstreamMethod } = payload;
 
   if (!url || !isAllowedUrl(url)) {
@@ -494,6 +504,101 @@ async function handlePolarTokenRequest(payload, req) {
   } catch (e) {
     return new Response(JSON.stringify({ error: 'Polar token endpoint unreachable: ' + e.message }), {
       status: 502, headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
+    });
+  }
+}
+
+// CAMS atmosphere relay → getbased-uvdata (the maintainer-run instance
+// behind UVDATA_UPSTREAM env). The proxy injects the bearer server-side
+// so the token never reaches the browser. Hosted-only path; self-host
+// users go straight via the `selfhost` Sun Data Source mode instead.
+//
+// env:
+//   UVDATA_UPSTREAM — base URL, e.g. https://uvdata.getbased.health
+//   UVDATA_BEARER   — token to send on Authorization header
+async function handleCamsRelay(payload, req) {
+  const upstream = (typeof process !== 'undefined' && process.env?.UVDATA_UPSTREAM)
+    ? process.env.UVDATA_UPSTREAM.replace(/\/+$/, '') : '';
+  if (!upstream) {
+    return new Response(JSON.stringify({
+      error: 'CAMS relay not configured on this deploy. Set UVDATA_UPSTREAM env or use the self-host Sun Data Source mode.',
+    }), {
+      status: 503,
+      headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
+    });
+  }
+  const lat = Number(payload.latitude);
+  const lon = Number(payload.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+    return new Response(JSON.stringify({ error: 'Invalid latitude/longitude' }), {
+      status: 400,
+      headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
+    });
+  }
+  const time = typeof payload.time === 'string' ? payload.time : '';
+  const qs = new URLSearchParams({ latitude: String(lat), longitude: String(lon) });
+  if (time) qs.set('time', time);
+  const url = `${upstream}/uv?${qs.toString()}`;
+  const headers = { 'Accept': 'application/json' };
+  const bearer = (typeof process !== 'undefined' && process.env?.UVDATA_BEARER) ? process.env.UVDATA_BEARER : '';
+  if (bearer) headers['Authorization'] = `Bearer ${bearer}`;
+  try {
+    const res = await fetch(url, { headers });
+    // Cap upstream response so a misbehaving / compromised CAMS relay
+    // can't blow up the function's memory. Real CAMS UV payloads sit
+    // around 5-10 KB; 256 KB leaves generous headroom while bounding
+    // the worst case. Greptile PR #175 review caught this.
+    const MAX_UPSTREAM_BYTES = 256 * 1024;
+    const cl = parseInt(res.headers.get('content-length') || '0', 10);
+    if (Number.isFinite(cl) && cl > MAX_UPSTREAM_BYTES) {
+      return new Response(JSON.stringify({ error: 'CAMS response exceeds size cap' }), {
+        status: 502,
+        headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
+      });
+    }
+    // Even when Content-Length is absent or lying, read with a running
+    // byte counter and bail past the cap.
+    const reader = res.body?.getReader();
+    if (!reader) {
+      return new Response(JSON.stringify({ error: 'CAMS response had no body' }), {
+        status: 502,
+        headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
+      });
+    }
+    const chunks = [];
+    let total = 0;
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_UPSTREAM_BYTES) {
+        try { await reader.cancel(); } catch (_) {}
+        return new Response(JSON.stringify({ error: 'CAMS response exceeds size cap' }), {
+          status: 502,
+          headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
+        });
+      }
+      chunks.push(value);
+    }
+    const body = new TextDecoder().decode(
+      chunks.length === 1 ? chunks[0] : (() => {
+        const out = new Uint8Array(total);
+        let off = 0;
+        for (const c of chunks) { out.set(c, off); off += c.byteLength; }
+        return out;
+      })()
+    );
+    return new Response(body, {
+      status: res.status,
+      headers: {
+        ...corsHeaders(req),
+        'Content-Type': res.headers.get('content-type') || 'application/json',
+      },
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: 'CAMS upstream unreachable: ' + e.message }), {
+      status: 502,
+      headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
     });
   }
 }

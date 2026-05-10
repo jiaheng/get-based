@@ -26,6 +26,25 @@ import { ensureSNPTable, ensureHaplogroupTable } from './dna.js';
 import './wearables.js';
 import { initWearableScheduler, handleOAuthCallbackOnLoad, loadWearableRuntimeConfig } from './wearables-connect.js';
 import { migrateBiometricsToManual, hasManualData } from './wearables-manual.js';
+import './sun-uvdata.js';
+import './sun-spectrum.js';
+import './sun.js';
+import './sun-ai-analysis.js';
+import './sun-context.js';
+import './light-devices.js';
+import './light-device-ai-analysis.js';
+import './light-tools.js';
+import './light-tools-ai-analysis.js';
+import './light-env.js';
+import './light-env-ai-analysis.js';
+import './light-screen-ai-analysis.js';
+import './light-audit-ai-analysis.js';
+import './light-burden-ai-analysis.js';
+import './light-channels-ai-analysis.js';
+import './sun-defaults.js';
+import './sun-onboarding-ai.js';
+import './sun-correlations.js';
+import './light-today-ai.js';
 import './export.js';
 import './chat.js';
 import './image-utils.js';
@@ -35,12 +54,14 @@ import './cashu-wallet.js';
 import './nostr-discovery.js';
 import './feedback.js';
 import './tour.js';
+import './touch-tooltip.js';
 import { maybeShowChangelog } from './changelog.js';
 import { buildSidebar, renderProfileDropdown } from './nav.js';
 import './client-list.js';
 import './views.js';
 import { initEncryption, initBroadcastChannel, initFolderBackup, encryptedGetItem, maybeShowBackupNudge } from './crypto.js';
 import { initSync, renderSyncIndicator } from './sync.js';
+import { initMeteoConfigCache } from './sun-uvdata.js';
 
 // ═══════════════════════════════════════════════
 // INIT
@@ -48,6 +69,11 @@ import { initSync, renderSyncIndicator } from './sync.js';
 document.addEventListener("DOMContentLoaded", async () => {
   // Initialize encryption (shows passphrase modal if enabled, blocks until unlocked)
   await initEncryption();
+  // Decrypt the meteo config (selfhostBearer is sensitive at-rest — see
+  // sun-uvdata.js header note). Run AFTER initEncryption so the session
+  // key is available to encryptedGetItem; the cache is then sync-readable
+  // by getMeteoConfig() callers (sun-context.js, settings.js, providers).
+  await initMeteoConfigCache();
   // Initialize cross-tab sync
   initBroadcastChannel();
   // Initialize folder backup (restore persisted handle, check permission)
@@ -68,7 +94,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     setActiveProfileId('default');
     const oldImported = localStorage.getItem('labcharts-imported');
     if (oldImported) {
-      localStorage.setItem(profileStorageKey('default', 'imported'), oldImported);
+      // Route through encryptedSetItem so the destination key
+      // (`labcharts-default-imported`) lands in IndexedDB rather than
+      // localStorage. Otherwise this v1→v2 migration could fail when
+      // the legacy blob is large enough to exceed the localStorage cap
+      // even though it just barely fit at the old key.
+      const { encryptedSetItem } = await import('./crypto.js');
+      await encryptedSetItem(profileStorageKey('default', 'imported'), oldImported);
       localStorage.removeItem('labcharts-imported');
     }
     const oldUnits = localStorage.getItem('labcharts-units');
@@ -87,6 +119,35 @@ document.addEventListener("DOMContentLoaded", async () => {
   state.currentProfile = getActiveProfileId();
   const savedImported = await encryptedGetItem(profileStorageKey(state.currentProfile, 'imported'));
   if (savedImported) { try { state.importedData = JSON.parse(savedImported); if (!state.importedData.notes) state.importedData.notes = []; migrateProfileData(state.importedData); } catch(e) {} }
+
+  // Self-heal sun-session doses + safety after engine math fixes. The
+  // engineVersion stamp on each session lets us detect data computed
+  // under an older (buggy) version and re-run hydrate. Fires async so
+  // it doesn't block init; one network call per stale session,
+  // serialized inside rehydrateStaleSessions. No-op when everything is
+  // already stamped at the current version.
+  if (typeof window.rehydrateStaleSessions === 'function') {
+    setTimeout(() => {
+      window.rehydrateStaleSessions().then(r => {
+        if (r?.rehydrated) {
+          // Surface in debug console only — not worth a user-facing
+          // notification for a silent self-heal.
+          if (window.console && console.log) console.log('[sun] self-healed', r.rehydrated, 'session(s) under v' + (window.SUN_ENGINE_VERSION || '?'));
+        }
+      }).catch(() => {});
+    }, 1500); // give the engine modules time to settle
+  }
+
+  // Round 7: backfill channelGroups / modes / coupling onto user devices
+  // that pre-date the schema additions. Without this, existing Maxi UVB
+  // / Trinity device records have no `modes` array, so the session-log
+  // dialog can't render the mode picker for them. Idempotent — re-runs
+  // are no-ops once devices carry the fields.
+  if (typeof window.hydrateDevicesFromPresets === 'function') {
+    window.hydrateDevicesFromPresets().then(dirty => {
+      if (dirty && window.console && console.log) console.log('[light] hydrated user devices from preset library');
+    }).catch(() => {});
+  }
 
   // Health Metrics unification (Commit 1/5): walk legacy importedData.biometrics
   // into the wearables IndexedDB with source: 'manual'. Idempotent — tagged in
@@ -338,6 +399,15 @@ document.addEventListener("keydown", e => {
     if (settingsOverlay && settingsOverlay.classList.contains("show")) { window.closeSettingsModal(); return; }
     const modalOverlay = document.getElementById("modal-overlay");
     if (modalOverlay && modalOverlay.classList.contains("show")) { window.closeModal(); return; }
+    // Generic fallback: any dynamically-injected `.modal-overlay.show` (sun
+    // sessions, light tools, conditions inspect, etc.) gets dismissed by
+    // removing its top-most overlay. Skip overlays with explicit close
+    // wiring above. Last resort so Escape never silently no-ops.
+    const dynamicOverlays = document.querySelectorAll('.modal-overlay.show');
+    if (dynamicOverlays.length > 0) {
+      const top = dynamicOverlays[dynamicOverlays.length - 1];
+      if (!top.id) { top.remove(); return; } // only remove anonymous (id-less) overlays we created on the fly
+    }
     return;
   }
   // Focus trap for open modals. Sync overlays use `.confirm-overlay` not

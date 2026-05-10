@@ -5,7 +5,7 @@ import { getStatus, formatValue, showNotification, showConfirmDialog, getTrend }
 import { getActiveData, filterDatesByRange, getEffectiveRange, getAllFlaggedMarkers, getLatestValueIndex, saveImportedData } from './data.js';
 import { getProfiles, profileStorageKey, createProfile, updateProfileMeta, loadProfile, saveProfiles, migrateProfileData } from './profile.js';
 import { getBloodDrawPhases } from './cycle.js';
-import { encryptedGetItem, encryptedSetItem, getEncryptionEnabled } from './crypto.js';
+import { encryptedGetItem, encryptedSetItem, getEncryptionEnabled, encryptedRemoveItem } from './crypto.js';
 
 // ═══════════════════════════════════════════════
 // PDF REPORT EXPORT
@@ -439,7 +439,22 @@ export async function exportClientJSON(profileId, includeChat = false) {
     // Evolu sync uses (wearableConnections wholesale exclude).
     wearableSummary: data.wearableSummary || null,
     wearableCardOrder: data.wearableCardOrder || null,
-    wearablePrimaryOverride: data.wearablePrimaryOverride || null
+    wearablePrimaryOverride: data.wearablePrimaryOverride || null,
+    // Light & Sun stack — earlier export schema predated this lens and
+    // silently dropped everything on export. importDataJSON learned to
+    // restore these fields (v1.6.x); the export side has to ship them
+    // for the round-trip to actually work.
+    sunSessions: data.sunSessions || [],
+    deviceSessions: data.deviceSessions || [],
+    lightDevices: data.lightDevices || [],
+    lightAudits: data.lightAudits || [],
+    lightMeasurements: data.lightMeasurements || [],
+    lightEnvironment: data.lightEnvironment || null,
+    sunDefaults: data.sunDefaults || null,
+    sunCorrelations: data.sunCorrelations || null,
+    lifelightProfile: data.lifelightProfile || null,
+    lightDailyVerdicts: data.lightDailyVerdicts || null,
+    channelMixAI: data.channelMixAI || null
   };
   if (includeChat) {
     const chat = await _exportChatData(profileId);
@@ -503,10 +518,16 @@ export async function exportAllDataJSON() {
 }
 
 export function importDataJSON(file) {
-  const reader = new FileReader();
-  reader.onload = async (e) => {
-    try {
-      const json = JSON.parse(e.target.result);
+  // Returns a Promise that resolves when the FileReader pipeline finishes
+  // (success OR error). Existing fire-and-forget callers (`importDataJSON(file)`)
+  // ignore the return value and behave identically; the demo loader awaits
+  // it to compute fingerprints against the imported state.
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onerror = () => resolve();
+    reader.onload = async (e) => {
+      try {
+        const json = JSON.parse(e.target.result);
       // Database bundle — multi-profile import
       if (json.type === 'database' && Array.isArray(json.profiles)) {
         await _importDatabaseBundle(json);
@@ -531,8 +552,23 @@ export function importDataJSON(file) {
       for (const entry of json.entries) {
         if (!entry.date || !entry.markers) continue;
         if (!state.importedData.entries) state.importedData.entries = [];
-        state.importedData.entries = state.importedData.entries.filter(ex => ex.date !== entry.date);
-        state.importedData.entries.push(entry);
+        // Earlier draft did `filter(ex => ex.date !== entry.date)` — same-
+        // date entries clobbered each other. The demos legitimately ship
+        // two entries per date (comprehensive panel + specialty add-on
+        // like an OmegaQuant fatty-acid run on the same draw day) and the
+        // second entry was silently dropped, losing every fatty-acid /
+        // specialty marker on import. Merge markers + markerSources
+        // instead so all data lands; later entries win on key conflicts.
+        const existing = state.importedData.entries.find(ex => ex.date === entry.date);
+        if (existing) {
+          Object.assign(existing.markers || (existing.markers = {}), entry.markers);
+          if (entry.markerSources) {
+            Object.assign(existing.markerSources || (existing.markerSources = {}), entry.markerSources);
+          }
+          if (entry.file && !existing.file) existing.file = entry.file;
+        } else {
+          state.importedData.entries.push(entry);
+        }
         count++;
       }
       if (count === 0 && (!json.notes || json.notes.length === 0)) { showNotification('No valid entries found in JSON', 'error'); return; }
@@ -705,6 +741,71 @@ export function importDataJSON(file) {
         if (!state.importedData.manualValues) state.importedData.manualValues = {};
         Object.assign(state.importedData.manualValues, json.manualValues);
       }
+      // Import Light & Sun stack (added v1.6.x; was missing from importDataJSON
+      // entirely so demo + JSON imports silently dropped sun sessions, devices,
+      // rooms, audits, measurements, sunDefaults, lightDailyVerdicts). Merge
+      // semantics chosen to match other arrays here: id-keyed dedup for arrays,
+      // first-write-wins for singletons so an in-progress profile keeps its
+      // own setup over a re-import that lacks it.
+      function _mergeArrayById(field) {
+        if (!Array.isArray(json[field])) return;
+        if (!Array.isArray(state.importedData[field])) state.importedData[field] = [];
+        const known = new Set(state.importedData[field].map(x => x?.id).filter(Boolean));
+        for (const item of json[field]) {
+          if (!item || typeof item !== 'object') continue;
+          if (item.id && known.has(item.id)) continue;
+          state.importedData[field].push(item);
+          if (item.id) known.add(item.id);
+        }
+      }
+      _mergeArrayById('sunSessions');
+      _mergeArrayById('deviceSessions');
+      _mergeArrayById('lightDevices');
+      _mergeArrayById('lightAudits');
+      _mergeArrayById('lightMeasurements');
+      // lightEnvironment is an object with `rooms` + `screens` + `burdenAI`.
+      // Merge rooms/screens by id like the arrays above; burdenAI is a
+      // singleton AI verdict — replace.
+      if (json.lightEnvironment && typeof json.lightEnvironment === 'object') {
+        if (!state.importedData.lightEnvironment) state.importedData.lightEnvironment = { rooms: [], screens: [] };
+        for (const sub of ['rooms', 'screens']) {
+          if (!Array.isArray(json.lightEnvironment[sub])) continue;
+          if (!Array.isArray(state.importedData.lightEnvironment[sub])) state.importedData.lightEnvironment[sub] = [];
+          const known = new Set(state.importedData.lightEnvironment[sub].map(x => x?.id).filter(Boolean));
+          for (const item of json.lightEnvironment[sub]) {
+            if (!item || typeof item !== 'object') continue;
+            if (item.id && known.has(item.id)) continue;
+            state.importedData.lightEnvironment[sub].push(item);
+            if (item.id) known.add(item.id);
+          }
+        }
+        if (json.lightEnvironment.burdenAI) state.importedData.lightEnvironment.burdenAI = json.lightEnvironment.burdenAI;
+      }
+      // Singletons — first-write-wins; re-importing a demo over an in-progress
+      // profile keeps the user's own Light setup answers + correlations.
+      for (const sk of ['sunDefaults', 'sunCorrelations', 'lifelightProfile']) {
+        if (json[sk] && typeof json[sk] === 'object' && !state.importedData[sk]) {
+          state.importedData[sk] = json[sk];
+        }
+      }
+      // lightDailyVerdicts is a map keyed by ISO date — merge per-key.
+      if (json.lightDailyVerdicts && typeof json.lightDailyVerdicts === 'object') {
+        if (!state.importedData.lightDailyVerdicts) state.importedData.lightDailyVerdicts = {};
+        for (const [date, verdict] of Object.entries(json.lightDailyVerdicts)) {
+          if (!state.importedData.lightDailyVerdicts[date]) {
+            state.importedData.lightDailyVerdicts[date] = verdict;
+          }
+        }
+      }
+      // channelMixAI is the singleton AI verdict for "Your light, by what
+      // it does". Replace-on-import (matches lightEnvironment.burdenAI).
+      // Without this branch, a demo / round-trip import silently dropped
+      // the prefilled verdict — the channel-mix render then saw idle
+      // status and auto-fired a real provider call against a freshly
+      // loaded demo, defeating the no-API-on-demo guarantee.
+      if (json.channelMixAI && typeof json.channelMixAI === 'object') {
+        state.importedData.channelMixAI = json.channelMixAI;
+      }
       // Import change history (merge by field+date, imported snapshot wins on conflict)
       if (Array.isArray(json.changeHistory)) {
         if (!state.importedData.changeHistory) state.importedData.changeHistory = [];
@@ -778,16 +879,25 @@ export function importDataJSON(file) {
         await _importChatData(state.currentProfile, json.chat);
         if (window.loadChatThreads) window.loadChatThreads();
       }
+      // Demo-load completion: clear the loading sentinel (dashboard
+      // empty-state renderer keys off this flag while data is en route).
+      if (window._demoLoadingProfileId === state.currentProfile) {
+        delete window._demoLoadingProfileId;
+      }
       window.buildSidebar();
       window.updateHeaderDates();
       window.navigate('dashboard');
       const profileMsg = json.profile?.name ? ` into "${json.profile.name}"` : '';
       showNotification(`Imported ${count} date entr${count === 1 ? 'y' : 'ies'}${profileMsg}`, 'success');
     } catch (err) {
+      delete window._demoLoadingProfileId;
       showNotification('Error parsing JSON: ' + err.message, 'error');
+    } finally {
+      resolve();
     }
   };
   reader.readAsText(file);
+  });
 }
 
 async function _importDatabaseBundle(json) {
@@ -956,7 +1066,9 @@ export function clearAllData() {
     // Wipe storage for every profile
     for (const p of profiles) {
       const id = p.id;
-      localStorage.removeItem(profileStorageKey(id, 'imported'));
+      // The `-imported` blob lives in IndexedDB now → encryptedRemoveItem
+      // hits both backends so the IDB residue is also wiped.
+      await encryptedRemoveItem(profileStorageKey(id, 'imported'));
       localStorage.removeItem(profileStorageKey(id, 'units'));
       localStorage.removeItem(profileStorageKey(id, 'suppOverlay'));
       localStorage.removeItem(profileStorageKey(id, 'noteOverlay'));
@@ -1031,16 +1143,98 @@ export async function loadDemoData(sex = 'male') {
     const allProfiles = getProfiles();
     const emptyDefault = allProfiles.find(p => p.id === 'default');
     if (emptyDefault) {
-      const defaultData = JSON.parse(localStorage.getItem('labcharts-default-imported') || '{}');
+      // `labcharts-default-imported` matches the `*-imported` suffix and now
+      // lives in IndexedDB. encryptedGetItem migrates from localStorage on
+      // first read, so this works whether the value is in either place.
+      const defaultRaw = await encryptedGetItem('labcharts-default-imported');
+      const defaultData = defaultRaw ? JSON.parse(defaultRaw) : {};
       if (!defaultData.entries || defaultData.entries.length === 0) {
         await saveProfileList(allProfiles.filter(p => p.id !== 'default'));
-        localStorage.removeItem('labcharts-default-imported');
+        await encryptedRemoveItem('labcharts-default-imported');
       }
     }
-    switchProfile(profileId);
+    // Mark the loading window so the dashboard renderer shows a
+    // "Loading demo data…" placeholder instead of the empty Welcome
+    // hero during the 2-3s gap between switchProfile and
+    // importDataJSON-finish. Cleared by the import completion path.
+    window._demoLoadingProfileId = profileId;
+    // Await switchProfile fully — it's now async, and racing it against
+    // importDataJSON used to leave state.currentProfile pointing at the
+    // OLD profile when FileReader fired, causing the demo to land in
+    // the wrong profile and the dashboard to render stale until the
+    // user manually refreshed.
+    await switchProfile(profileId);
     localStorage.setItem(profileStorageKey(profileId, 'onboarded'), 'profile-set');
+    // Prefill caches BEFORE the import runs. importDataJSON's onload
+    // ends with `navigate('dashboard')`, which immediately fires
+    // loadFocusCard + loadContextHealthDots. If we wrote these caches
+    // AFTER the import, those renders would beat us to the punch and
+    // fire 9+1 AI calls before our prefill landed. Both writes are
+    // demo-only by code path (regular importDataJSON does not touch
+    // either localStorage cache).
+    let demoJson = null;
+    try { demoJson = JSON.parse(await blob.text()); } catch (_) {}
+    if (demoJson?.focusCard?.text) {
+      // Focus card cache ships without a fingerprint — loadFocusCard
+      // treats that as a hand-authored prefill and never auto-refreshes
+      // against a live provider. Manual ↻ clears the cache.
+      localStorage.setItem(profileStorageKey(profileId, 'focusCard'),
+        JSON.stringify({ text: demoJson.focusCard.text }));
+    }
+    if (demoJson?.contextHealth?.dots) {
+      try {
+        const { getCardFingerprint } = await import('./context-cards.js');
+        // Compute fingerprints against the demo JSON directly — passing
+        // an explicit ctx so getCardFingerprint doesn't read the live
+        // state (which won't be populated until importDataJSON's onload
+        // runs). The fingerprint values match what loadContextHealthDots
+        // will compute post-import (same data, same sex/dob), so the
+        // standard fp-match path renders cached without firing AI.
+        //
+        // CRITICAL: importDataJSON applies two transforms before the
+        // dashboard renders, both of which influence the labPart hash:
+        //   (1) merge same-date entries (commit 42415b1 — demos ship two
+        //       entries per draw day for comprehensive + specialty
+        //       add-on panels)
+        //   (2) migrateProfileData (e.g. hematocrit fraction → percent
+        //       per v1.6.1 migration)
+        // Apply both to a deep-cloned demoJson here, otherwise every
+        // fingerprint mismatches and all 9 dots fall through to stale
+        // AI-fire on first dashboard render. Deep clone via
+        // structuredClone keeps the original demoJson reference clean
+        // for any downstream usage (currently none, but defensive).
+        const _ctxData = structuredClone(demoJson);
+        const _entryByDate = new Map();
+        for (const e of (_ctxData.entries || [])) {
+          const existing = _entryByDate.get(e.date);
+          if (existing) {
+            Object.assign(existing.markers || (existing.markers = {}), e.markers || {});
+          } else {
+            _entryByDate.set(e.date, e);
+          }
+        }
+        _ctxData.entries = Array.from(_entryByDate.values());
+        try { migrateProfileData(_ctxData); } catch (_) {}
+        const ctx = {
+          importedData: _ctxData,
+          profileSex: sex,
+          profileDob: dob,
+        };
+        const cacheKey = profileStorageKey(profileId, 'contextHealth');
+        const dots = {};
+        const summaries = {};
+        const fingerprints = {};
+        for (const k of Object.keys(demoJson.contextHealth.dots)) {
+          dots[k] = demoJson.contextHealth.dots[k];
+          summaries[k] = demoJson.contextHealth.summaries?.[k] || '';
+          try { fingerprints[k] = getCardFingerprint(k, ctx); } catch (_) {}
+        }
+        localStorage.setItem(cacheKey, JSON.stringify({ dots, summaries, fingerprints }));
+      } catch (_) { /* prefill is best-effort */ }
+    }
     importDataJSON(new File([blob], file, { type: 'application/json' }));
   } catch (err) {
+    delete window._demoLoadingProfileId;
     showNotification('Could not load demo data: ' + err.message, 'error');
   }
 }

@@ -4,7 +4,7 @@ import { state } from './state.js';
 import { MARKER_SCHEMA, SPECIALTY_MARKER_DEFS } from './schema.js';
 import { COUNTRY_LATITUDES, LATITUDE_BANDS } from './constants.js';
 import { showNotification } from './utils.js';
-import { encryptedSetItem, encryptedGetItem, getEncryptionEnabled } from './crypto.js';
+import { encryptedSetItem, encryptedGetItem, getEncryptionEnabled, encryptedRemoveItem } from './crypto.js';
 
 // ═══════════════════════════════════════════════
 // PROFILE MANAGEMENT
@@ -273,6 +273,28 @@ export function migrateProfileData(data) {
   if (data.markerNotes === undefined) data.markerNotes = {};
   if (data.changeHistory === undefined) data.changeHistory = [];
   if (data.biometrics === undefined) data.biometrics = null;
+  // Light lens (v1.7+): sun sessions, light devices, light environment, on-device measurements
+  if (data.sunSessions === undefined) data.sunSessions = [];
+  if (data.deviceSessions === undefined) data.deviceSessions = [];
+  if (data.lightDevices === undefined) data.lightDevices = [];
+  if (data.lightEnvironment === undefined) data.lightEnvironment = null;
+  if (data.lightMeasurements === undefined) data.lightMeasurements = [];
+  if (data.lightAudits === undefined) data.lightAudits = [];
+  if (data.sunCorrelations === undefined) data.sunCorrelations = null;
+  if (data.lifelightProfile === undefined) data.lifelightProfile = null;
+  if (data.sunDefaults === undefined) data.sunDefaults = null;
+  // Migration — sunDefaults.location → sunDefaults.coords. Earlier demo
+  // imports + a brief window of the v1.6.55 demo upgrade wrote the
+  // location under `.location`, but getSunCoords() (sun.js:2329) reads
+  // `.coords`. Self-heal so the conditions strip + session start dialog
+  // see the location without a re-import.
+  if (data.sunDefaults && data.sunDefaults.location && !data.sunDefaults.coords) {
+    const { lat, lon, label } = data.sunDefaults.location;
+    if (Number.isFinite(lat) && Number.isFinite(lon)) {
+      data.sunDefaults.coords = { lat, lon, source: 'profile-precise', ...(label ? { label } : {}) };
+    }
+    delete data.sunDefaults.location;
+  }
   return data;
 }
 
@@ -280,7 +302,7 @@ export async function loadProfile(profileId) {
   state.currentProfile = profileId;
   setActiveProfileId(profileId);
   const savedImported = await encryptedGetItem(profileStorageKey(profileId, 'imported'));
-  const defaultData = { entries: [], notes: [], supplements: [], healthGoals: [], diagnoses: null, diet: null, exercise: null, sleepRest: null, lightCircadian: null, stress: null, loveLife: null, environment: null, interpretiveLens: '', contextNotes: '', menstrualCycle: null, emfAssessment: null, customMarkers: {}, changeHistory: [], genetics: null, biometrics: null, manualValues: {} };
+  const defaultData = { entries: [], notes: [], supplements: [], healthGoals: [], diagnoses: null, diet: null, exercise: null, sleepRest: null, lightCircadian: null, stress: null, loveLife: null, environment: null, interpretiveLens: '', contextNotes: '', menstrualCycle: null, emfAssessment: null, customMarkers: {}, changeHistory: [], genetics: null, biometrics: null, manualValues: {}, sunSessions: [], deviceSessions: [], lightDevices: [], lightEnvironment: null, lightMeasurements: [], lightAudits: [], sunCorrelations: null, lifelightProfile: null, sunDefaults: null };
   state.importedData = savedImported ? (function() {
     try {
       const d = JSON.parse(savedImported);
@@ -291,9 +313,22 @@ export async function loadProfile(profileId) {
       // Don't silently substitute defaults — preserve the corrupted bytes so
       // the user can recover (or we can debug). Same key suffix every time
       // so a second corruption doesn't shadow the first recoverable copy.
+      // Route through IDB when the blob is large (the very condition that
+      // commonly triggers the corruption); fall back to localStorage otherwise.
+      // Fire-and-forget — the IIFE this catch lives in is sync, so we kick
+      // the IDB write off via Promise chain rather than awaiting it here.
       try {
         const corruptKey = profileStorageKey(profileId, 'imported-corrupt');
-        if (!localStorage.getItem(corruptKey)) localStorage.setItem(corruptKey, savedImported);
+        if (!localStorage.getItem(corruptKey)) {
+          if (savedImported.length < 4_000_000) {
+            try { localStorage.setItem(corruptKey, savedImported); }
+            catch { /* fall through to IDB */ }
+          }
+          import('./blob-storage.js').then(async ({ setBlob, getBlob }) => {
+            const existing = await getBlob(corruptKey).catch(() => null);
+            if (!existing) await setBlob(corruptKey, savedImported);
+          }).catch(() => {});
+        }
       } catch {}
       // Surface to the user via the global notification system if available;
       // fall back to console so headless paths still log it.
@@ -410,10 +445,12 @@ export function touchProfileTimestamp(profileId) {
 export function deleteProfile(profileId, onComplete) {
   const profiles = getProfiles();
   if (profiles.length <= 1) { showNotification("Cannot delete the last profile", "error"); return; }
-  window.showConfirmDialog('Delete this profile and all its data? This cannot be undone.', () => {
+  window.showConfirmDialog('Delete this profile and all its data? This cannot be undone.', async () => {
     const updated = profiles.filter(p => p.id !== profileId);
     saveProfiles(updated);
-    localStorage.removeItem(profileStorageKey(profileId, 'imported'));
+    // The `-imported` blob lives in IndexedDB now → encryptedRemoveItem
+    // hits both backends so the IDB residue is also wiped.
+    await encryptedRemoveItem(profileStorageKey(profileId, 'imported'));
     localStorage.removeItem(profileStorageKey(profileId, 'units'));
     localStorage.removeItem(profileStorageKey(profileId, 'suppOverlay'));
     localStorage.removeItem(profileStorageKey(profileId, 'noteOverlay'));
@@ -460,12 +497,25 @@ export function deleteProfile(profileId, onComplete) {
   });
 }
 
-export function switchProfile(profileId) {
+export async function switchProfile(profileId) {
   if (profileId === state.currentProfile) return;
-  loadProfile(profileId);
+  // loadProfile is async (encryptedGetItem awaits IDB / OPFS). Earlier
+  // draft fired-and-forgot it, leaving switchProfile resolving before
+  // state.importedData was actually populated — callers like loadDemoData
+  // could then race the import against the still-running profile load
+  // and end up with the demo data saved to the WRONG profile id, or
+  // overwritten when the (delayed) loadProfile finally read the empty
+  // localStorage row for the new profile.
+  await loadProfile(profileId);
   const profiles = getProfiles();
   const p = profiles.find(p => p.id === profileId);
   showNotification(`Switched to ${p ? p.name : 'profile'}`, 'info');
+  // Modules with per-profile module-singleton state (sun.js region map cache,
+  // overlay cache, tick counters, in-flight rehydrate flag) listen for this
+  // event so their caches don't bleed across profiles after a switch.
+  if (typeof window !== 'undefined' && typeof window.CustomEvent === 'function') {
+    try { window.dispatchEvent(new CustomEvent('labcharts-profile-switched', { detail: { profileId } })); } catch (_) {}
+  }
   // Push updated context to messenger gateway so bots see the new profile
   import('./sync.js').then(m => m.pushContextToGateway()).catch(() => {});
 }

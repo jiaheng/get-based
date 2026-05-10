@@ -37,6 +37,10 @@ export function collectWearableOverrides(env) {
 }
 
 const PORT = parseInt(process.argv[2], 10) || 8000;
+// Bind address. Defaults to 127.0.0.1 (loopback only) so the dev server
+// stays off the LAN unless explicitly opted in. Set HOST=0.0.0.0 to expose
+// it to the local network — useful for testing on a phone over Wi-Fi.
+const HOST = process.env.HOST || '127.0.0.1';
 const __filename = fileURLToPath(import.meta.url);
 const ROOT = path.dirname(__filename);
 
@@ -374,6 +378,11 @@ function serveFile(res, filePath) {
       'Content-Type': MIME[ext] || 'application/octet-stream',
       'Cross-Origin-Opener-Policy': 'same-origin',
       'Cross-Origin-Embedder-Policy': 'credentialless',
+      // Dev-only — phones over Tailscale otherwise hit the PWA service
+      // worker cache and never see code changes until the SW updates on
+      // its own schedule. Forcing no-store makes every reload pick up
+      // the freshest JS/CSS/HTML.
+      'Cache-Control': 'no-store, must-revalidate',
     });
     res.end(data);
   });
@@ -405,6 +414,32 @@ function isSameOrigin(req) {
   return false;
 }
 
+// Loopback check on the actual TCP socket — the only authentication that
+// can't be forged by a LAN peer setting `Origin: http://localhost:PORT`.
+// Used as a hard gate in front of /api/* when HOST=0.0.0.0 (phone testing).
+function _isLoopbackSocket(req) {
+  const ra = req.socket?.remoteAddress || '';
+  // Node reports IPv4 via "::ffff:127.0.0.1" on dual-stack listeners.
+  return ra === '127.0.0.1' || ra === '::1' || ra === '::ffff:127.0.0.1';
+}
+
+// Canonical same-origin check using the request's own Host header.
+// A browser only sets Origin equal to Host on same-page fetches; a
+// cross-site request always carries the requester's origin instead.
+// So Origin === scheme://Host means the request was issued by the same
+// page the dev server is hosting — exactly the meaning of "same-origin"
+// for security purposes. Used as an escape hatch for tailscale-served
+// phone tabs where the host the user typed isn't in the static
+// ALLOWED_ORIGINS allowlist.
+function _isHostOriginMatch(req) {
+  const host = req.headers.host;
+  const origin = req.headers.origin;
+  if (!host || !origin) return false;
+  // Two valid forms: http://<host> and https://<host>. tailscale serve
+  // terminates TLS so phone tabs use https; localhost dev uses http.
+  return origin === `http://${host}` || origin === `https://${host}`;
+}
+
 // Reflect the request's allowlisted origin instead of emitting `*`. Mismatch
 // between `isSameOrigin` (allowlist) and the response header (wildcard) is
 // only safe today because the guard runs first; reflecting keeps the two
@@ -422,8 +457,45 @@ const server = http.createServer((req, res) => {
 
   // Same-origin guard for proxy/API endpoints. Blocks SSRF via forged
   // Origin/Referer from browser tabs on malicious sites. See #119.
-  if ((pathname.startsWith('/api/') || pathname === '/proxy') && !isSameOrigin(req)) {
+  //
+  // Two escape hatches:
+  // - /api/commit always passes (read-only, returns public git HEAD sha;
+  //   the SW relies on it to derive a per-commit cache key).
+  // - Cross-origin Origins still pass IF they exactly match the request's
+  //   own `Host` header. This is the canonical same-origin definition: the
+  //   browser only sets Origin = Host on a same-page fetch, never on a
+  //   cross-site request. tailscale-served phone tabs naturally pass —
+  //   Host = `mickey.tailnet.ts.net:port`, Origin = `http(s)://mickey.tailnet.ts.net:port`.
+  //   A malicious site can't forge this: when evil.com fetches our /api/proxy,
+  //   the browser sends Host = `localhost:8000` (the target) and Origin =
+  //   `https://evil.com` (the requester) — mismatch.
+  if ((pathname.startsWith('/api/') || pathname === '/proxy')
+      && pathname !== '/api/commit'
+      && !isSameOrigin(req)
+      && !_isHostOriginMatch(req)) {
     res.writeHead(403); res.end('Forbidden'); return;
+  }
+  // Hard loopback gate when bound to 0.0.0.0 (LAN-exposed for phone
+  // testing). Origin/Referer headers are forgeable by any LAN peer; the
+  // TCP socket address is not. The /api/* endpoints (deploy-catalog,
+  // git-status, proxy, fetch-page, check-url) write to disk / fetch
+  // arbitrary URLs — none are needed for phone-testing the app's UX,
+  // so refusing them outright on LAN is the safe default.
+  //
+  // EXCEPT /api/commit — read-only, returns the git HEAD sha + branch
+  // (data already public in any git clone of the repo). The service
+  // worker uses it to derive a per-commit cache key (`labcharts-v…-sha8`),
+  // and without it the SW falls back to a sha-less key that NEVER
+  // changes across commits on LAN-tested devices. That bug pinned phones
+  // to whatever bundle they first cached, so phone testing silently
+  // missed every code change after the initial visit. Allowlist it
+  // explicitly here.
+  const LAN_SAFE_API_PATHS = new Set(['/api/commit']);
+  if (HOST === '0.0.0.0'
+      && (pathname.startsWith('/api/') || pathname === '/proxy')
+      && !LAN_SAFE_API_PATHS.has(pathname)
+      && !_isLoopbackSocket(req)) {
+    res.writeHead(403); res.end('Forbidden — /api/* disabled for non-loopback peers when HOST=0.0.0.0'); return;
   }
 
   // API: return current git HEAD + branch so Settings → Display shows the
@@ -845,6 +917,64 @@ const server = http.createServer((req, res) => {
           return;
         }
 
+        // CAMS atmosphere relay → getbased-uvdata. Mirrors the
+        // handleCamsRelay block in api/proxy.js so localhost dev can
+        // exercise the same flow against a real upstream. Reads
+        // UVDATA_UPSTREAM + UVDATA_BEARER from process.env (typically
+        // .env.local sourced before `node dev-server.js`).
+        if (payload.meteo === 'cams') {
+          const upstream = (process.env.UVDATA_UPSTREAM || '').replace(/\/+$/, '');
+          if (!upstream) {
+            res.writeHead(503, { 'Content-Type': 'application/json', ...corsHeaders(req) });
+            res.end(JSON.stringify({
+              error: 'CAMS relay not configured locally. Set UVDATA_UPSTREAM (and UVDATA_BEARER) in your shell env before `node dev-server.js`.',
+            }));
+            return;
+          }
+          const lat = Number(payload.latitude);
+          const lon = Number(payload.longitude);
+          if (!Number.isFinite(lat) || !Number.isFinite(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+            res.writeHead(400, { 'Content-Type': 'application/json', ...corsHeaders(req) });
+            res.end(JSON.stringify({ error: 'Invalid latitude/longitude' }));
+            return;
+          }
+          const time = typeof payload.time === 'string' ? payload.time : '';
+          const qs = new URLSearchParams({ latitude: String(lat), longitude: String(lon) });
+          if (time) qs.set('time', time);
+          const upstreamUrl = `${upstream}/uv?${qs.toString()}`;
+          const upstreamHeaders = { 'Accept': 'application/json' };
+          if (process.env.UVDATA_BEARER) upstreamHeaders['Authorization'] = `Bearer ${process.env.UVDATA_BEARER}`;
+          // Mirror the 256 KB streaming cap from api/proxy.js (Greptile P2
+          // closeout `5869341`). A misbehaving upstream that streams an
+          // unbounded body would otherwise OOM the dev server.
+          const CAMS_RESPONSE_CAP_BYTES = 256 * 1024;
+          const camsReq = https.request(upstreamUrl, { method: 'GET', headers: upstreamHeaders }, (camsRes) => {
+            const ct = camsRes.headers['content-type'] || 'application/json';
+            res.writeHead(camsRes.statusCode, { 'Content-Type': ct, ...corsHeaders(req), 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' });
+            let bytesPiped = 0;
+            let aborted = false;
+            camsRes.on('data', (chunk) => {
+              if (aborted) return;
+              bytesPiped += chunk.length;
+              if (bytesPiped > CAMS_RESPONSE_CAP_BYTES) {
+                aborted = true;
+                try { camsRes.destroy(); } catch (_) {}
+                try { res.end(); } catch (_) {}
+                return;
+              }
+              try { res.write(chunk); } catch (_) {}
+            });
+            camsRes.on('end', () => { if (!aborted) try { res.end(); } catch (_) {} });
+            camsRes.on('error', () => { if (!aborted) try { res.end(); } catch (_) {} });
+          });
+          camsReq.on('error', (e) => {
+            res.writeHead(502, { 'Content-Type': 'application/json', ...corsHeaders(req) });
+            res.end(JSON.stringify({ error: 'CAMS upstream unreachable: ' + e.message }));
+          });
+          camsReq.end();
+          return;
+        }
+
         const { url: targetUrl, headers: fwdHeaders, body: fwdBody, method: upMethod } = payload;
         if (!targetUrl) { res.writeHead(400, { 'Content-Type': 'application/json', ...corsHeaders(req) }); res.end('{"error":"missing url"}'); return; }
         if (!_isAllowedProxyUrl(targetUrl)) {
@@ -985,8 +1115,11 @@ const server = http.createServer((req, res) => {
 // `node dev-server.js`, different means `import ... from './dev-server.js'`.
 const _entryUrl = process.argv[1] ? new URL(`file://${path.resolve(process.argv[1])}`).href : '';
 const _isDirectRun = import.meta.url === _entryUrl;
-if (_isDirectRun) server.listen(PORT, '127.0.0.1', () => {
-  console.log(`Dev server running at http://127.0.0.1:${PORT}`);
+if (_isDirectRun) server.listen(PORT, HOST, () => {
+  console.log(`Dev server running at http://${HOST === '0.0.0.0' ? '0.0.0.0' : '127.0.0.1'}:${PORT}`);
+  if (HOST === '0.0.0.0') {
+    console.log(`  → reachable on your LAN at http://<your-lan-ip>:${PORT}`);
+  }
   if (hasSite) {
     console.log(`  /        → landing page (${SITE_DIR})`);
     console.log(`  /app     → index.html`);

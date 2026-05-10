@@ -978,32 +978,35 @@ ${html}
 }
 
 export function clearChatHistory() {
-  state.chatHistory = [];
-  if (state.currentThreadId) {
-    localStorage.removeItem(getChatThreadKey(state.currentThreadId));
-    // Update thread metadata
-    const thread = state.chatThreads.find(t => t.id === state.currentThreadId);
-    if (thread) {
-      thread.messageCount = 0;
-      thread.updatedAt = new Date().toISOString();
-      delete thread.summary;
-      delete thread.summaryDate;
-      delete thread.summaryModel;
-      delete thread.summaryCost;
-      saveChatThreadIndex();
-      renderThreadList();
-      // Remove saved summary
-      if (state.importedData.chatSummaries) {
-        state.importedData.chatSummaries = state.importedData.chatSummaries.filter(s => s.threadId !== state.currentThreadId);
-        saveImportedData();
+  // Sister "delete thread" confirms; this one used to wipe immediately.
+  showConfirmDialog("Clear all messages in this conversation? This can't be undone.", () => {
+    state.chatHistory = [];
+    if (state.currentThreadId) {
+      localStorage.removeItem(getChatThreadKey(state.currentThreadId));
+      // Update thread metadata
+      const thread = state.chatThreads.find(t => t.id === state.currentThreadId);
+      if (thread) {
+        thread.messageCount = 0;
+        thread.updatedAt = new Date().toISOString();
+        delete thread.summary;
+        delete thread.summaryDate;
+        delete thread.summaryModel;
+        delete thread.summaryCost;
+        saveChatThreadIndex();
+        renderThreadList();
+        // Remove saved summary
+        if (state.importedData.chatSummaries) {
+          state.importedData.chatSummaries = state.importedData.chatSummaries.filter(s => s.threadId !== state.currentThreadId);
+          saveImportedData();
+        }
+        renderSavedSummaries();
       }
-      renderSavedSummaries();
     }
-  }
-  renderChatMessages();
-  updateChatHeaderTitle();
-  updateDiscussButton();
-  showNotification('Chat history cleared', 'info');
+    renderChatMessages();
+    updateChatHeaderTitle();
+    updateDiscussButton();
+    showNotification('Chat history cleared', 'info');
+  });
 }
 
 // ═══════════════════════════════════════════════
@@ -2047,7 +2050,7 @@ export async function sendChatMessage() {
   const webSearchEnabled = getChatWebSearchEnabled() && supportsWebSearch();
 
   try {
-    let labContext = buildLabContext();
+    let labContext = buildLabContext({ userMessage: text });
     let _lensResultForMsg = null;
     if (hasLens()) {
       const lensResult = await queryLensMulti(text, { signal: _chatAbortController ? _chatAbortController.signal : undefined });
@@ -2449,7 +2452,7 @@ async function runDiscussionRound(personas, steerPrompt, opts = {}) {
       container.appendChild(typingEl);
       container.scrollTop = container.scrollHeight;
 
-      let labContext = buildLabContext();
+      let labContext = buildLabContext({ userMessage: msgText });
       let _lensResultForMsg = null;
       if (hasLens()) {
         const lensResult = await queryLensMulti(msgText, { signal: _chatAbortController.signal });

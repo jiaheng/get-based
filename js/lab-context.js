@@ -98,6 +98,22 @@ function summarizeChange(field, prev, curr) {
 // ═══════════════════════════════════════════════
 // LAB CONTEXT
 // ═══════════════════════════════════════════════
+// Pre-2026-05-08 a regex (_SUN_INTENT_RE) detected sun/light keywords
+// in the user message and escalated buildSunContext from 'always' to
+// 'standard' tier (adding the 30-day session table + correlations,
+// ~1200 tok). The intent was token-budget conservation, but the regex
+// produced silent failures whenever the user's natural phrasing didn't
+// match the keyword set ("sunbathing" missed, "naked" missed,
+// "swimwear" missed) — and the rest of the app uses a much simpler
+// pattern: include the section when the data exists, full stop. Diet,
+// Exercise, Sleep, Diagnoses, Supplements, Biometrics, every context
+// card — all unconditional if-data-exists includes. Sun was the
+// outlier. Removed the intent-detector; buildSunContext always runs
+// at 'standard' tier, and itself returns '' when there's no data, so
+// users without sessions pay zero tokens and users with sessions get
+// the full session table on every turn — same shape as every other
+// section in this file.
+
 export function buildLabContext({ skipGroupFilter } = {}) {
   // skipGroupFilter: true → include all specialty groups regardless of AI toggle
   // Used by sync/push so the relay always receives complete data
@@ -674,6 +690,18 @@ function _buildLabContextInner({ skipGroupFilter } = {}) {
   const ctxNotes = state.importedData.contextNotes || '';
   if (ctxNotes.trim()) {
     ctx += `[section:contextNotes]\n## Additional Context Notes\n${ctxNotes.trim()}\n[/section:contextNotes]\n\n`;
+  }
+
+  // ── 19. Light & Sun lens — full standard tier when user has data ──
+  // buildSunContext returns '' when there's nothing to show, so a
+  // user without sessions pays zero tokens. Users with sessions get
+  // the 30-day session table + biomarker correlations on every turn,
+  // matching the pattern the rest of this file uses for every other
+  // section (include if-data-exists, no keyword gating).
+  if (typeof window !== 'undefined' && typeof window.buildSunContext === 'function') {
+    try {
+      ctx += window.buildSunContext({ tier: 'standard' });
+    } catch (e) { /* sun context is best-effort */ }
   }
 
   return ctx;

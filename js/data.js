@@ -4,7 +4,7 @@ import { state } from './state.js';
 import { MARKER_SCHEMA, UNIT_CONVERSIONS, OPTIMAL_RANGES, PHASE_RANGES } from './schema.js';
 import { hashString, getStatus, formatValue, linearRegression, showNotification } from './utils.js';
 import { profileStorageKey, touchProfileTimestamp } from './profile.js';
-import { encryptedSetItem, broadcastDataChanged, getEncryptionEnabled, scheduleAutoBackup } from './crypto.js';
+import { encryptedSetItem, broadcastDataChanged, scheduleAutoBackup } from './crypto.js';
 import { onDataSaved } from './sync.js';
 
 // ═══════════════════════════════════════════════
@@ -46,11 +46,11 @@ export async function saveImportedData() {
   try {
     const key = profileStorageKey(state.currentProfile, 'imported');
     const value = JSON.stringify(state.importedData);
-    if (getEncryptionEnabled()) {
-      await encryptedSetItem(key, value);
-    } else {
-      localStorage.setItem(key, value);
-    }
+    // Always route through encryptedSetItem — it skips encryption when
+    // disabled (just a localStorage.setItem) but also routes big-blob
+    // keys to IndexedDB. Going through localStorage.setItem directly
+    // would bypass that routing and re-introduce the 5 MB quota wall.
+    await encryptedSetItem(key, value);
     broadcastDataChanged(state.currentProfile);
     scheduleAutoBackup();
     touchProfileTimestamp(state.currentProfile);

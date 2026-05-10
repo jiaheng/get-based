@@ -136,6 +136,48 @@ return (async function() {
   assert('weight log inputs respect state.unitSystem',
     wearSrc.includes("state.unitSystem === 'US' ? 'lb' : 'kg'"));
 
+  // ─── 12b. Light-device browse modals close on backdrop click ───
+  // Browse-style modals (Add device, picker) close on backdrop; form-input
+  // modals (Log device session) require explicit Cancel/Save so accidental
+  // taps don't lose typed values.
+  const lightDevSrc = await fetch('/js/light-devices.js').then(r => r.text());
+  // Two browse modals each get a backdrop-close listener guarded by
+  // `e.target === overlay` so child clicks don't bubble out.
+  const backdropMatches = lightDevSrc.match(/overlay\.addEventListener\('click', \(e\) => \{\s*if \(e\.target === overlay\) overlay\.remove\(\);/g) || [];
+  assert('Add-device + device-picker modals each have backdrop-click close',
+    backdropMatches.length >= 2,
+    `found ${backdropMatches.length} backdrop-close listeners`);
+  // openDeviceSessionDialog is a form modal — must NOT have backdrop-close
+  // (would lose typed duration/distance/notes on stray click).
+  const sessionDialogStart = lightDevSrc.indexOf('export async function openDeviceSessionDialog');
+  const sessionDialogEnd = lightDevSrc.indexOf('export', sessionDialogStart + 1);
+  const sessionDialogBody = lightDevSrc.slice(sessionDialogStart, sessionDialogEnd > 0 ? sessionDialogEnd : undefined);
+  assert('openDeviceSessionDialog (form modal) has NO backdrop-close listener',
+    !/overlay\.addEventListener\('click'/.test(sessionDialogBody));
+
+  // ─── 13. Light-page channel pill drill-down a11y ───
+  // Pills are <button>s (native focusable + Enter/Space) with aria-expanded
+  // toggling between false/true and aria-controls pointing at the panel.
+  // The detail panel is role=region with aria-label; close button has its
+  // own aria-label. Hidden text in .sr-only carries the qualitative tier
+  // for screen readers since the dots are aria-hidden.
+  assert('pill is a <button> with aria-expanded + aria-controls',
+    /class="light-pill light-pill-tier-\$\{t7\} light-pill-interactive"[\s\S]{0,300}aria-expanded="false"[\s\S]{0,300}aria-controls="\$\{detailId\}"/.test(viewsSrc));
+  assert('pill sparkline is aria-hidden (qualitative info already in sr-only span)',
+    viewsSrc.includes('class="light-pill-sparkline"') &&
+    /<svg class="light-pill-sparkline"[^>]*aria-hidden="true"/.test(viewsSrc));
+  assert('pill carries sr-only tier + day-count label for assistive tech',
+    /class="sr-only">\$\{tlabel\(t7\)\}, \$\{dc\.n\} of 7 days hit target/.test(viewsSrc));
+  assert('detail panel is role=region with aria-label',
+    /class="light-channel-detail"[\s\S]{0,200}role="region" aria-label="\$\{escapeHTML\(meta\.label/.test(viewsSrc));
+  assert('detail close button has aria-label',
+    /class="light-channel-detail-close" aria-label="Close \$\{escapeAttr\(meta\.label/.test(viewsSrc));
+  assert('_toggleChannelDetail flips aria-expanded on the active pill',
+    /p\.setAttribute\('aria-expanded', 'true'\)/.test(viewsSrc) &&
+    /p\.setAttribute\('aria-expanded', 'false'\)/.test(viewsSrc));
+  assert('_toggleChannelDetail moves focus into the opened panel',
+    viewsSrc.includes('panel.focus(') && /tabindex.*-1/.test(viewsSrc));
+
   console.log(`%c Phase 3 A11y: ${passed} passed, ${failed} failed `,
     failed === 0 ? 'background:#22c55e;color:#fff;padding:4px 12px;border-radius:4px;font-weight:bold' : 'background:#ef4444;color:#fff;padding:4px 12px;border-radius:4px;font-weight:bold');
   if (failed > 0) console.error('Failures:', fails);
