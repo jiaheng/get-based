@@ -4107,12 +4107,12 @@ export function saveCustomMarker() {
   setTimeout(() => openManualEntryForm(id), 100);
 }
 
-export function deleteMarkerValue(id, date) {
+export async function deleteMarkerValue(id, date) {
   const dotKey = id.replace('_', '.');
   if (!state.importedData.entries) return;
   const entry = state.importedData.entries.find(e => e.date === date);
   if (!entry || entry.markers[dotKey] === undefined) return;
-  showConfirmDialog(`Delete this value (${date})? This can't be undone.`, () => {
+  if (await showConfirmDialog(`Delete this value (${date})? This can't be undone.`)) {
     delete entry.markers[dotKey];
     // Clean up provenance and manual tracking
     if (entry.markerSources) delete entry.markerSources[dotKey];
@@ -4131,10 +4131,10 @@ export function deleteMarkerValue(id, date) {
     navigate(activeNav ? activeNav.dataset.category : "dashboard");
     showDetailModal(id);
     showNotification(`Removed value from ${date}`, 'info');
-  });
+  }
 }
 
-export function deleteCustomMarker(id) {
+export async function deleteCustomMarker(id) {
   const dotKey = id.replace('_', '.');
   const catKey = dotKey.split('.')[0];
   const def = state.importedData?.customMarkers?.[dotKey];
@@ -4145,7 +4145,7 @@ export function deleteCustomMarker(id) {
   const msg = isLastInCat
     ? `Delete "${def.name}" and the entire "${def.categoryLabel || catKey}" category? This cannot be undone.`
     : `Delete "${def.name}" and all its values? This cannot be undone.`;
-  showConfirmDialog(msg, () => {
+  if (await showConfirmDialog(msg)) {
     // Determine which keys to delete — just this marker, or all in category
     const keysToDelete = isLastInCat ? siblingsInCat : [dotKey];
     for (const key of keysToDelete) {
@@ -4176,7 +4176,7 @@ export function deleteCustomMarker(id) {
     updateHeaderDates();
     navigate('dashboard');
     showNotification(`Deleted "${def.name}"${isLastInCat && siblingsInCat.length > 1 ? ` and ${siblingsInCat.length - 1} other marker(s)` : ''}`, 'info');
-  });
+  }
 }
 
 export function editMarkerValue(id, date, currentValue, event) {
