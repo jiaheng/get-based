@@ -517,8 +517,23 @@ export async function initSync() {
       window.addEventListener('pageshow', (e) => {
         if (e.persisted) _kickSync('pageshow-persisted');
       });
-      // Network came back — drain any pending pushes.
-      window.addEventListener('online', () => _kickSync('online'));
+      // Network came back — drain any pending pushes + toast the user.
+      // Evolu queues writes locally while offline; the user has no other
+      // signal that their edits are safely persisted (vs. lost). The
+      // toasts are throttled — only one fires per offline → online
+      // transition, not per visibilitychange.
+      let _lastNetState = navigator.onLine ?? true;
+      window.addEventListener('online', () => {
+        _kickSync('online');
+        if (!_lastNetState) {
+          _lastNetState = true;
+          if (window.showNotification) window.showNotification('Back online — syncing your changes.', 'success', 3000);
+        }
+      });
+      window.addEventListener('offline', () => {
+        _lastNetState = false;
+        if (window.showNotification) window.showNotification('Offline — changes are saved locally and will sync when you reconnect.', 'info', 5000);
+      });
     }
 
     dbg('Initialized, relay:', relay);
@@ -1254,6 +1269,15 @@ const DELTA_ARRAY_CONFIG = {
     },
     noTombstones: true,
   },
+  // lightMeasurements: every deletion path (_supersedePriorMeasurement
+  // on save, _collapseToLatestPerRoomTool one-time migration,
+  // deleteMeasurement on user delete) explicitly writes to _deleted via
+  // recordTombstone. Under Phase 1 (v3 blob) those tombstones ride the
+  // fat blob. Under Phase 2 (v4, blob omitted) the planner's automatic
+  // per-row tombstone emission is the ONLY carrier — so we MUST allow
+  // it (no `noTombstones: true`). The storm guard upstream still blocks
+  // a >50% drop from N>=20 rows, so a one-time migration that collapses
+  // historical data won't broadcast accidental peer-wipes.
   // Lab entries — `{date, markers, ...}` with no `.id`. The import path
   // already enforces date-uniqueness (import-dedup filter on `date`), so
   // `date` is the natural composite-free key. `YYYY-MM-DD` matches the
@@ -3442,10 +3466,12 @@ async function onSyncReceived() {
           // becomes visible — but ONLY when the merge actually produced
           // new content from the remote side. `localImportedForMerge`
           // already had everything ⇒ no observable change ⇒ skip the
-          // re-render so an in-progress form (e.g. typing a duration
-          // into the session log dialog) doesn't get wiped on every pull.
-          const activeNav = document.querySelector('.nav-item.active');
-          const cat = activeNav?.dataset?.category || 'dashboard';
+          // re-render so an in-progress form doesn't get wiped on pull.
+          // Source: state.currentView (canonical). DOM .nav-item.active
+          // is briefly absent during buildSidebar→navigate cycles and
+          // would yank the user to 'dashboard' on a pull landing in
+          // that gap (user-reported flicker/sync race).
+          const cat = state.currentView || document.querySelector('.nav-item.active')?.dataset?.category || 'dashboard';
           // Sidebar nav items are conditional on data presence (e.g. the
           // Genetics entry only renders when state.importedData.genetics
           // exists). Per-row CRDT deltas can populate scalars/maps that
@@ -3468,6 +3494,14 @@ async function onSyncReceived() {
               showNotification('Data updated from another device', 'success');
             }
             dbg(`Pulled active profile ${profileId.slice(0,8)} → re-rendered '${cat}'`);
+          }
+          // Broadcast for any detached UI listening for cross-device
+          // updates (e.g., the All-Sessions modal in views.js). The
+          // navigate() above already rebuilt the inline page; this
+          // event covers floating modals that aren't part of the main
+          // tree. Greptile PR #178 P2 comment.
+          if (typeof window !== 'undefined' && typeof window.CustomEvent === 'function') {
+            try { window.dispatchEvent(new CustomEvent('labcharts-sync-applied')); } catch (_) {}
           }
         } else {
           dbg('Pulled profile:', profileId);

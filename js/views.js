@@ -36,8 +36,35 @@ export function navigate(category, data) {
   // preserved.
   const sameView = category === state.currentView;
   let anchor = null;
+  // Track whether the caller explicitly requested an anchor — even if
+  // the element isn't found, an explicit request means "don't fall
+  // back to auto-pick." This covers the cross-view race where an AI
+  // verdict completes for a Light measurement after the user has
+  // already navigated to Dashboard: the room's data-id no longer
+  // exists, and we should leave the user's current scroll alone, not
+  // grab some random Dashboard element via the proximity heuristic.
+  const explicitAnchorRequested = !!(data && typeof data === 'object' && data.scrollAnchor);
   if (sameView && typeof document !== 'undefined') {
-    anchor = _captureScrollAnchor();
+    if (explicitAnchorRequested) {
+      // If a restore loop is ALREADY running for this same anchor (rapid
+      // re-render burst — e.g. saveMeasurement → AI verdict engine's
+      // _refresh → setTimeout-navigate all firing within ms), reuse the
+      // original captured viewportTop. Without this, each successive
+      // navigate captures AFTER the jump and pins to the wrong place.
+      if (_activeAnchor && _activeAnchor.selector === data.scrollAnchor) {
+        anchor = _activeAnchor;
+      } else {
+        const el = document.querySelector(data.scrollAnchor);
+        if (el) {
+          const rect = el.getBoundingClientRect();
+          anchor = { selector: data.scrollAnchor, viewportTop: rect.top };
+        }
+        // Element not found AND explicit anchor was requested →
+        // intentionally skip the auto-pick fallback below.
+      }
+    } else {
+      anchor = _captureScrollAnchor();
+    }
   }
   document.querySelectorAll(".nav-item").forEach(el => {
     el.classList.toggle("active", el.dataset.category === category);
@@ -57,14 +84,56 @@ export function navigate(category, data) {
     // Force synchronous layout so getBoundingClientRect is accurate.
     void document.body.offsetHeight;
     _restoreScrollAnchor(anchor);
-    // Re-apply on next frame and the frame after, in case post-layout
-    // async paths (chart paint, image decoding) shift content.
-    requestAnimationFrame(() => {
+    // Re-apply over a 1.2s window so async layout (Chart.js paints,
+    // image decodes, AI verdict chips rendering for OTHER rows above
+    // ours) doesn't drift the anchor element away from its captured
+    // viewport position. Earlier 3-RAF approach (~50ms total) caught
+    // synchronous reflows but missed downstream async ones — the
+    // measurement chip would land correctly, then a chart 200ms later
+    // would shift content above the room by 1115 px and the user saw
+    // the page "jump up" to the session list.
+    //
+    // Cancellation: (a) a NEW navigate to a DIFFERENT anchor increments
+    // the token and the old loop bails. Same-anchor re-navigates reuse
+    // _activeAnchor (captured above) so all back-to-back navigates pin
+    // to the SAME original viewport position even if intermediate ones
+    // captured after content shifted. (b) user-initiated scroll
+    // (wheel/touch/keydown) also cancels so we never fight a manual
+    // scroll. The 'scroll' event itself isn't a cancellation signal
+    // because OUR scrollBy calls also fire it.
+    _activeAnchor = anchor;
+    const myToken = ++_navAnchorToken;
+    const start = Date.now();
+    let cancelled = false;
+    const cancel = () => { cancelled = true; };
+    const inputOpts = { passive: true, capture: true };
+    window.addEventListener('wheel', cancel, inputOpts);
+    window.addEventListener('touchstart', cancel, inputOpts);
+    window.addEventListener('keydown', cancel, inputOpts);
+    const cleanup = () => {
+      window.removeEventListener('wheel', cancel, inputOpts);
+      window.removeEventListener('touchstart', cancel, inputOpts);
+      window.removeEventListener('keydown', cancel, inputOpts);
+      if (myToken === _navAnchorToken) _activeAnchor = null;
+    };
+    const reapply = () => {
+      if (cancelled || myToken !== _navAnchorToken) { cleanup(); return; }
+      if (Date.now() - start > 1200) { cleanup(); return; }
       _restoreScrollAnchor(anchor);
-      requestAnimationFrame(() => _restoreScrollAnchor(anchor));
-    });
+      requestAnimationFrame(reapply);
+    };
+    requestAnimationFrame(reapply);
   }
 }
+
+// Monotonic counter for in-flight anchor-restore loops. Each navigate
+// captures a new token; older loops compare and bail when the user
+// has moved on.
+let _navAnchorToken = 0;
+// Currently-active anchor — exposed so rapid same-selector re-navigates
+// reuse the original captured viewportTop instead of re-capturing AFTER
+// the jump that the original was trying to prevent.
+let _activeAnchor = null;
 
 // Capture identity + viewport position of the most reasonable scroll
 // anchor for the current interaction. Priority:
@@ -89,18 +158,51 @@ function _captureScrollAnchor() {
     }
     el = el.parentElement;
   }
-  // Fallback: pick the first stably-identifiable element currently in
-  // viewport. This covers async re-renders (AI refresh, sync pull) where
-  // there's no focused click target.
+  // Fallback heuristic: find the stably-identifiable element the user
+  // is most plausibly looking at. Two-tier:
+  //
+  // 1. Elements that CONTAIN the viewport center — the user's focus is
+  //    almost certainly inside one of these (a large expanded room
+  //    card, an open audit, etc.). Pick the SMALLEST containing element
+  //    (innermost = most specific anchor).
+  // 2. Failing that, the element whose rect center is closest to
+  //    viewport center.
+  //
+  // First-in-DOM-order was the previous heuristic and produced the
+  // "screen jumps to the session list" bug — session cards sit above
+  // rooms in the DOM, so the room couldn't win even when it dominated
+  // the viewport. Closest-center alone had the inverse problem: a huge
+  // room card has its rect-center off-screen, so smaller off-to-the-
+  // side elements with centers inside the viewport beat it.
   const candidates = document.querySelectorAll('[data-id], [data-screen-id], [data-room-id]');
+  const vh = window.innerHeight;
+  const viewportCenter = vh / 2;
+  let containingBest = null;
+  let containingBestArea = Infinity;
+  let centerBest = null;
+  let centerBestDist = Infinity;
   for (const c of candidates) {
     const rect = c.getBoundingClientRect();
-    if (rect.top >= 0 && rect.top < window.innerHeight) {
-      const sel = _stableSelectorFor(c);
-      if (sel) return { selector: sel, viewportTop: rect.top };
+    if (rect.bottom <= 0 || rect.top >= vh) continue;
+    const sel = _stableSelectorFor(c);
+    if (!sel) continue;
+    const containsCenter = rect.top <= viewportCenter && rect.bottom >= viewportCenter;
+    if (containsCenter) {
+      const area = rect.width * rect.height;
+      if (area < containingBestArea) {
+        containingBestArea = area;
+        containingBest = { selector: sel, viewportTop: rect.top };
+      }
+    } else {
+      const center = rect.top + rect.height / 2;
+      const dist = Math.abs(center - viewportCenter);
+      if (dist < centerBestDist) {
+        centerBestDist = dist;
+        centerBest = { selector: sel, viewportTop: rect.top };
+      }
     }
   }
-  return null;
+  return containingBest || centerBest;
 }
 
 function _stableSelectorFor(el) {
@@ -113,7 +215,16 @@ function _stableSelectorFor(el) {
 
 function _restoreScrollAnchor(anchor) {
   if (!anchor) return;
-  const el = document.querySelector(anchor.selector);
+  let el;
+  try {
+    el = document.querySelector(anchor.selector);
+  } catch (_) {
+    // Malformed selector (e.g., a roomId that slipped past CSS.escape
+    // and contained unbalanced brackets). querySelector throws
+    // SyntaxError on malformed CSS — caught here so the RAF re-anchor
+    // loop's cleanup() still runs (listener leak prevention).
+    return;
+  }
   if (!el) return;
   const rect = el.getBoundingClientRect();
   const delta = rect.top - anchor.viewportTop;
@@ -752,7 +863,7 @@ function _renderConditionsHTML(atm, coords, variant, offline = false) {
   // If clouds are actively suppressing UVI, surface the clear-sky alternate
   const cloudChip = cloudWord
     ? (uviClear != null && uvi != null && uviClear > uvi + 0.5
-       ? `${cloudWord} · UVI ${uviClear.toFixed(1)} clear sky`
+       ? `${cloudWord} · clear-sky max UVI ${uviClear.toFixed(1)}`
        : cloudWord)
     : '';
   // Surface-ozone WHO bucket
@@ -832,8 +943,8 @@ function _renderConditionsHTML(atm, coords, variant, offline = false) {
   const nowEvent = { icon: '⏵', label: nowSubLabel, ts: nowTs, isNow: true };
   // Insert "now" at the right chronological position
   const eventsWithNow = [...events, nowEvent].sort((a, b) => a.ts - b.ts);
-  const sunEventsLine = events.length ? `<div class="conditions-now-events-wrap" title="${escapeAttr('Today\'s sun arc — left to right is the timeline through your day. Events left of the highlighted now-marker have passed; events to the right are upcoming.')}">
-    <div class="conditions-now-events-caption">Today's sun arc</div>
+  const sunEventsLine = events.length ? `<div class="conditions-now-events-wrap" title="${escapeAttr('Today\'s sun timeline — left to right is the timeline through your day. Events left of the highlighted now-marker have passed; events to the right are upcoming.')}">
+    <div class="conditions-now-events-caption">Today's sun timeline</div>
     <div class="conditions-now-events">
       ${eventsWithNow.map(e => `<span class="conditions-now-event${e.peak ? ' conditions-now-event-peak' : ''}${e.uvaEvent ? ' conditions-now-event-uva' : ''}${e.isNow ? ' conditions-now-event-now' : ''}${e.ts < nowTs ? ' conditions-now-event-past' : ''}"${e.tooltip ? ` title="${escapeAttr(e.tooltip)}"` : ''}><span class="conditions-now-event-icon">${e.icon}</span>${escapeHTML(e.label)}</span>`).join('')}
     </div>
@@ -912,7 +1023,7 @@ function _renderConditionsHTML(atm, coords, variant, offline = false) {
     <div class="conditions-now-cell ${aqAgg ? `conditions-aq-${aqAgg.cls}` : ''}" title="${escapeAttr('Air quality is the worst-of category across PM2.5, PM10, and NO₂ — so a high traffic-pollutant level (NO₂) won\'t hide behind clean PM. EAQI uses the same multi-pollutant logic.')}">
       <div class="conditions-now-label">Air quality</div>
       <div class="conditions-now-value conditions-now-value-aq">${aqAgg ? escapeHTML(aqAgg.label) : '—'}</div>
-      <div class="conditions-now-sub">${aqAgg ? (aqAgg.why ? `worst: ${aqAgg.why} ${aqAgg.why === 'PM2.5' && aqPm25 != null ? aqPm25 + ' µg/m³' : ''}` : 'worst-of multi-pollutant') : ''}</div>
+      <div class="conditions-now-sub">${aqAgg ? (aqAgg.why === 'EAQI' ? 'EU air quality index' : (aqAgg.why ? `worst pollutant: ${aqAgg.why} ${aqAgg.why === 'PM2.5' && aqPm25 != null ? aqPm25 + ' µg/m³' : ''}` : 'worst-of multi-pollutant')) : ''}</div>
     </div>
   </div>
   ${sunEventsLine}
@@ -1215,6 +1326,16 @@ function _sanityCheckAtmosphere(atm, coords) {
   if (atm.uvIndex != null) {
     if (atm.uvIndex < 0) warnings.push(`UVI is ${atm.uvIndex} (should be ≥ 0)`);
     if (atm.uvIndex > 16) warnings.push(`UVI is ${atm.uvIndex} (extreme — typical max ~12-13)`);
+    // Live UVI exceeding today's forecast peak by >20% suggests a stale
+    // or wrong-hour cache entry (the same bug pattern that produced the
+    // "saw UVI 8+ briefly when daily max was 6" report). Forecast peak
+    // can legitimately revise upward by ~10-15% as forecast models
+    // refresh through the day, but a 20%+ overshoot is almost always a
+    // data anomaly worth surfacing.
+    const peak = atm.daily?.uvIndexMax;
+    if (Number.isFinite(peak) && peak > 0 && atm.uvIndex > peak * 1.2) {
+      warnings.push(`UVI ${atm.uvIndex.toFixed(1)} exceeds today's forecast peak (${peak.toFixed(1)}) — likely stale data, try Refresh`);
+    }
     // UVI should be near zero when sun is below horizon
     try {
       if (window.solarZenithAngle && coords) {
@@ -1698,8 +1819,10 @@ function _channelDayCount(channelKey) {
   // "4/7" reads as a fraction at a glance — much clearer than "4d",
   // which users were parsing as "4 days ago" instead of "4 of 7 days
   // this week hit target". Tooltip + sr-only label still say it the
-  // long way for accessibility.
-  return { txt: n === 0 ? '—' : `${n}/7`, n };
+  // long way for accessibility. Zero-hit channels show "0/7" too so
+  // the format stays consistent across pills instead of an em-dash
+  // (which read as "no data" instead of "zero days hit").
+  return { txt: `${n}/7`, n };
 }
 
 // Unified channel pill row — same vocabulary as the dashboard strip,
@@ -1891,6 +2014,14 @@ function _renderChannelCitations(channelKey) {
 function _renderChannelWeekChart(channelKey) {
   if (!window.dailyChannelBreakdown) return '';
   const days = window.dailyChannelBreakdown(channelKey, 7);
+  // For vit-D, pull a per-day IU breakdown that uses the same per-session
+  // math as rollingVitaminDIU (real Fitz/UVI/rotation/genetics/body-frac
+  // cap). Bar height + tier color still use channel-au from `days` for
+  // continuity with the sparkline; only the numeric label switches to
+  // per-session-accurate IU so it agrees with the session-row IU readout.
+  const iuDays = (channelKey === 'vitamin_d' && window.dailyVitaminDIUBreakdown)
+    ? window.dailyVitaminDIUBreakdown(7)
+    : null;
   const ch = window.CHANNEL_DISPLAY || {};
   const meta = ch[channelKey] || {};
   const dailyTarget = meta.dailyTarget || 0;
@@ -1915,13 +2046,16 @@ function _renderChannelWeekChart(channelKey) {
   //
   // Returns "" for zero/sub-meaningful values so the chart doesn't get
   // peppered with "0%" labels on empty days.
-  const fmt = (n) => {
+  const fmt = (n, dayIdx) => {
     if (!Number.isFinite(n) || n < 0.5) return '';
-    if (channelKey === 'vitamin_d' && window.vitaminDIU) {
-      // No per-day fitz/uvi context; use Fitz III + assume threshold met
-      // as a chart-only approximation. Hero uses the per-session-correct
-      // rollingVitaminDIU; chart reads as relative IU per day.
-      const iu = window.vitaminDIU(n, 'III', 7);
+    if (channelKey === 'vitamin_d') {
+      // Use the per-session IU breakdown (same math as the session row
+      // and the rollingVitaminDIU hero) rather than the old Fitz-III /
+      // uvi-7 / no-genetics approximation that diverged 20-50% from the
+      // session-row IU on real sessions.
+      const iu = iuDays && dayIdx != null
+        ? (iuDays[dayIdx]?.sun || 0) + (iuDays[dayIdx]?.device || 0)
+        : 0;
       if (iu < 1) return '';
       if (iu >= 1000) return (iu / 1000).toFixed(1) + 'k';
       if (iu >= 100) return String(Math.round(iu / 10) * 10);
@@ -1967,7 +2101,7 @@ function _renderChannelWeekChart(channelKey) {
     const devH = total > 0 ? (d.device / max) * innerH : 0;
     const y = padTop + innerH - h;
     const isToday = d.date.getTime() === today.getTime();
-    const labelTxt = total > 0 ? fmt(total) : '';
+    const labelTxt = total > 0 ? fmt(total, i) : '';
     const { fill: barFill, op: barOp } = colorForDay(total);
     // Hit-target check mark — greener visual cue when the day cleared the
     // daily target line. Reduces the urge to chase higher percentages
@@ -2376,16 +2510,18 @@ function _toggleChannelDetail(channelKey) {
 // device, or both kinds of sessions. Device rows render inline since
 // they have a simpler shape (no per-channel chips on the device-side
 // — those would be the SAME chips on every row, not informative).
-// Default cap on the historical sessions list. Without this, a year of
-// daily sessions becomes a 365-row scroll — useful information drowns
-// in chronology. Cap at 10 most recent and offer a single toggle to
-// expand to the full history. Module-scoped flag persists for the tab
-// session (resets on reload) — small enough to be ergonomic, opinionated
-// enough to keep the page tight by default.
-const SESSIONS_DEFAULT_CAP = 10;
-let _showAllSessions = false;
+// Inline cap on the historical sessions list. 3 is enough for
+// at-a-glance context ("what did I do recently"); the full history
+// opens in a modal so the rest of the Light & Sun page (Devices,
+// Light Environment, Tools) sits within one scroll-page below.
+// Each row is ~160 px tall (date + duration + channel chips + burn-
+// risk meta + AI verdict chip), so 3 rows ≈ 480 px is a tight default.
+const SESSIONS_DEFAULT_CAP = 3;
 
-function renderUnifiedSessionsList() {
+// Build the unified, sorted (newest-first) row list of all completed
+// sun + device sessions. Shared between the inline render (cap-bounded)
+// and the modal that shows the full history.
+function _collectUnifiedSessionRows() {
   // Active sun session is pinned at the top of the page (showLight
   // renders it before the quicklog row), so filter it out of the
   // historical-sessions list to avoid the same row appearing twice.
@@ -2393,26 +2529,22 @@ function renderUnifiedSessionsList() {
   // Active device sessions are pinned above (renderActiveDeviceSessionCard);
   // filter them out here so the same row doesn't render twice.
   const devSessions = ((window.getDeviceSessions && window.getDeviceSessions()) || []).filter(s => !!s.endedAt);
-
-  // Build the unified, sorted row list once — regardless of whether we
-  // have only sun, only devices, or both. Lets the cap + toggle apply
-  // uniformly across all three shapes.
   const rows = [];
   for (const s of sunSessions) rows.push({ kind: 'sun', startedAt: s.startedAt || 0, sess: s });
   for (const s of devSessions) rows.push({ kind: 'device', startedAt: s.startedAt || 0, sess: s });
-  if (rows.length === 0) return '';
   rows.sort((a, b) => b.startedAt - a.startedAt);
+  return { rows, hasDeviceRows: devSessions.length > 0 };
+}
 
-  const totalCount = rows.length;
-  const visibleRows = _showAllSessions ? rows : rows.slice(0, SESSIONS_DEFAULT_CAP);
-  const hiddenCount = totalCount - visibleRows.length;
-
+// Render N session rows from the unified list as the body of a
+// .sun-sessions-list block. Shared by the inline render + modal so
+// the per-row look stays identical.
+function _renderSessionRowsHTML(rows) {
   const devices = (window.getDevices && window.getDevices()) || [];
   const deviceById = Object.fromEntries(devices.map(d => [d.id, d]));
   const renderSunRow = window.renderSunSessionRow;
-
-  let html = `<div class="sun-sessions-list${devSessions.length ? ' light-sessions-list-unified' : ''}">`;
-  for (const row of visibleRows) {
+  let html = '';
+  for (const row of rows) {
     if (row.kind === 'sun' && renderSunRow) {
       html += renderSunRow(row.sess);
     } else if (row.kind === 'device') {
@@ -2458,22 +2590,71 @@ function renderUnifiedSessionsList() {
       </div>`;
     }
   }
+  return html;
+}
+
+// Inline render — caps at SESSIONS_DEFAULT_CAP and exposes the rest
+// via "View all" modal instead of expanding inline (which used to
+// bloat the page 1600+ px below the visible session list).
+function renderUnifiedSessionsList() {
+  const { rows, hasDeviceRows } = _collectUnifiedSessionRows();
+  if (rows.length === 0) return '';
+  const totalCount = rows.length;
+  const visibleRows = rows.slice(0, SESSIONS_DEFAULT_CAP);
+  const hiddenCount = totalCount - visibleRows.length;
+  let html = `<div class="sun-sessions-list${hasDeviceRows ? ' light-sessions-list-unified' : ''}">`;
+  html += _renderSessionRowsHTML(visibleRows);
   html += `</div>`;
-  // Toggle row — only render when there's something to expand/collapse.
   if (hiddenCount > 0) {
-    html += `<button class="light-sessions-show-more" onclick="window._toggleAllSessions()">Show ${hiddenCount} older session${hiddenCount === 1 ? '' : 's'}</button>`;
-  } else if (_showAllSessions && totalCount > SESSIONS_DEFAULT_CAP) {
-    html += `<button class="light-sessions-show-more" onclick="window._toggleAllSessions()">Show only the ${SESSIONS_DEFAULT_CAP} most recent</button>`;
+    html += `<button class="light-sessions-show-more" onclick="window._openAllSessionsModal()">View all ${totalCount} sessions</button>`;
   }
   return html;
 }
 
-// Exposed for the inline onclick on the show-more toggle.
-if (typeof window !== 'undefined') {
-  window._toggleAllSessions = () => {
-    _showAllSessions = !_showAllSessions;
-    if (window.navigate && state.currentView === 'light') window.navigate('light');
+// Modal listing every session — opened from the "View all" button so
+// the Light & Sun page itself stays compact. Reuses the same per-row
+// renderer as the inline list. Click any row to drill into its detail
+// modal (the existing per-row onclicks pass through fine; they fire
+// their own modal which replaces this one's overlay).
+function _openAllSessionsModal() {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay show';
+  const renderInto = () => {
+    const { rows, hasDeviceRows } = _collectUnifiedSessionRows();
+    const title = `All sessions (${rows.length})`;
+    overlay.innerHTML = `<div class="modal" role="dialog" aria-label="${escapeAttr(title)}" style="max-width:760px">
+      <div class="modal-header">
+        <h3>${escapeHTML(title)}</h3>
+        <button class="modal-close" aria-label="Close" onclick="this.closest('.modal-overlay').remove()">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="sun-sessions-list${hasDeviceRows ? ' light-sessions-list-unified' : ''}">${_renderSessionRowsHTML(rows)}</div>
+      </div>
+    </div>`;
   };
+  renderInto();
+  // Re-render on sync pull / AI verdict completion so the modal stays
+  // fresh when a paired device adds/edits/deletes sessions while it's
+  // open. Listeners self-remove on modal close (overlay.remove()).
+  // Greptile PR #178 P2 comment.
+  const onSync = () => {
+    if (!document.body.contains(overlay)) { _detach(); return; }
+    renderInto();
+  };
+  const _detach = () => {
+    window.removeEventListener('labcharts-ai-verdict-updated', onSync);
+    window.removeEventListener('labcharts-sync-applied', onSync);
+  };
+  window.addEventListener('labcharts-ai-verdict-updated', onSync);
+  window.addEventListener('labcharts-sync-applied', onSync);
+  if (window._wireBackdropClose) try { window._wireBackdropClose(overlay, () => { _detach(); overlay.remove(); }); } catch (e) {}
+  document.body.appendChild(overlay);
+  if (window.trapModalFocus) try { window.trapModalFocus(overlay); } catch (e) {}
+}
+
+// Exposed for the inline "View all" button onclick.
+if (typeof window !== 'undefined') {
+  window._openAllSessionsModal = _openAllSessionsModal;
 }
 
 // One-line action suggestion based on the lowest-tier channel.

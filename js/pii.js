@@ -185,6 +185,40 @@ export async function sanitizeWithOllamaStreaming(pdfText, onChunk, signal, onTh
   const headers = { 'Content-Type': 'application/json' };
   if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`;
 
+  // Quick reachability probe with a 5s timeout BEFORE issuing the
+  // streaming request. If Ollama is unreachable (server stopped,
+  // airplane mode, etc.) the caller can fall back to regex without
+  // waiting for the long streaming timeout to fire. The probe signal
+  // composes the caller's `signal` with the 5s deadline so a user-
+  // initiated abort (e.g., closing the import dialog mid-probe) takes
+  // effect immediately instead of waiting up to 5s for the timeout
+  // to fire. Mirrors the AbortSignal.any-with-polyfill pattern used
+  // in api.js's _fetchWithRetry. Greptile PR #178 P2 comment.
+  try {
+    let probeSignal;
+    const hasTimeout = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function';
+    const timeoutSig = hasTimeout ? AbortSignal.timeout(5000) : null;
+    if (!timeoutSig) {
+      // No timeout API at all — use caller's signal alone. Loses the
+      // 5s deadline but at least doesn't spuriously fail the probe on
+      // a healthy server when Ollama responds in <5s anyway.
+      probeSignal = signal;
+    } else if (signal && typeof AbortSignal.any === 'function') {
+      probeSignal = AbortSignal.any([signal, timeoutSig]);
+    } else if (signal) {
+      const ctl = new AbortController();
+      const fwd = (s) => s.addEventListener('abort', () => ctl.abort(s.reason), { once: true });
+      if (signal.aborted) ctl.abort(signal.reason); else fwd(signal);
+      if (timeoutSig.aborted) ctl.abort(timeoutSig.reason); else fwd(timeoutSig);
+      probeSignal = ctl.signal;
+    } else {
+      probeSignal = timeoutSig;
+    }
+    await fetch(`${baseUrl}/api/version`, { signal: probeSignal });
+  } catch (e) {
+    throw new Error(`Local PII server unreachable at ${baseUrl} — falling back to regex obfuscation. (${e.message})`);
+  }
+
   const resp = await fetch(`${baseUrl}/v1/chat/completions`, {
     method: 'POST',
     headers,
@@ -198,10 +232,24 @@ export async function sanitizeWithOllamaStreaming(pdfText, onChunk, signal, onTh
   let accumulated = '';
   let buffer = '';
   let inThinkTag = false; // track <think>...</think> blocks in content
+  // Per-chunk stall timeout — local Ollama can hang mid-stream if the
+  // model crashes / OOMs / loses GPU access; fail loud after 45s so
+  // the user can fall back to regex instead of waiting forever.
+  const STALL_MS = 45000;
+  const readWithStall = () => new Promise((resolve, reject) => {
+    const t = setTimeout(() => {
+      try { reader.cancel(); } catch (e) {}
+      reject(new Error(`Local PII stream stalled — no data for ${Math.round(STALL_MS / 1000)}s. Stop and use regex instead.`));
+    }, STALL_MS);
+    reader.read().then(
+      (r) => { clearTimeout(t); resolve(r); },
+      (e) => { clearTimeout(t); reject(e); },
+    );
+  });
 
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      const { done, value } = await readWithStall();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');

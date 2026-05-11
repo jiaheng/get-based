@@ -114,7 +114,7 @@ export const EXPOSURE_PRESETS = [
 // summary line. Row meta now shows just "Eyes uncovered ⚠" so the
 // safety state is conveyed by the icon, not a redundant warning string.
 export const EYE_MODES = [
-  { key: 'direct',         label: 'Eyes uncovered',     pickerLabel: 'Eyes uncovered — never look directly at the sun', warn: true },
+  { key: 'direct',         label: 'Eyes uncovered',     pickerLabel: 'Eyes uncovered (never stare at sun)', warn: true },
   { key: 'sunglasses',     label: 'Sunglasses',         pickerLabel: 'Sunglasses' },
   { key: 'clear-glasses',  label: 'Clear glasses',      pickerLabel: 'Clear glasses' },
   { key: 'closed-eyes',    label: 'Closed eyes',        pickerLabel: 'Closed eyes' },
@@ -1085,6 +1085,90 @@ export function rollingVitaminDIU(days = 7) {
   return total;
 }
 
+// Per-day vit-D IU breakdown for the same N-day window. Mirrors
+// rollingVitaminDIU exactly — per-session through vitaminDIUPerSession
+// with the real Fitzpatrick / UVI / rotation / genetics / bodyFraction,
+// summed per local day, then daily-cap applied. Returns [{date, key,
+// sun, device}] aligned to the chart's "today on the right" layout.
+//
+// Existence rationale: the weekly-chart in views.js previously called
+// vitaminDIU(channelAu, 'III', 7) per day — a hardcoded-Fitz-III,
+// hardcoded-uvi-7, no-rotation, no-genetics, no-body-cap approximation
+// that disagreed with the per-session row by 20-50% on real sessions.
+// Charts now read IU from here and stay consistent with what the row
+// shows.
+export function dailyVitaminDIUBreakdown(days = 7) {
+  const buckets = [];
+  const now = new Date();
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+    buckets.push({ date: d, key: d.toISOString().slice(0, 10), sun: 0, device: 0 });
+  }
+  const startOf = (ts) => {
+    const d = new Date(ts);
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  };
+  const idxFor = (ts) => {
+    const day = startOf(ts);
+    return buckets.findIndex(b => b.date.getTime() === day);
+  };
+  const perSession = (typeof window !== 'undefined' && typeof window.vitaminDIUPerSession === 'function') ? window.vitaminDIUPerSession : null;
+  if (!perSession) return buckets;
+  const dailyCap = (typeof window !== 'undefined' && Number.isFinite(window.VITD_DAILY_SATURATION_IU)) ? window.VITD_DAILY_SATURATION_IU : 20000;
+  const genetics = state.importedData?.genetics || null;
+  for (const sess of getSessions()) {
+    const ts = sess.endedAt || sess.startedAt;
+    if (!ts) continue;
+    const i = idxFor(ts);
+    if (i < 0) continue;
+    let au, fitz, uvi, rotated;
+    if (!sess.endedAt) {
+      const live = _liveDosesFor(sess);
+      au = live?.doses?.vitamin_d;
+      fitz = live?.fitzpatrick || sess.safety?.fitzpatrick || 'III';
+      uvi = live?.atm?.uvIndex ?? sess.atmosphere?.uvIndex ?? null;
+      rotated = !!sess.bodyExposure?.rotatedSides;
+    } else {
+      au = sess.doses?.vitamin_d;
+      fitz = sess.safety?.fitzpatrick || 'III';
+      uvi = sess.atmosphere?.uvIndex ?? null;
+      rotated = !!sess.bodyExposure?.rotatedSides;
+    }
+    if (!Number.isFinite(au) || au <= 0) continue;
+    const bodyFrac = sess.bodyExposure?.fraction;
+    buckets[i].sun += perSession(au, fitz, uvi, rotated, genetics, bodyFrac);
+  }
+  const fitzForDevice = state.importedData?.sunDefaults?.fitzpatrick || 'III';
+  const fracByKey = (typeof window !== 'undefined' && window.BODY_REGIONS)
+    ? Object.fromEntries(window.BODY_REGIONS.map(r => [r.key, r.fraction]))
+    : {};
+  const _broadFracs = { face: 0.04, arms: 0.10, torso: 0.13, legs: 0.30, 'whole-body': 0.92, targeted: 0.05 };
+  for (const sess of (state.importedData?.deviceSessions || [])) {
+    if (!sess.endedAt) continue;
+    const i = idxFor(sess.endedAt);
+    if (i < 0) continue;
+    const au = sess.doses?.vitamin_d;
+    if (!Number.isFinite(au) || au <= 0) continue;
+    let bodyFrac = null;
+    if (Array.isArray(sess.bodyAreas) && sess.bodyAreas.length > 0) {
+      bodyFrac = sess.bodyAreas.reduce((acc, k) => acc + (fracByKey[k] || 0), 0);
+    } else if (sess.bodyArea) {
+      bodyFrac = _broadFracs[sess.bodyArea] ?? null;
+    }
+    buckets[i].device += perSession(au, fitzForDevice, null, false, genetics, bodyFrac);
+  }
+  // Daily cap applied to combined sun+device per day.
+  for (const b of buckets) {
+    const total = b.sun + b.device;
+    if (total > dailyCap) {
+      const scale = dailyCap / total;
+      b.sun *= scale;
+      b.device *= scale;
+    }
+  }
+  return buckets;
+}
+
 // Cumulative vitamin D IU synthesized from sun TODAY (local-day window).
 // Mirrors rollingVitaminDIU logic but bounds by local midnight instead of
 // a rolling-N-day cutoff. Used by the vit-D budget cross-check.
@@ -1637,13 +1721,46 @@ function _topChannel(sess) {
 // preservation here too, but pixel-based broke when content above the
 // viewport changed height during rebuild — superseded by the navigate()
 // path which handles all callers uniformly.
-function _refreshSurfaces() {
-  if (window.buildSidebar) try { window.buildSidebar(); } catch (e) {}
-  const view = state.currentView || 'dashboard';
-  if (window.navigate) try { window.navigate(view); } catch (e) {}
-  // After re-render the active-session card is a fresh DOM node — make sure
-  // the ticker is alive so it patches the new card on the next interval.
-  setTimeout(() => _resumeActiveTickerIfNeeded(), 100);
+// Debounce window for _refreshSurfaces — the AI verdict engine fires
+// _refresh 3-5 times during a single measurement save (retrying.add,
+// inflight.add, inflight.delete, retrying.delete, plus saveMeasurement's
+// own setTimeout-navigate). Each rebuild destroys charts and re-renders
+// the entire view, and the destroy/recreate cycle shifts content above
+// the user's anchor (charts paint async, then are torn down again on
+// the next rebuild). That thrashing produced visible scroll jumps even
+// with the anchor-restore loop active. Coalescing multiple refresh
+// requests into a single rebuild eliminates the thrash.
+//
+// Trailing edge: we want the FINAL state (after the verdict lands) to
+// render, not the in-flight "analyzing" intermediate. The first refresh
+// in a burst schedules a navigate ~150ms out; subsequent refreshes
+// within that window reset the timer (keeping the latest scrollAnchor).
+// The user sees a slightly delayed "Analyzing..." indicator (acceptable
+// trade for no jump) and the final result with no thrash.
+let _refreshSurfacesTimer = null;
+let _refreshSurfacesPendingAnchor = null;
+function _refreshSurfaces(scrollAnchor) {
+  // Always keep the most recent anchor — if any caller in the burst
+  // requested a specific anchor, use it.
+  if (scrollAnchor) _refreshSurfacesPendingAnchor = scrollAnchor;
+  if (_refreshSurfacesTimer) clearTimeout(_refreshSurfacesTimer);
+  _refreshSurfacesTimer = setTimeout(() => {
+    _refreshSurfacesTimer = null;
+    const anchor = _refreshSurfacesPendingAnchor;
+    _refreshSurfacesPendingAnchor = null;
+    if (window.buildSidebar) try { window.buildSidebar(); } catch (e) {}
+    // Boot-time guard: state.currentView is undefined until the first
+    // navigate() runs. If a sync pull or AI verdict tick fires during
+    // that window, fall back to the DOM's active nav-item rather than
+    // defaulting to 'dashboard' (which would yank a user mid-init off
+    // whatever page they're on per the URL fragment / launcher target).
+    const view = state.currentView
+      || document.querySelector('.nav-item.active')?.dataset?.category
+      || 'dashboard';
+    const navOpts = anchor ? { scrollAnchor: anchor } : undefined;
+    if (window.navigate) try { window.navigate(view, navOpts); } catch (e) {}
+    setTimeout(() => _resumeActiveTickerIfNeeded(), 100);
+  }, 150);
 }
 
 // First-fire jargon explainer for in-session toasts. Returns a one-line
@@ -1744,6 +1861,29 @@ async function _snapshotActiveRate(sess) {
     const now = new Date();
     let atm = await fetchAtmosphere({ lat: coords.lat, lon: coords.lon, isoTime: now.toISOString() });
     atm = _applyAtmOverrides(atm);
+    // Mid-session source-flip guard: if a re-snapshot returns a result
+    // whose primary source differs from the prior snapshot AND the
+    // confidence dropped AND the UVI delta is large, REJECT the new atm
+    // and reuse the prior one. Targets the "airplane-mode toggle"
+    // pattern where the live ticker briefly fails over from CAMS (0.95
+    // confidence, real aerosol/AOD) to Open-Meteo (0.65, GFS-approx)
+    // and back, surfacing as a transient UVI spike (the v1.6.7 sanity
+    // warning catches this passively; this guard prevents the spike
+    // from feeding the live rate at all). 25% delta threshold rejects
+    // genuine source-driven discontinuities; smaller drifts pass through.
+    const priorAtm = _getLiveState(sess.id)?.atm;
+    if (priorAtm && Number.isFinite(priorAtm.uvIndex) && Number.isFinite(atm?.uvIndex)) {
+      const primarySrc = (s) => String(s || '').split('+')[0];
+      const sourcesDiffer = primarySrc(priorAtm.source) !== primarySrc(atm.source);
+      const priorConf = priorAtm.confidence ?? 0.6;
+      const newConf = atm.confidence ?? 0.6;
+      const downgraded = newConf < priorConf - 0.15;
+      const uviDelta = Math.abs(atm.uvIndex - priorAtm.uvIndex);
+      const largeJump = priorAtm.uvIndex > 0 && uviDelta > priorAtm.uvIndex * 0.25;
+      if (sourcesDiffer && downgraded && largeJump) {
+        atm = { ...priorAtm, _sourceFlipBlocked: { from: priorAtm.source, to: atm.source, attemptedUvi: atm.uvIndex, at: Date.now() } };
+      }
+    }
     const zenith = solarZenithAngle(now, coords.lat, coords.lon);
     const spectrum = reconstructSpectrum({
       zenithDeg: zenith,
@@ -3231,7 +3371,13 @@ function _renderSelectionOverlay(selected, onReady) {
   if (!_regionMapData || !selected || selected.size === 0) return null;
   const key = _selectedKey(selected);
   if (key === _overlayCache.key) return _overlayCache.url;
-  if (_overlayPending) return null;
+  // When a fresh overlay is mid-encode (or just-finished but still
+  // queued), return the PREVIOUS cached URL instead of null. The caller
+  // can paint the SVG with the stale overlay immediately — previously-
+  // selected regions stay visible during the ~100-200 ms PNG encode on
+  // the new selection set. Without this we tear down the overlay on
+  // every tap and the user perceives all selections briefly clearing.
+  if (_overlayPending) return _overlayCache.url || null;
   const selectedInts = new Set();
   for (const reg of selected) {
     const col = REGION_COLOR_RGB[reg];
@@ -3266,7 +3412,11 @@ function _renderSelectionOverlay(selected, onReady) {
     _overlayCache = { key, url: URL.createObjectURL(blob) };
     if (onReady) onReady(_overlayCache.url);
   }, 'image/png');
-  return null;
+  // Same idea as the _overlayPending branch above: return the previous
+  // URL so the SVG renders with stale selections until the new blob is
+  // ready. Without this the just-tapped region's previously-selected
+  // neighbors briefly disappear.
+  return _overlayCache.url || null;
 }
 
 // Render the two-view silhouette picker as an SVG. `selected` is a Set of
@@ -3814,6 +3964,7 @@ if (typeof window !== 'undefined') {
     getActiveSession,
     rollingChannelTotals,
     dailyChannelBreakdown,
+    dailyVitaminDIUBreakdown,
     rollingVitaminDIU,
     cumulativeMEDToday,
     cumulativeMEDYesterday,
