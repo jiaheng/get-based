@@ -2236,7 +2236,10 @@ async function _signSelfRequest(context) {
 // Fetch the relay's authoritative storedBytes for our owner. On
 // success, mirrors the value into the local quota cache so the
 // synchronous getRelayQuotaEstimate() reflects ground truth. Returns
-// {storedBytes, quotaBytes} or null on any failure.
+// {storedBytes, quotaBytes, messageCount, lastWriteToken} or null on
+// any failure. The latter two are surfaced by relay >= 1.2.3 — older
+// relays return null for them, which the caller treats as "unknown"
+// (not an error condition).
 export async function fetchOwnerStorageFromRelay() {
   const base = _getSelfBaseUrl();
   if (!base) return null;
@@ -2253,8 +2256,127 @@ export async function fetchOwnerStorageFromRelay() {
     const body = await r.json();
     if (!body || typeof body.storedBytes !== 'number') return null;
     _setRelayQuotaBytes(body.storedBytes);
-    return { storedBytes: body.storedBytes, quotaBytes: body.quotaBytes ?? null };
+    return {
+      storedBytes: body.storedBytes,
+      quotaBytes: body.quotaBytes ?? null,
+      // Relay 1.2.3+: messageCount + lastWriteToken let us verify
+      // "did the relay actually persist my last push?". Older relays
+      // omit these → null. Code reading them must handle null = unknown.
+      messageCount: typeof body.messageCount === 'number' ? body.messageCount : null,
+      lastWriteToken: typeof body.lastWriteToken === 'string' ? body.lastWriteToken : null,
+    };
   } catch { return null; }
+}
+
+// ─── Push verification (Evolu silent-reject detector) ────────────────
+// After every "push committed" event, we snapshot what the relay reports
+// for our owner and stash it. The NEXT verifyPushLanded() call hits
+// /self/owner-storage again and compares — if storedBytes hasn't
+// increased AND messageCount hasn't increased AND lastWriteToken
+// hasn't changed, the push was silently dropped server-side (the
+// Evolu silent-reject bug 2026-05-11: WS round-trip looks healthy,
+// relay acks "Push committed", but evolu_message gets zero rows
+// written). Three-state verdict so we can surface a colored dot
+// without false-alarming on transient errors or pre-1.2.3 relays:
+//   'healthy'  — relay advanced; push landed
+//   'wedged'   — relay didn't advance; push was silently dropped
+//   'unknown'  — couldn't probe (old relay, offline, no prior snapshot)
+let _lastRelaySnapshot = null;  // { storedBytes, messageCount, lastWriteToken, at }
+let _lastVerifyVerdict = { verdict: 'unknown', at: 0, reason: null };
+// Track the most recent local "push committed" event. The verifier only
+// reports 'wedged' if a push completed AFTER the last snapshot — without
+// this gate, two consecutive verify calls with no push between them
+// would always report 'wedged' (nothing changed on the relay because
+// nothing was pushed, but the user gets a misleading red dot).
+let _lastPushCommittedAt = 0;
+
+export function getRelayHealthVerdict() {
+  return { ..._lastVerifyVerdict };
+}
+
+// Called from onComplete inside the push pipeline once a "Push committed"
+// event has fired. Used by verifyPushLanded to gate the wedged verdict —
+// otherwise idle calls would always be 'wedged'.
+function notePushCommitted() {
+  _lastPushCommittedAt = Date.now();
+}
+
+// Verify that the most recent push actually advanced the relay's state.
+// Returns the verdict object. Caller is the diagnose modal renderer.
+export async function verifyPushLanded() {
+  // Old relay (< 1.2.3): messageCount + lastWriteToken come back null.
+  // We can still check storedBytes, but it can advance and then drop
+  // back to its prior value after a compaction, so it's a weaker signal.
+  // Treat the pre-1.2.3 case as 'unknown' to avoid false alarms.
+  const fresh = await fetchOwnerStorageFromRelay();
+  if (!fresh) {
+    _lastVerifyVerdict = { verdict: 'unknown', at: Date.now(), reason: 'relay-unreachable' };
+    return _lastVerifyVerdict;
+  }
+  // `messageCount` is the discriminator for relay version: v1.2.3+
+  // always returns an integer (0 for empty owners, > 0 otherwise);
+  // older relays omit the field and the fetcher maps the absence to
+  // null. We CANNOT use `lastWriteToken` here — it's null both for
+  // pre-1.2.3 AND for legit wedged owners (zero writes ever landed),
+  // which is exactly the state we want to detect. (Greptile follow-up.)
+  if (fresh.messageCount === null) {
+    _lastVerifyVerdict = { verdict: 'unknown', at: Date.now(), reason: 'pre-1.2.3-relay' };
+    return _lastVerifyVerdict;
+  }
+  // Absolute-value sanity check: if we've pushed at least once this
+  // session AND the relay reports zero messages, we're in the exact
+  // 2026-05-11 wedged-owner shape. No baseline needed — pushes
+  // succeeded locally, relay has nothing. Strongest signal we have.
+  if (_lastPushCommittedAt > 0 && fresh.messageCount === 0 && fresh.storedBytes === 0) {
+    _lastVerifyVerdict = {
+      verdict: 'wedged',
+      at: Date.now(),
+      reason: 'pushes committed locally but relay reports zero messages and zero bytes',
+    };
+    return _lastVerifyVerdict;
+  }
+  if (!_lastRelaySnapshot) {
+    // First call this session — snapshot now, can't verify yet.
+    _lastRelaySnapshot = {
+      storedBytes: fresh.storedBytes,
+      messageCount: fresh.messageCount,
+      lastWriteToken: fresh.lastWriteToken,
+      at: Date.now(),
+    };
+    _lastVerifyVerdict = { verdict: 'unknown', at: Date.now(), reason: 'no-baseline-yet' };
+    return _lastVerifyVerdict;
+  }
+  // Only report 'wedged' from a delta if a push happened SINCE the
+  // baseline was captured. Otherwise the relay has nothing to advance
+  // past and we'd be flagging idle-as-wedged.
+  if (_lastPushCommittedAt <= _lastRelaySnapshot.at) {
+    _lastVerifyVerdict = { verdict: 'unknown', at: Date.now(), reason: 'no-push-since-baseline' };
+    // Don't roll the baseline — we want the NEXT verify (after a real
+    // push) to compare against the same snapshot.
+    return _lastVerifyVerdict;
+  }
+  const advanced =
+    fresh.storedBytes > _lastRelaySnapshot.storedBytes
+    || fresh.messageCount > _lastRelaySnapshot.messageCount
+    || (fresh.lastWriteToken && fresh.lastWriteToken !== _lastRelaySnapshot.lastWriteToken);
+  if (advanced) {
+    _lastVerifyVerdict = { verdict: 'healthy', at: Date.now(), reason: null };
+  } else {
+    _lastVerifyVerdict = {
+      verdict: 'wedged',
+      at: Date.now(),
+      reason: `pushed at ${new Date(_lastPushCommittedAt).toISOString()} but relay still reports storedBytes=${fresh.storedBytes} messageCount=${fresh.messageCount}`,
+    };
+  }
+  // Roll the baseline forward so the next push-verify pair measures the
+  // next interval, not all of session-history.
+  _lastRelaySnapshot = {
+    storedBytes: fresh.storedBytes,
+    messageCount: fresh.messageCount,
+    lastWriteToken: fresh.lastWriteToken,
+    at: Date.now(),
+  };
+  return _lastVerifyVerdict;
 }
 
 // Hit POST /self/compact-owner — drops every evolu_message row for our
@@ -2617,6 +2739,11 @@ async function pushProfile(profileId, importedData, opts = {}) {
       const okMsg = `Push committed ${profileId.slice(0,8)} (${elapsed}ms) — sun=${sunCount} dev=${devCount}`;
       dbg(okMsg);
       _logSyncEvent('push', okMsg);
+      // Mark the moment a push committed locally so the relay-health
+      // verifier (verifyPushLanded) can distinguish "no push happened
+      // yet" from "push happened but relay didn't advance" (silent
+      // reject).
+      notePushCommitted();
       // Only advance the local-sync-ts watermark when the push actually
       // landed. The previous (synchronous) bump after evolu.update meant
       // a wedged push set the watermark anyway → subsequent pulls saw
@@ -3649,6 +3776,15 @@ export function toggleSyncDetail() {
 // other's data despite using the same relay URL.
 export async function showSyncDiagnose() {
   const d = await getEvoluDiagnostics();
+  // Probe the relay so we can render a fresh "is the relay actually
+  // persisting my pushes?" verdict. verifyPushLanded compares a stored
+  // baseline against the relay's current state — if storedBytes /
+  // messageCount / lastWriteToken haven't moved since the last probe,
+  // the verdict is 'wedged'. First call this session is 'unknown' (just
+  // seeds the baseline). Best-effort: any error path resolves to a
+  // 'unknown' verdict, never blocks modal rendering.
+  let healthVerdict = { verdict: 'unknown', at: 0, reason: null };
+  try { healthVerdict = await verifyPushLanded(); } catch {}
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay show';
   const rowsHtml = d.rows.length
@@ -3679,6 +3815,38 @@ export async function showSyncDiagnose() {
         <div>In-memory state: sunSessions=${d.activeImported.sunSessions} lightDevices=${d.activeImported.lightDevices}</div>
       </div>
       ${(() => {
+        // Sync health — relays ≥ 1.2.3 surface messageCount + lastWriteToken
+        // on /self/owner-storage, letting us verify "did the relay actually
+        // persist my push?" without operator help. Three-state verdict:
+        //   healthy  → relay advanced; push landed (green dot)
+        //   wedged   → relay didn't advance; push silently dropped (red dot)
+        //   unknown  → couldn't compare (old relay, offline, first call) — render dim
+        const v = healthVerdict?.verdict || 'unknown';
+        if (v === 'unknown') {
+          // Hide the tile when we genuinely don't know — avoids confusing
+          // the user with "Unknown ✓" or similar. The relay-storage tile
+          // above already covers the basics. We re-render with a real
+          // verdict on the user's next open of this modal.
+          return '';
+        }
+        const isHealthy = v === 'healthy';
+        const color = isHealthy ? 'var(--green)' : 'var(--red)';
+        const label = isHealthy ? 'Healthy — relay is persisting your pushes.' : 'Wedged — relay accepted the WebSocket round-trip but didn\'t persist anything.';
+        const detail = isHealthy
+          ? 'Last verified ' + new Date(healthVerdict.at).toISOString().slice(11, 19) + 'Z. Storage state has advanced since the previous check.'
+          : (healthVerdict.reason || 'No relay-side advance observed since the previous check.');
+        const recovery = isHealthy ? '' : '<div style="color:var(--text-muted);font-size:11px;margin-top:6px">This is the Evolu silent-reject pattern (2026-05-11 production incident). The fix is identity rotation — generate a fresh 24-word mnemonic and restore the other devices to it. See <a href="docs/guide/cross-device-sync.html" target="_blank" style="color:var(--accent)">cross-device sync docs</a>.</div>';
+        return `<div style="margin-bottom:12px;padding:10px;border:1px solid var(--border);border-radius:6px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+            <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color}"></span>
+            <b>Relay sync health:</b>
+            <span style="color:${color};font-weight:600">${escapeHTML(label)}</span>
+          </div>
+          <div style="color:var(--text-muted);font-size:11px">${escapeHTML(detail)}</div>
+          ${recovery}
+        </div>`;
+      })()}
+      ${(() => {
         const q = getRelayQuotaEstimate();
         if (!q) return '';
         const mb = (q.bytes / (1024 * 1024)).toFixed(2);
@@ -3697,7 +3865,8 @@ export async function showSyncDiagnose() {
         // estimate with the relay's authoritative storedBytes.
         const buttons = `
           <button class="ctx-btn-option" style="font-size:11px" onclick="window.refreshRelayStorage(this)" title="Probe the relay for the actual storedBytes for this owner — replaces the local estimate.">Refresh</button>
-          <button class="ctx-btn-option" style="font-size:11px" onclick="window.confirmCompactRelay(this)" title="Drops every Evolu message row for this owner on the relay and resets storedBytes to 0. Devices re-establish their state on the next push.">Compact storage</button>`;
+          <button class="ctx-btn-option" style="font-size:11px" onclick="window.confirmCompactRelay(this)" title="Drops every Evolu message row for this owner on the relay and resets storedBytes to 0. Devices re-establish their state on the next push.">Compact storage</button>
+          <button class="ctx-btn-option" style="font-size:11px" onclick="window.confirmRotateIdentity(this)" title="Generate a fresh 24-word mnemonic for this owner. Use when the relay-health verdict above shows 'wedged' (silent-reject pattern). You'll need to enter the new mnemonic on every other device.">Rotate identity</button>`;
         return `<div style="margin-bottom:12px;padding:10px;border:1px solid var(--border);border-radius:6px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;gap:8px;flex-wrap:wrap">
             <b>Relay storage:</b>
@@ -3915,6 +4084,181 @@ async function refreshRelayStorage(btn) {
     if (btn && !btn.closest?.('.modal-overlay')?.parentElement) return;
     if (btn) { btn.disabled = false; btn.textContent = 'Refresh'; }
   }
+}
+
+// "Rotate identity" — generate a fresh 24-word BIP-39 mnemonic, show
+// it (with QR for cross-device entry), confirm the user saved it, then
+// apply locally via restoreFromMnemonic. The new ownerId is fresh on
+// the relay (no ghost state from any prior Evolu silent-reject), so
+// pushes start landing immediately. The other devices need to enter
+// the same mnemonic to converge.
+//
+// This is the user-facing fix for the silent-reject pattern surfaced
+// by the diagnose modal's red dot — closes the loop from detection
+// (relay-health verdict) to recovery (one-click rotation). Without
+// this, the only path was the manual `enableSync({skipPush:true}) →
+// restoreFromMnemonic` dance from the 2026-05-11 incident.
+async function confirmRotateIdentity(btn) {
+  // Stage 1: warning dialog. Make sure the user understands the
+  // implications BEFORE we generate a fresh mnemonic (which is what
+  // makes this destructive — the old identity is recoverable until
+  // we apply the new one, but most users won't think to save it).
+  const warning =
+    "Rotate sync identity — generate a fresh 24-word mnemonic for this device and apply it.\n\n" +
+    "• You'll need to enter the new mnemonic on every OTHER device that should keep syncing with this one.\n" +
+    "• The old identity's data stays on the relay until it ages out (no immediate loss), but new pushes will go under the new identity.\n" +
+    "• This is the recovery path for a wedged owner (red dot above) — see the 2026-05-11 silent-reject bug.\n\n" +
+    "Proceed?";
+  // utils.js helper missing → proceed without confirmation. Mirrors the
+  // pattern in the sibling confirm* helpers (see confirmCompactRelay)
+  // so a utils-load failure doesn't dead-end the user. Native
+  // confirm()/prompt()/alert() are banned by the no-native-dialogs test.
+  const proceed = (typeof window.showConfirmDialog === 'function')
+    ? await window.showConfirmDialog(warning)
+    : true;
+  if (!proceed) return;
+
+  // Stage 2: generate the new mnemonic. BIP-39 256 bits = 24 words.
+  if (!window.bip39 || typeof window.bip39.generateMnemonic !== 'function') {
+    showNotification('BIP-39 library not loaded — cannot rotate identity', 'error');
+    return;
+  }
+  let mnemonic;
+  try {
+    mnemonic = await window.bip39.generateMnemonic(256);
+  } catch (e) {
+    showNotification(`Mnemonic generation failed: ${e?.message || e}`, 'error');
+    return;
+  }
+  if (typeof mnemonic !== 'string' || mnemonic.split(/\s+/).filter(Boolean).length !== 24) {
+    showNotification('Generated mnemonic is malformed (expected 24 words)', 'error');
+    return;
+  }
+
+  // Stage 3: present to the user. Show in a dedicated modal with QR for
+  // phone-side entry, copy button, and a save-confirmation checkbox
+  // that gates the Apply button. We do NOT auto-apply — the user has
+  // to consciously confirm they saved it. Losing this mnemonic means
+  // losing the new sync identity entirely (no recovery path).
+  // Defensive: close any existing diagnose modal so its z-index / focus
+  // trap doesn't fight us.
+  const existing = btn?.closest?.('.modal-overlay');
+  if (existing) existing.remove();
+
+  let qrSvg = '';
+  try {
+    if (typeof qrcode === 'function') {
+      const qr = qrcode(0, 'L');
+      qr.addData(mnemonic);
+      qr.make();
+      qrSvg = qr.createSvgTag({ cellSize: 4, margin: 4, scalable: true });
+    }
+  } catch (e) {
+    // Non-fatal; the user can still copy-paste.
+    qrSvg = '';
+  }
+
+  // The 24 words rendered as a grid with positional numbers so users
+  // can sanity-check across devices ("word 13 is 'magic'") without
+  // having to mentally count.
+  const words = mnemonic.split(/\s+/).filter(Boolean);
+  const wordsHtml = words
+    .map((w, i) => `<span style="display:inline-flex;align-items:baseline;gap:4px;padding:2px 6px;background:var(--surface);border-radius:4px;font-family:monospace;font-size:12px"><span style="color:var(--text-muted);font-size:10px">${i + 1}.</span>${escapeHTML(w)}</span>`)
+    .join(' ');
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay show';
+  overlay.innerHTML = `<div class="modal" role="dialog" aria-label="Rotate sync identity" style="max-width:560px">
+    <div class="modal-header"><h3>Rotate sync identity — save your new mnemonic</h3><button class="modal-close" aria-label="Close">×</button></div>
+    <div class="modal-body" style="font-size:13px">
+      <div style="margin-bottom:12px;padding:8px;border:1px solid var(--red);border-radius:6px;background:rgba(255,80,80,0.08)">
+        <div style="font-weight:600;margin-bottom:4px">⚠ Save this BEFORE you click Apply</div>
+        <div style="font-size:12px;color:var(--text-muted)">Losing this 24-word mnemonic means losing your new cross-device sync identity — there is no recovery path. Save it in a password manager AND enter it on every device that should keep syncing.</div>
+      </div>
+      <div style="display:flex;gap:16px;align-items:flex-start;margin-bottom:12px">
+        ${qrSvg ? `<div style="flex-shrink:0;background:#fff;padding:8px;border-radius:8px;width:180px;height:180px">${qrSvg}</div>` : ''}
+        <div style="flex:1">
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">${qrSvg ? 'Scan from another device, or copy the words below.' : 'Copy the words below — QR code unavailable on this build.'}</div>
+          <div id="rotate-words" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px">${wordsHtml}</div>
+          <button class="import-btn import-btn-secondary" id="rotate-copy-btn" style="font-size:11px">Copy mnemonic</button>
+        </div>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:12px;cursor:pointer;font-size:12px">
+        <input type="checkbox" id="rotate-saved-check"/>
+        <span>I've saved this mnemonic in a safe place (password manager or written down).</span>
+      </label>
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <button class="import-btn import-btn-secondary" id="rotate-cancel-btn">Cancel</button>
+        <button class="import-btn import-btn-primary" id="rotate-apply-btn" disabled>Apply on this device</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+
+  // Wire up: close handlers, copy, gate Apply on checkbox, then Apply.
+  const closeBtn = overlay.querySelector('.modal-close');
+  const cancelBtn = overlay.querySelector('#rotate-cancel-btn');
+  const copyBtn = overlay.querySelector('#rotate-copy-btn');
+  const check = overlay.querySelector('#rotate-saved-check');
+  const applyBtn = overlay.querySelector('#rotate-apply-btn');
+  const cleanup = () => {
+    // Zero out the in-memory mnemonic — both the string AND the words
+    // array, since the array is what the copy/apply handlers actually
+    // hold via closure. Missing the array was a Greptile finding: the
+    // string wipe alone left the seed live on the JS heap as long as
+    // the modal's handlers stayed in scope. Mutate-in-place (fill +
+    // length=0) so any closure that already captured the array sees
+    // the zeroed-out version too, not a stale snapshot.
+    mnemonic = null;
+    if (Array.isArray(words)) {
+      words.fill('');
+      words.length = 0;
+    }
+    overlay.remove();
+  };
+  closeBtn?.addEventListener('click', cleanup);
+  cancelBtn?.addEventListener('click', cleanup);
+  copyBtn?.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(words.join(' '));
+      copyBtn.textContent = '✓ Copied';
+      setTimeout(() => { if (copyBtn) copyBtn.textContent = 'Copy mnemonic'; }, 1500);
+    } catch {
+      showNotification('Copy failed — select the words manually', 'error');
+    }
+  });
+  check?.addEventListener('change', () => {
+    if (applyBtn) applyBtn.disabled = !check.checked;
+  });
+  applyBtn?.addEventListener('click', async () => {
+    applyBtn.disabled = true;
+    applyBtn.textContent = 'Applying…';
+    try {
+      // Ensure sync is enabled so Evolu exists before we restore. The
+      // skipPush flag matters: enableSync would otherwise push the
+      // current local state under a freshly-generated (wrong) mnemonic
+      // before restoreFromMnemonic swaps the owner. skipPush=true
+      // lets restoreFromMnemonic be the first push after the swap,
+      // under the right identity.
+      if (!isSyncEnabled()) {
+        await enableSync({ skipPush: true });
+      }
+      const ok = await restoreFromMnemonic(words.join(' '));
+      if (!ok) {
+        showNotification('Restore returned false — generated mnemonic was rejected', 'error');
+        applyBtn.disabled = false;
+        applyBtn.textContent = 'Apply on this device';
+        return;
+      }
+      // restoreFromMnemonic schedules window.location.reload() on
+      // success — the cleanup happens implicitly when the page unloads.
+      // No need to call cleanup() here.
+    } catch (e) {
+      showNotification(`Apply failed: ${e?.message || e}`, 'error');
+      applyBtn.disabled = false;
+      applyBtn.textContent = 'Apply on this device';
+    }
+  });
 }
 
 // "Reset window" — drops the rolling per-push telemetry log so the user
@@ -4139,8 +4483,11 @@ Object.assign(window, {
   copySyncEvents,
   copySyncDiagnose,
   confirmCompactRelay,
+  confirmRotateIdentity,
   refreshRelayStorage,
   fetchOwnerStorageFromRelay,
+  verifyPushLanded,
+  getRelayHealthVerdict,
   compactOwnerSelfServe,
   getRelayQuotaEstimate,
   resetRelayQuotaEstimate,
