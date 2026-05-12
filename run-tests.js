@@ -102,7 +102,12 @@ const TEST_FILES = [
   'tests/test-family-history.js',
   'tests/test-manual-entry-flow.js',
   'tests/test-table-heatmap-empty.js',
-  'tests/test-wearables-bp-merge.js'
+  'tests/test-wearables-bp-merge.js',
+  // axe-core runtime scan runs LAST. It rebuilds the DOM extensively and
+  // mutates state in ways that are expensive to fully reverse (creates a
+  // demo profile, swaps currentProfile, opens/closes 8 modals), so anything
+  // depending on a specific upstream state would have been observed by now.
+  'tests/test-a11y-axe.js',
 ];
 
 const PORT = process.env.PORT || 8000;
