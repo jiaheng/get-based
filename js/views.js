@@ -2,7 +2,7 @@
 
 import { state } from './state.js';
 import { CORRELATION_PRESETS, CHIP_COLORS, trackUsage } from './schema.js';
-import { escapeHTML, getStatus, getRangePosition, formatValue, getTrend, showNotification, showConfirmDialog, showPromptDialog, hasCardContent, formatDate } from './utils.js';
+import { escapeHTML, getStatus, getRangePosition, formatValue, getTrend, showNotification, showConfirmDialog, showPromptDialog, hasCardContent, formatDate, safeMarkerId } from './utils.js';
 import { getChartColors } from './theme.js';
 import { getActiveData, filterDatesByRange, destroyAllCharts, getEffectiveRange, getEffectiveRangeForDate, getLatestValueIndex, getAllFlaggedMarkers, statusIcon, detectTrendAlerts, getKeyTrendMarkers, getFocusCardFingerprint, saveImportedData, recalculateHOMAIR, updateHeaderDates, renderDateRangeFilter, renderChartLayersDropdown, convertDisplayToSI } from './data.js';
 import { profileStorageKey } from './profile.js';
@@ -3315,6 +3315,11 @@ export function dismissOnboarding() {
 // ═══════════════════════════════════════════════
 
 export function showCategory(categoryKey, preData) {
+  // categoryKey is interpolated into inline-onclick handlers below (rename,
+  // changeIcon, switchView, showDetailModal). Reject anything that doesn't
+  // match the strict allowlist so a poisoned customMarker key can't break
+  // out of the JS string context.
+  if (!safeMarkerId(categoryKey)) return;
   // Ensure catalog is preloaded for sorting and rec links
   if (window.loadCatalog && !window._cachedCatalog) window.loadCatalog().then(c => { window._cachedCatalog = c; });
   const rawData = preData || getActiveData();
@@ -3361,6 +3366,9 @@ export function showCategory(categoryKey, preData) {
     });
     html += `<div class="charts-grid">`;
     for (const [key, marker] of withData) {
+      // Skip legacy customMarkers with unsafe keys — they can't be safely
+      // embedded in inline-onclick handlers.
+      if (!safeMarkerId(key)) continue;
       html += renderChartCard(categoryKey + "_" + key, marker, data.dateLabels);
     }
     html += `</div>`;
@@ -3369,6 +3377,7 @@ export function showCategory(categoryKey, preData) {
     if (noData.length > 0) {
       html += `<div style="margin-top:16px"><p style="color:var(--text-secondary);font-size:13px;margin-bottom:8px">No data yet</p><div style="display:flex;flex-wrap:wrap;gap:8px">`;
       for (const [key, marker] of noData) {
+        if (!safeMarkerId(key)) continue;
         const id = categoryKey + '_' + key;
         html += `<div class="chart-card" role="button" tabindex="0" aria-label="Add value for ${escapeHTML(marker.name)}" onclick="showDetailModal('${id}')" style="cursor:pointer;padding:12px 16px;min-height:auto;flex:0 0 auto">
           <span style="color:var(--text-secondary)">${escapeHTML(marker.name)}</span>
@@ -3553,6 +3562,10 @@ export function changeCategoryIcon(categoryKey) {
 }
 
 export function switchView(view, categoryKey, btn) {
+  // categoryKey reaches inline-onclick handlers via renderChartCard /
+  // renderFattyAcidsView / renderTableView / renderHeatmapView. Same
+  // allowlist guard as showCategory.
+  if (!safeMarkerId(categoryKey)) return;
   state.categoryView = view;
   document.querySelectorAll(".view-btn").forEach(b => {
     b.classList.remove("active");
@@ -3583,7 +3596,9 @@ export function switchView(view, categoryKey, btn) {
       container.innerHTML = renderFattyAcidsView(cat, categoryKey);
       renderFattyAcidsCharts(cat);
     } else {
-      const withData = Object.entries(cat.markers).filter(([, m]) => markerHasData(m));
+      // Per-key safety check skips legacy customMarkers with unsafe keys so
+      // they never reach inline-onclick handlers in renderChartCard.
+      const withData = Object.entries(cat.markers).filter(([key, m]) => markerHasData(m) && safeMarkerId(key));
       let html = `<div class="charts-grid">`;
       for (const [key, marker] of withData) {
         html += renderChartCard(categoryKey + "_" + key, marker, data.dateLabels);
@@ -3598,6 +3613,9 @@ export function switchView(view, categoryKey, btn) {
 }
 
 export function renderChartCard(id, marker, dateLabels) {
+  // id is interpolated into onclick handlers and DOM ids below. Single
+  // chokepoint guard for every caller (dashboard, showCategory, switchView).
+  if (!safeMarkerId(id)) return '';
   state.markerRegistry[id] = marker;
   const latestIdx = getLatestValueIndex(marker.values);
   const latestVal = latestIdx !== -1 ? marker.values[latestIdx] : null;
@@ -3737,11 +3755,14 @@ export function renderHeatmapView(cat, dateLabels, dates, categoryKey) {
 }
 
 export function renderFattyAcidsView(cat, categoryKey) {
+  // categoryKey + per-marker key flow into inline-onclick handlers below.
+  if (!safeMarkerId(categoryKey)) return '';
   let html = `<div style="background:var(--bg-card);border-radius:var(--radius);padding:20px;margin-bottom:20px;border:1px solid var(--border)">
     <h3 style="margin-bottom:16px;font-size:16px">Fatty Acid Profile${cat.singleDate ? ' \u2014 ' + new Date(cat.singleDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : ''}</h3>
     <div class="fa-bar-chart-container"><canvas id="chart-fa-bar"></canvas></div></div>`;
   html += `<div class="fatty-acids-grid">`;
   for (const [key, marker] of Object.entries(cat.markers)) {
+    if (!safeMarkerId(key)) continue;
     const r = getEffectiveRange(marker);
     const v = marker.values[0], s = getStatus(v, r.min, r.max);
     const pos = Math.max(0, Math.min(100, getRangePosition(v, r.min, r.max)));
@@ -3818,6 +3839,11 @@ export async function fetchCustomMarkerDescription(markerId, markerName, unit) {
 }
 
 export function showDetailModal(id, opts = {}) {
+  // id is interpolated into multiple inline-onclick handlers in the modal
+  // body (Add Value, Save/Cancel/Delete note, Ask AI, Delete custom marker).
+  // Reject anything outside the strict allowlist so a poisoned customMarker
+  // key can't break out of the JS string context.
+  if (!safeMarkerId(id)) return;
   const data = getActiveData();
   const idx = id.indexOf('_');
   const catKey = id.slice(0, idx), mKey = id.slice(idx + 1);

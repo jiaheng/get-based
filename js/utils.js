@@ -20,6 +20,42 @@ export function hashString(str) {
   return (hash >>> 0).toString(36);
 }
 
+// Marker keys are interpolated into inline-onclick JS string literals
+// (e.g. `onclick="showDetailModal('${id}')"`), where escapeHTML is not
+// enough — a key containing `'` or `\` would close the JS string and
+// inject. Custom marker keys come from PDF AI extraction, so the only
+// way to be sure is an allowlist + proto-pollution guard. Returns the
+// input unchanged when safe, or null when not (callers should skip
+// rendering that element rather than coerce to a wrong id).
+const _PROTO_PARTS = new Set(['__proto__', 'constructor', 'prototype']);
+export function safeMarkerId(id) {
+  if (typeof id !== 'string' || id.length === 0 || id.length > 128) return null;
+  if (!/^[a-zA-Z0-9_.]+$/.test(id)) return null;
+  // Reject the whole id matching a proto name (would pollute when used
+  // as a property key) and each `.`-separated part (would pollute when
+  // a downstream site splits and indexes per-part).
+  if (_PROTO_PARTS.has(id)) return null;
+  for (const part of id.split('.')) {
+    if (_PROTO_PARTS.has(part)) return null;
+  }
+  return id;
+}
+
+// Sanitize a `category.markerKey` at write time so unsafe keys never
+// enter `state.importedData`. Returns the cleaned key, or null when the
+// shape is wrong (no dot, empty part) or either part collides with a
+// prototype-pollution name. Keep in sync with safeMarkerId's allowlist.
+export function sanitizeMarkerKey(fullKey) {
+  if (typeof fullKey !== 'string') return null;
+  const dotIdx = fullKey.indexOf('.');
+  if (dotIdx < 1 || dotIdx >= fullKey.length - 1) return null;
+  const cat = fullKey.slice(0, dotIdx).replace(/[^a-zA-Z0-9_]/g, '');
+  const mk  = fullKey.slice(dotIdx + 1).replace(/[^a-zA-Z0-9_]/g, '');
+  if (!cat || !mk) return null;
+  if (_PROTO_PARTS.has(cat) || _PROTO_PARTS.has(mk)) return null;
+  return `${cat}.${mk}`;
+}
+
 export function getStatus(value, refMin, refMax) {
   if (value === null || value === undefined) return "missing";
   if (refMin == null && refMax == null) return "normal";
