@@ -2,7 +2,7 @@
 
 import { state } from './state.js';
 import { CORRELATION_PRESETS, CHIP_COLORS, trackUsage } from './schema.js';
-import { escapeHTML, getStatus, getRangePosition, formatValue, getTrend, showNotification, showConfirmDialog, hasCardContent, formatDate } from './utils.js';
+import { escapeHTML, getStatus, getRangePosition, formatValue, getTrend, showNotification, showConfirmDialog, showPromptDialog, hasCardContent, formatDate } from './utils.js';
 import { getChartColors } from './theme.js';
 import { getActiveData, filterDatesByRange, destroyAllCharts, getEffectiveRange, getEffectiveRangeForDate, getLatestValueIndex, getAllFlaggedMarkers, statusIcon, detectTrendAlerts, getKeyTrendMarkers, getFocusCardFingerprint, saveImportedData, recalculateHOMAIR, updateHeaderDates, renderDateRangeFilter, renderChartLayersDropdown, convertDisplayToSI } from './data.js';
 import { profileStorageKey } from './profile.js';
@@ -3013,7 +3013,7 @@ export function buildFocusContext() {
     ctx += `Lens: ${interpretiveLens.trim()}\n`;
   }
 
-  // Medical conditions
+  // Medical history (own diagnoses + family history)
   const diag = state.importedData.diagnoses;
   if (hasCardContent(diag)) {
     const conditions = (diag.conditions || []).map(c => `${c.name} (${c.severity})`);
@@ -3380,6 +3380,13 @@ export function showCategory(categoryKey, preData) {
   html += `</div>`;
   main.innerHTML = html;
 
+  const savedView = state.categoryView;
+  if (savedView === 'table' || savedView === 'heatmap') {
+    const buttons = main.querySelectorAll('.view-toggle .view-btn');
+    const idx = savedView === 'table' ? 1 : 2;
+    if (buttons[idx]) { switchView(savedView, categoryKey, buttons[idx]); return; }
+  }
+
   if (withData.length === 0) { /* no charts to render */ }
   else if (cat.singleDate) { renderFattyAcidsCharts(cat); }
   else {
@@ -3546,6 +3553,7 @@ export function changeCategoryIcon(categoryKey) {
 }
 
 export function switchView(view, categoryKey, btn) {
+  state.categoryView = view;
   document.querySelectorAll(".view-btn").forEach(b => {
     b.classList.remove("active");
     b.setAttribute('aria-selected', 'false');
@@ -3559,10 +3567,17 @@ export function switchView(view, categoryKey, btn) {
   const data = filterDatesByRange(rawData);
   const cat = data.categories[categoryKey];
   const container = document.getElementById("view-content");
+  // Pre-sanitize date labels at the call boundary — CodeQL's taint analysis
+  // (js/xss-through-dom) doesn't trace sanitizers across function calls, so
+  // even though renderTableView/renderHeatmapView re-escape internally,
+  // escaping here closes the call-site taint flow. Date arrays stay raw
+  // because they're consumed by JSON.stringify in inline-onclick attrs
+  // (escapeHTML would double-escape the JSON literal).
+  const safeLabels = Array.isArray(data.dateLabels) ? data.dateLabels.map(escapeHTML) : data.dateLabels;
   if (view === "table") {
-    container.innerHTML = renderTableView(cat, data.dateLabels, categoryKey);
+    container.innerHTML = renderTableView(cat, safeLabels, categoryKey, data.dates);
   } else if (view === "heatmap") {
-    container.innerHTML = renderHeatmapView(cat, data.dateLabels, data.dates, categoryKey);
+    container.innerHTML = renderHeatmapView(cat, safeLabels, data.dates, categoryKey);
   } else {
     if (cat.singleDate) {
       container.innerHTML = renderFattyAcidsView(cat, categoryKey);
@@ -3629,13 +3644,24 @@ export function renderChartCard(id, marker, dateLabels) {
   return html;
 }
 
-export function renderTableView(cat, dateLabels, categoryKey) {
+export function renderTableView(cat, dateLabels, categoryKey, dates) {
   const labels = cat.singleDate ? [cat.singleDateLabel || "N/A"] : dateLabels;
+  // Hide markers with no values at all — sidebar still lists them with 0 count.
+  const markerEntries = Object.entries(cat.markers).filter(([, m]) =>
+    m.values && m.values.some(v => v !== null)
+  );
+  if (markerEntries.length === 0) {
+    return `<div class="data-table-wrapper"><div style="padding:32px;text-align:center;color:var(--text-muted)">No data yet for this category. Use the sidebar to add a value or import a PDF.</div></div>`;
+  }
   let html = `<div class="data-table-wrapper"><table class="data-table"><thead><tr>
     <th>Biomarker</th><th>Unit</th><th>Reference</th>`;
+  // Column headers — labels are already HTML-escaped by the showCategory
+  // call site (renderTableView's contract: dateLabels passed in are safe).
+  // Pre-escape lives at the boundary so CodeQL's taint analysis sees the
+  // sanitizer at the call site (it doesn't trace across function calls).
   for (const d of labels) html += `<th>${d}</th>`;
   html += `<th>Trend</th><th>Range</th></tr></thead><tbody>`;
-  for (const [key, marker] of Object.entries(cat.markers)) {
+  for (const [key, marker] of markerEntries) {
     const id = categoryKey ? categoryKey + '_' + key : '';
     const r = getEffectiveRange(marker);
     let refCell = r.min != null && r.max != null ? `${formatValue(r.min)} \u2013 ${formatValue(r.max)}` : '\u2014';
@@ -3650,7 +3676,19 @@ export function renderTableView(cat, dateLabels, categoryKey) {
       const v = marker.values[i];
       const ri = getEffectiveRangeForDate(marker, i);
       const s = v !== null ? getStatus(v, ri.min, ri.max) : "missing";
-      html += `<td class="value-cell val-${s}">${v !== null ? formatValue(v) : "\u2014"}</td>`;
+      // Empty cells: click \u2192 add a value for THIS column's date (not today).
+      // Skip for singleDate categories where the "date" is a synthetic label.
+      const colDate = (dates && !cat.singleDate) ? dates[i] : null;
+      // JSON.stringify + escapeHTML so the interpolated values survive
+      // the HTML-attribute → JS-string-literal round-trip even if they
+      // ever contain quotes or HTML meta-chars (CodeQL js/xss-through-dom).
+      // Same trick as filterConditionSuggestions for apostrophe-bearing
+      // condition names — defense in depth on top of the marker-key /
+      // ISO-date validators upstream.
+      const emptyClick = (v === null && id && colDate)
+        ? ` onclick="event.stopPropagation();openManualEntryForm(${escapeHTML(JSON.stringify(id))},${escapeHTML(JSON.stringify(colDate))})" style="cursor:cell" title="Add value for ${dateLabels[i] || escapeHTML(colDate)}"`
+        : '';
+      html += `<td class="value-cell val-${s}"${emptyClick}>${v !== null ? formatValue(v) : "\u2014"}</td>`;
     }
     const li = getLatestValueIndex(marker.values);
     const trendRange = li !== -1 ? getEffectiveRangeForDate(marker, li) : r;
@@ -3671,10 +3709,17 @@ export function renderTableView(cat, dateLabels, categoryKey) {
 
 export function renderHeatmapView(cat, dateLabels, dates, categoryKey) {
   const labels = cat.singleDate ? [cat.singleDateLabel || "N/A"] : dateLabels;
+  const markerEntries = Object.entries(cat.markers).filter(([, m]) =>
+    m.values && m.values.some(v => v !== null)
+  );
+  if (markerEntries.length === 0) {
+    return `<div class="heatmap-wrapper"><div style="padding:32px;text-align:center;color:var(--text-muted)">No data yet for this category. Use the sidebar to add a value or import a PDF.</div></div>`;
+  }
   let html = `<div class="heatmap-wrapper"><table class="heatmap-table"><thead><tr><th>Biomarker</th>`;
+  // Labels pre-escaped at the showCategory call boundary — see renderTableView.
   for (const d of labels) html += `<th>${d}</th>`;
   html += `</tr></thead><tbody>`;
-  for (const [key, marker] of Object.entries(cat.markers)) {
+  for (const [key, marker] of markerEntries) {
     const id = categoryKey + "_" + key;
     state.markerRegistry[id] = marker;
     html += `<tr><td role="button" tabindex="0" aria-label="${escapeHTML(marker.name)}" style="cursor:pointer" onclick="showDetailModal('${id}')">${escapeHTML(marker.name)}</td>`;
@@ -3863,9 +3908,16 @@ export function showDetailModal(id, opts = {}) {
         sourceHtml = `<div class="mv-source" title="${escapeHTML(fname)}">${escapeHTML(display)}</div>`;
       }
     }
+    // Per-value note (markerValueNotes keyed `dotKey:date`).
+    const valueNote = rawDate ? state.importedData.markerValueNotes?.[mvKey] : null;
+    const valueNoteHtml = rawDate
+      ? (valueNote
+          ? `<div class="mv-value-note has-note"><span class="mv-value-note-text" role="button" tabindex="0" title="Click to edit note" onclick="event.stopPropagation();editValueNote('${id}','${rawDate}')">${escapeHTML(valueNote)}</span> <button class="mv-value-note-delete" title="Remove note" onclick="event.stopPropagation();deleteValueNote('${id}','${rawDate}')">&times;</button></div>`
+          : `<div class="mv-value-note add-note" role="button" tabindex="0" title="Add a note for this value" onclick="event.stopPropagation();editValueNote('${id}','${rawDate}')">+ note</div>`)
+      : '';
     html += `<div class="modal-value-card status-${s}">${deleteBtn}<div class="mv-date">${dates[i]}${noteIcon}</div>${sourceHtml}
       <div class="mv-value val-${s}"${editClick}>${formatValue(v)}${manualBadge}</div>
-      <div class="mv-status val-${s}">${sl}</div>${phaseInfo}</div>`;
+      <div class="mv-status val-${s}">${sl}</div>${phaseInfo}${valueNoteHtml}</div>`;
   }
   html += `</div>`;
   const nonNull = marker.values.map((v,i)=>({v,i})).filter(x=>x.v!==null);
@@ -4008,6 +4060,8 @@ export function showDetailModal(id, opts = {}) {
   }
   // Collect inline SNPs for the unified rec section (genetics + actionable tips together)
   const _inlineSNPs = (state.importedData.genetics?.snps && window._getRelevantSNPs) ? window._getRelevantSNPs(dotKey) : [];
+  // Add Value (Manually) — primary action, kept above Note so it's the first thing users see below the values grid.
+  html += `<button class="manual-entry-btn" onclick="event.stopPropagation();openManualEntryForm('${id}')">+ Add Value Manually</button>`;
   // Marker note
   const markerNote = state.importedData.markerNotes?.[dotKey] || '';
   html += `<div class="marker-note-section">
@@ -4027,7 +4081,6 @@ export function showDetailModal(id, opts = {}) {
     html += `<div id="rec-modal-${id}"></div>`;
   }
   html += `<button class="ask-ai-btn" onclick="event.stopPropagation();askAIAboutMarker('${id}')">Ask AI about this marker</button>`;
-  html += `<button class="manual-entry-btn" onclick="event.stopPropagation();openManualEntryForm('${id}')">+ Add Value</button>`;
   // Show delete link for custom markers only
   if (state.importedData?.customMarkers?.[dotKey]) {
     html += `<div style="text-align:center;margin-top:8px"><a href="#" style="color:var(--text-muted);font-size:0.8rem" onclick="event.preventDefault();event.stopPropagation();deleteCustomMarker('${id}')">Delete this marker</a></div>`;
@@ -4078,46 +4131,130 @@ export function showDetailModal(id, opts = {}) {
   }
 }
 
-export function openManualEntryForm(id) {
-  const marker = state.markerRegistry[id];
+export function openManualEntryForm(id, prefillDate) {
+  let marker = state.markerRegistry[id];
+  if (!marker) {
+    // Fall back to schema lookup — marker may not have been registered
+    // yet (renderChartCard only runs for markers with data; a click on
+    // an empty cell in Table view can target a marker with no data).
+    const idx = id.indexOf('_');
+    const catKey = id.slice(0, idx), mKey = id.slice(idx + 1);
+    const data = getActiveData();
+    marker = data.categories[catKey]?.markers[mKey];
+    if (marker) state.markerRegistry[id] = marker;
+  }
   if (!marker) return;
   const modal = document.getElementById("detail-modal");
   const overlay = document.getElementById("modal-overlay");
   const today = new Date().toISOString().slice(0, 10);
+  // Date fallback chain: explicit prefill (e.g. empty-cell click) → last-used in this session → today.
+  // sessionStorage clears when the tab closes, so we don't outlast a single sitting.
+  let sessionLast = null;
+  try {
+    const raw = sessionStorage.getItem('labcharts-last-manual-date');
+    if (raw && /^\d{4}-\d{2}-\d{2}$/.test(raw)) sessionLast = raw;
+  } catch (_) { /* sessionStorage may be unavailable (private mode) */ }
+  const dateValue = (typeof prefillDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(prefillDate))
+    ? prefillDate
+    : (sessionLast || today);
   const refText = marker.refMin != null || marker.refMax != null
     ? `Reference: ${marker.refMin != null ? marker.refMin : '–'} \u2013 ${marker.refMax != null ? marker.refMax : '–'} ${escapeHTML(marker.unit)}`
     : '';
+  // Placeholder hint: midpoint of ref range if known, otherwise a neutral example.
+  let placeholderHint = 'e.g. 5.4';
+  if (marker.refMin != null && marker.refMax != null) {
+    placeholderHint = `e.g. ${formatValue((marker.refMin + marker.refMax) / 2)}`;
+  }
   modal.innerHTML = `<button class="modal-close" aria-label="Close" onclick="closeModal()">&times;</button>
-    <h3>Add Value \u2014 ${escapeHTML(marker.name)}</h3>
-    <div class="modal-unit">${escapeHTML(marker.unit)}${refText ? ' \u00b7 ' + refText : ''}</div>
+    <h3>Add Value Manually</h3>
+    <div class="modal-unit"><strong>${escapeHTML(marker.name)}</strong> \u00b7 ${escapeHTML(marker.unit)}${refText ? ' \u00b7 ' + refText : ''}</div>
     <div class="manual-entry-form">
       <div class="me-field">
-        <label>Date</label>
-        <input type="date" id="me-date" value="${today}">
+        <label for="me-date">Date</label>
+        <input type="date" id="me-date" value="${dateValue}" max="${today}">
       </div>
       <div class="me-field">
-        <label>Value (${marker.unit})</label>
-        <input type="number" id="me-value" step="any" placeholder="Enter value..." autofocus>
+        <label for="me-value">Value <span style="color:var(--text-muted);font-weight:400">(${escapeHTML(marker.unit)})</span></label>
+        <input type="number" id="me-value" step="any" placeholder="${escapeHTML(placeholderHint)}" autofocus>
       </div>
-      <div style="display:flex;gap:8px;margin-top:16px">
+      <div class="me-field">
+        <label for="me-note">Note <span style="color:var(--text-muted);font-weight:400">(optional)</span></label>
+        <textarea id="me-note" rows="2" placeholder="Context for this value — e.g. fasted 14h, post-workout, different lab, retake of low value..."></textarea>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
         <button class="import-btn import-btn-primary" onclick="saveManualEntry('${id}')">Save</button>
+        <button class="import-btn import-btn-secondary" onclick="saveAndAddAnotherManualEntry('${id}')" title="Save this value, then enter another marker for the same date">Save &amp; Add Another</button>
         <button class="import-btn import-btn-secondary" onclick="showDetailModal('${id}')">Cancel</button>
       </div>
     </div>`;
   overlay.classList.add("show");
-  setTimeout(() => { const el = document.getElementById('me-value'); if (el) el.focus(); }, 50);
+  setTimeout(() => {
+    const el = document.getElementById('me-value');
+    if (el) {
+      el.focus();
+      // Enter-to-save / Esc-to-cancel for keyboard users.
+      const onKey = (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); saveManualEntry(id); }
+        else if (e.key === 'Escape') { e.preventDefault(); showDetailModal(id); }
+      };
+      el.addEventListener('keydown', onKey);
+      const dateEl = document.getElementById('me-date');
+      if (dateEl) dateEl.addEventListener('keydown', onKey);
+    }
+  }, 50);
 }
 
-export function saveManualEntry(id) {
+// Insulin is stored under hormones.insulin but also surfaced on the diabetes
+// category as diabetes.insulin_d (so the marker shows up in both contexts).
+// Per-value notes need to mirror across both keys regardless of which
+// category the user is editing from. Returns the OTHER key (if any) so the
+// caller can write the same note value to both sides.
+function _insulinMirrorNoteKey(dotKey, date) {
+  if (dotKey === 'hormones.insulin') return 'diabetes.insulin_d:' + date;
+  if (dotKey === 'diabetes.insulin_d') return 'hormones.insulin:' + date;
+  return null;
+}
+
+export async function saveManualEntry(id, opts = {}) {
+  const { keepOpen = false } = opts;
   const dateInput = document.getElementById('me-date');
   const valueInput = document.getElementById('me-value');
+  const noteInput = document.getElementById('me-note');
   if (!dateInput || !valueInput) return;
   const date = dateInput.value;
   const value = parseFloat(valueInput.value);
+  // Cap notes at 500 chars to defend against runaway paste — matches the
+  // wearable-manual.js `_sanitizeNote` ceiling. Notes flow into IDB +
+  // sync payloads + AI context; a few-MB paste would bloat all three.
+  const noteRaw = noteInput ? noteInput.value.trim() : '';
+  const noteText = noteRaw.length > 500 ? noteRaw.slice(0, 500) : noteRaw;
   if (!date) { showNotification('Please enter a date', 'error'); return; }
   if (isNaN(value)) { showNotification('Please enter a valid number', 'error'); return; }
-  // Convert id format: "category_markerKey" → "category.markerKey"
   const dotKey = id.replace('_', '.');
+  // Resolve marker for range + unit context (used by sanity/dup checks below).
+  const marker = state.markerRegistry[id] || (() => {
+    const idx = id.indexOf('_');
+    return getActiveData().categories[id.slice(0, idx)]?.markers[id.slice(idx + 1)];
+  })();
+  // Range sanity check: catches decimal/unit slips (e.g. typing 100 mg/dL when SI ref is 4–6 mmol/L).
+  if (marker) {
+    const refMin = marker.refMin, refMax = marker.refMax;
+    let warn = null;
+    if (value < 0) warn = `${value} is negative — values are usually 0 or positive.`;
+    else if (refMax != null && refMax > 0 && value > refMax * 10) warn = `${value} is much higher than the reference range (${refMin ?? '?'}–${refMax} ${marker.unit}). Did you enter the right unit?`;
+    else if (refMin != null && refMin > 0 && value < refMin / 10) warn = `${value} is much lower than the reference range (${refMin}–${refMax ?? '?'} ${marker.unit}). Did you enter the right unit?`;
+    if (warn && !await showConfirmDialog(`${warn}\n\nSave anyway?`)) return;
+  }
+  // Duplicate-date check: an existing value for this marker on the same date.
+  const existingEntry = state.importedData.entries?.find(e => e.date === date);
+  if (existingEntry && existingEntry.markers && existingEntry.markers[dotKey] != null) {
+    // Show in display units — find the marker's display value at this date.
+    const data = getActiveData();
+    const dateIdx = data.dates.indexOf(date);
+    const displayVal = (dateIdx >= 0 && marker) ? marker.values[dateIdx] : existingEntry.markers[dotKey];
+    const unit = marker?.unit || '';
+    if (!await showConfirmDialog(`A value of ${displayVal} ${unit} already exists for ${date}. Overwrite?`)) return;
+  }
   if (!state.importedData.entries) state.importedData.entries = [];
   let entry = state.importedData.entries.find(e => e.date === date);
   if (!entry) {
@@ -4126,24 +4263,53 @@ export function saveManualEntry(id) {
   }
   const storedValue = convertDisplayToSI(dotKey, value);
   entry.markers[dotKey] = storedValue;
-  // Track provenance
   if (!entry.markerSources) entry.markerSources = {};
   entry.markerSources[dotKey] = { file: null, at: Date.now() };
-  // Track as manually added
   if (!state.importedData.manualValues) state.importedData.manualValues = {};
   state.importedData.manualValues[dotKey + ':' + date] = true;
-  // Insulin dual-mapping
-  if (dotKey === 'hormones.insulin') { entry.markers['diabetes.insulin_d'] = storedValue; entry.markerSources['diabetes.insulin_d'] = entry.markerSources[dotKey]; }
+  // Per-value note: store on save when non-empty; clear when emptied.
+  if (!state.importedData.markerValueNotes) state.importedData.markerValueNotes = {};
+  const noteKey = dotKey + ':' + date;
+  if (noteText) state.importedData.markerValueNotes[noteKey] = noteText;
+  else delete state.importedData.markerValueNotes[noteKey];
+  if (dotKey === 'hormones.insulin') {
+    entry.markers['diabetes.insulin_d'] = storedValue;
+    entry.markerSources['diabetes.insulin_d'] = entry.markerSources[dotKey];
+  }
+  // Mirror the per-value note across the insulin dual-mapping — same reading,
+  // two views. Bidirectional: user may save via either category page. Without
+  // this, a note added on one side wouldn't show on the other, and orphans
+  // would accumulate over delete cycles.
+  const insulinNoteMirror = _insulinMirrorNoteKey(dotKey, date);
+  if (insulinNoteMirror) {
+    if (noteText) state.importedData.markerValueNotes[insulinNoteMirror] = noteText;
+    else delete state.importedData.markerValueNotes[insulinNoteMirror];
+  }
   recalculateHOMAIR(entry);
   saveImportedData();
+  // Remember the date session-wide so the next manual entry defaults to it.
+  try { sessionStorage.setItem('labcharts-last-manual-date', date); } catch (_) {}
   window.buildSidebar();
   updateHeaderDates();
-  closeModal();
-  const activeNav = document.querySelector(".nav-item.active");
-  navigate(activeNav ? activeNav.dataset.category : "dashboard");
+  const targetCat = id.indexOf('_') !== -1 ? id.slice(0, id.indexOf('_')) : null;
+  const data = getActiveData();
+  const navCat = (targetCat && data.categories?.[targetCat]) ? targetCat : "dashboard";
   showNotification(`Added ${state.markerRegistry[id]?.name || id}: ${value} on ${date}`, 'success');
-  // Re-open detail modal so user stays in context (#29)
-  setTimeout(() => showDetailModal(id), 50);
+  if (keepOpen) {
+    // Rebuild page underneath, re-open the manual-entry form with the same id + date.
+    // Form re-render is in-place (modal.innerHTML), so no flicker.
+    navigate(navCat);
+    openManualEntryForm(id, date);
+  } else {
+    closeModal();
+    navigate(navCat);
+    // Re-open detail modal so user stays in context (#29)
+    setTimeout(() => showDetailModal(id), 50);
+  }
+}
+
+export function saveAndAddAnotherManualEntry(id) {
+  return saveManualEntry(id, { keepOpen: true });
 }
 
 export function openCreateMarkerModal() {
@@ -4301,8 +4467,21 @@ export async function deleteMarkerValue(id, date) {
     // Clean up provenance and manual tracking
     if (entry.markerSources) delete entry.markerSources[dotKey];
     if (state.importedData.manualValues) delete state.importedData.manualValues[dotKey + ':' + date];
-    // Clean up insulin dual-mapping
-    if (dotKey === 'hormones.insulin') { delete entry.markers['diabetes.insulin_d']; if (entry.markerSources) delete entry.markerSources['diabetes.insulin_d']; recalculateHOMAIR(entry); }
+    // Drop the per-value note (if any) — value is gone, note is orphaned.
+    if (state.importedData.markerValueNotes) delete state.importedData.markerValueNotes[dotKey + ':' + date];
+    // Clean up insulin dual-mapping (value, provenance, AND the per-value
+    // note for the mirror key — same reading, both views must go together).
+    if (dotKey === 'hormones.insulin') {
+      delete entry.markers['diabetes.insulin_d'];
+      if (entry.markerSources) delete entry.markerSources['diabetes.insulin_d'];
+      recalculateHOMAIR(entry);
+    }
+    // Mirror the note delete in both directions — user may delete via either
+    // category. Forward-only would leave orphans on the other side.
+    const mirrorKey = _insulinMirrorNoteKey(dotKey, date);
+    if (mirrorKey && state.importedData.markerValueNotes) {
+      delete state.importedData.markerValueNotes[mirrorKey];
+    }
     // Remove entry entirely if no markers left
     if (Object.keys(entry.markers).length === 0) {
       state.importedData.entries = state.importedData.entries.filter(e => e.date !== date);
@@ -4310,9 +4489,10 @@ export async function deleteMarkerValue(id, date) {
     saveImportedData();
     window.buildSidebar();
     updateHeaderDates();
-    // Re-open the detail modal to show updated values
-    const activeNav = document.querySelector(".nav-item.active");
-    navigate(activeNav ? activeNav.dataset.category : "dashboard");
+    // Re-open the detail modal to show updated values. buildSidebar
+    // resets .active to Dashboard, so use state.currentView (kept in
+    // sync by navigate) instead of re-reading the DOM.
+    navigate(state.currentView || "dashboard");
     showDetailModal(id);
     showNotification(`Removed value from ${date}`, 'info');
   }
@@ -4371,14 +4551,18 @@ export function editMarkerValue(id, date, currentValue, event) {
   input.step = 'any';
   input.value = currentValue;
   input.className = 'ref-edit-input';
-  input.style.cssText = 'width:80px;text-align:center;font-size:inherit';
+  input.style.cssText = 'width:100%;max-width:140px;text-align:center;font-size:inherit;box-sizing:border-box;padding:2px 4px';
   el.textContent = '';
   el.appendChild(input);
   input.focus();
   input.select();
+  let cancelled = false;
   const save = () => {
+    if (cancelled) return;
     const newValue = parseFloat(input.value);
     if (isNaN(newValue)) { showDetailModal(id); return; }
+    // No-op if the value didn't change — don't flip provenance to manual.
+    if (newValue === parseFloat(currentValue)) { showDetailModal(id); return; }
     const dotKey = id.replace('_', '.');
     const entry = state.importedData.entries?.find(e => e.date === date);
     if (!entry) return;
@@ -4396,10 +4580,15 @@ export function editMarkerValue(id, date, currentValue, event) {
     entry.markerSources[dotKey] = { file: null, at: Date.now() };
     if (dotKey === 'hormones.insulin') { entry.markers['diabetes.insulin_d'] = storedValue; if (entry.markerSources) entry.markerSources['diabetes.insulin_d'] = entry.markerSources[dotKey]; recalculateHOMAIR(entry); }
     saveImportedData();
+    // Rebuild the underlying view so Table/Heatmap/Chart reflect the edit.
+    window.navigate(state.currentView || 'dashboard');
     showDetailModal(id);
   };
   input.addEventListener('blur', save);
-  input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); else if (e.key === 'Escape') showDetailModal(id); });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') input.blur();
+    else if (e.key === 'Escape') { cancelled = true; showDetailModal(id); }
+  });
 }
 
 export function revertMarkerValue(id, date) {
@@ -4413,7 +4602,50 @@ export function revertMarkerValue(id, date) {
   if (dotKey === 'hormones.insulin') { entry.markers['diabetes.insulin_d'] = original; recalculateHOMAIR(entry); }
   delete state.importedData.manualValues[mvKey];
   saveImportedData();
+  // Rebuild the underlying view so Table/Heatmap/Chart reflect the revert.
+  window.navigate(state.currentView || 'dashboard');
   showDetailModal(id);
+}
+
+export async function editValueNote(id, date) {
+  if (!id || !date) return;
+  const dotKey = id.replace('_', '.');
+  const noteKey = dotKey + ':' + date;
+  if (!state.importedData.markerValueNotes) state.importedData.markerValueNotes = {};
+  const current = state.importedData.markerValueNotes[noteKey] || '';
+  const result = await showPromptDialog(
+    current ? `Edit note for ${date}` : `Add note for ${date}`,
+    { defaultValue: current, placeholder: 'e.g. fasted 14h, post-workout, different lab', okLabel: 'Save' }
+  );
+  // showPromptDialog collapses cancel + empty-submit to null. Treat null as
+  // "no change" — explicit deletion is via the dedicated × affordance.
+  if (result === null) return;
+  // Cap to match saveManualEntry — defends against runaway paste flowing
+  // into IDB, sync payloads, and AI context.
+  const capped = result.length > 500 ? result.slice(0, 500) : result;
+  state.importedData.markerValueNotes[noteKey] = capped;
+  // Mirror across the insulin dual-mapping in BOTH directions so a note
+  // edited via diabetes.insulin_d also lands on hormones.insulin and vice
+  // versa.
+  const mirror = _insulinMirrorNoteKey(dotKey, date);
+  if (mirror) state.importedData.markerValueNotes[mirror] = capped;
+  saveImportedData();
+  showDetailModal(id);
+}
+
+export async function deleteValueNote(id, date) {
+  if (!id || !date) return;
+  if (!await showConfirmDialog(`Remove the note for ${date}?`)) return;
+  const dotKey = id.replace('_', '.');
+  const noteKey = dotKey + ':' + date;
+  if (state.importedData.markerValueNotes && state.importedData.markerValueNotes[noteKey]) {
+    delete state.importedData.markerValueNotes[noteKey];
+    // Mirror cleanup in BOTH directions across the insulin dual-mapping.
+    const mirror = _insulinMirrorNoteKey(dotKey, date);
+    if (mirror) delete state.importedData.markerValueNotes[mirror];
+    saveImportedData();
+    showDetailModal(id);
+  }
 }
 
 export function closeModal() {
@@ -4908,6 +5140,7 @@ Object.assign(window, {
   revertRefRange,
   openManualEntryForm,
   saveManualEntry,
+  saveAndAddAnotherManualEntry,
   openCreateMarkerModal,
   pickNewCatIcon,
   saveCustomMarker,
@@ -4915,6 +5148,8 @@ Object.assign(window, {
   deleteCustomMarker,
   editMarkerValue,
   revertMarkerValue,
+  editValueNote,
+  deleteValueNote,
   toggleMarkerNoteEditor,
   saveMarkerNote,
   deleteMarkerNote,
