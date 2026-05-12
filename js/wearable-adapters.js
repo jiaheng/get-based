@@ -60,6 +60,7 @@ export const CANONICAL_METRICS = {
   spo2_avg:         { id: 'spo2_avg',         label: 'SpO₂',        sub: '',      unit: '%',     worseWhen: 'down'   },
   body_temp_delta:  { id: 'body_temp_delta',  label: 'Body temp',   sub: 'Δ',     unit: '°C',    worseWhen: 'either' },
   glucose_avg:      { id: 'glucose_avg',      label: 'Glucose',     sub: 'avg',   unit: 'mg/dL', worseWhen: 'either' },
+  vo2max:           { id: 'vo2max',           label: 'VO₂max',      sub: '',      unit: 'mL/kg/min', worseWhen: 'down' }, // Apple Watch / chest-strap derived — physiological aerobic capacity (distinct from Withings cardio_fitness 0-100 score)
   // Withings Body Scan / BPM extras (#5 follow-up). All of these are the raw
   // measurements; AI context collapses the body-comp cluster into a single
   // roll-up line to keep the token budget honest. Only populates for users
@@ -117,6 +118,9 @@ export const DEFAULT_METRIC_ORDER = [
   // Daytime companions are summarised so the AI / detail modal can read them,
   // but intentionally placed AFTER the overnight cards — the strip stays calm.
   'hrv_day', 'hr_day',
+  // Apple Health VO₂max — placed near cardio_fitness conceptually but at the
+  // tail so existing wearableCardOrder arrays aren't reshuffled for users.
+  'vo2max',
 ];
 
 export const ADAPTERS = [
@@ -420,6 +424,7 @@ export const ADAPTERS = [
       steps:           { hkType: 'HKQuantityTypeIdentifierStepCount' },
       spo2_avg:        { hkType: 'HKQuantityTypeIdentifierOxygenSaturation' },
       body_temp_delta: { hkType: 'HKQuantityTypeIdentifierBodyTemperature' },
+      vo2max:          { hkType: 'HKQuantityTypeIdentifierVO2Max' },
     },
   },
 ];
