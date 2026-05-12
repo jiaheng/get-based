@@ -209,13 +209,16 @@ return (async function() {
     window.maybeShowChangelog();
     assert('maybeShowChangelog stays closed once user has seen the latest version',
       ovAfterClose?.classList.contains('show') === false);
-    // Shadowing defense: if seen is newer than the forceShow entry but
-    // older than a non-forceShow patch on top, modal must NOT auto-open
-    // (no critical action is pending).
-    localStorage.setItem('labcharts-changelog-seen', '1.7.1');
+    // No-forceShow-ahead defense: when seen is newer than every forceShow
+    // entry in CHANGELOG (so no critical user-action notice is pending), the
+    // modal must NOT auto-open even if other non-forceShow entries exist.
+    // Easiest way to guarantee that without parsing the changelog source: set
+    // seen = current APP_VERSION. No entry is newer, so no forceShow is newer.
+    // This survives future bumps where any new patch ships as forceShow.
+    localStorage.setItem('labcharts-changelog-seen', window.APP_VERSION);
     ovAfterClose?.classList.remove('show');
     window.maybeShowChangelog();
-    assert('maybeShowChangelog stays closed when only non-forceShow patches are newer',
+    assert('maybeShowChangelog stays closed when no forceShow entry is newer than seen',
       ovAfterClose?.classList.contains('show') === false);
   } finally {
     if (_origSeen !== null) localStorage.setItem('labcharts-changelog-seen', _origSeen);
