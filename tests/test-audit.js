@@ -117,6 +117,111 @@ return (async function() {
   }
 
   // ═══════════════════════════════════════
+  // 3c. Sweep guard — every innerHTML site in production JS is sanitized
+  // ═══════════════════════════════════════
+  // CodeQL's js/xss-through-dom is excluded repo-wide (.github/workflows/
+  // codeql.yml) because it doesn't model escapeHTML() / safeMarkerId().
+  // This sweep replaces that signal locally across every production JS
+  // file with innerHTML usage — a future PR adding an unsanitized site
+  // fires immediately, before review.
+  //
+  // Categorize each `.innerHTML =` site per file:
+  //   SAFE: empty/clear, pure static literal (no `${`), helper-fn call.
+  //   GUARDED: surrounding ±100 lines contain a recognized sanitizer.
+  //   UNGUARDED: fail with file + line + snippet.
+  console.log('%c 3c. innerHTML sanitizer sweep ', 'font-weight:bold;color:#f59e0b');
+
+  // Recognized in-codebase HTML sanitizers / safe-rendering primitives.
+  // Adding a new sanitizer? Append here AND verify it actually escapes
+  // its input. `applyInlineMarkdown` is the markdown.js sanitized
+  // renderer; `escapeAttr` is the attribute-context variant of escapeHTML;
+  // `renderMarkdown` is the markdown.js full renderer.
+  const _SANITIZER_RE = /(escapeHTML|safeMarkerId|escapeAttr|applyInlineMarkdown|renderMarkdown)\s*\(/;
+  // Known-safe HTML-returning helpers — each verified to either (a) use
+  // escapeHTML/safeMarkerId/escapeAttr internally or (b) interpolate only
+  // hardcoded strings + numeric values. Rule (c) trusts these by name
+  // instead of trusting any function call, closing the "what if the
+  // helper is unsafe?" false-negative. New helpers MUST be audited
+  // before being added here.
+  const _SAFE_HELPERS = new Set([
+    // views.js
+    'renderChartCard', 'renderTableView', 'renderHeatmapView',
+    'renderFattyAcidsView', 'renderCompareTable', 'renderChannelDetailPanel',
+    'renderChannelPills', 'renderConditionsHTML', 'renderLightTools',
+    // chat.js (escapeHTML returns sanitized text directly; renderMarkdown
+    // is the markdown.js sanitized full renderer)
+    'escapeHTML', 'renderMarkdown',
+  ]);
+  // Files explicitly named by the excluded CodeQL rule's surface — Greptile
+  // PR review on #188 called out parity with `views.js` for `chat.js` +
+  // `charts.js`. `charts.js` has zero innerHTML sites today (no-op). The
+  // other ~28 production files with innerHTML can be folded into this
+  // sweep as a separate follow-up; some (light-tools.js modal scaffolding,
+  // provider-panels.js) need either tighter heuristics or per-line audit
+  // annotations before the sweep is precision-clean for them.
+  const _SWEEP_FILES = ['views.js', 'chat.js', 'charts.js'];
+
+  function _sweepInnerHTML(filename, src) {
+    const lines = src.split('\n');
+    const sites = [];
+    for (let i = 0; i < lines.length; i++) {
+      if (/\.innerHTML\s*\+?=/.test(lines[i])) sites.push({ lineNo: i + 1, line: lines[i] });
+    }
+    const unguarded = [];
+    for (const { lineNo, line } of sites) {
+      // Strip trailing line-comments so e.g. `innerHTML = '■'; // stop square`
+      // is recognized as a static literal in (a)/(b).
+      const _bare = line.replace(/\s*\/\/.*$/, '');
+      // (a) Empty/clear — `innerHTML = ''` or `innerHTML = "";`
+      if (/\.innerHTML\s*\+?=\s*(['"])\1\s*;?\s*$/.test(_bare)) continue;
+      // (b) Single-line static literal (no `${` interpolation). Multi-line
+      //     template literals fall through to (d) and need a sanitizer in
+      //     the surrounding window.
+      if (/\.innerHTML\s*\+?=\s*(['"`])[^`$]*\1\s*;?\s*$/.test(_bare) && !_bare.includes('${')) continue;
+      // (c) Direct helper-function-call result, where the helper is in the
+      //     audited safe-helper whitelist. Tightened from "trust any function"
+      //     to "trust an explicitly-audited helper" — Greptile #188 review
+      //     flagged the loose form as a false-negative path.
+      const _fnCallMatch = _bare.match(/\.innerHTML\s*\+?=\s*(?:window\.|_)?([a-zA-Z][\w]*)\s*\(/);
+      if (_fnCallMatch && _SAFE_HELPERS.has(_fnCallMatch[1])) continue;
+      // (d) Otherwise — sanitizer within ±100 lines (covers "build html
+      //     across many lines, assign at end" + "h is callback param" patterns).
+      //     Heuristic limitation: the proximity window can theoretically
+      //     associate a sanitizer with a different interpolation in the
+      //     same scope. A full per-`${...}` interpolation analysis would
+      //     close that path but adds significant complexity; the tradeoff
+      //     is documented in PR #188 review threads. This sweep is a
+      //     regression detector, not a complete proof — Greptile + manual
+      //     review remain the primary defense for the
+      //     unsafe-`${...}`-in-otherwise-safe-file class.
+      const start = Math.max(0, (lineNo - 1) - 100);
+      const end = Math.min(lines.length, lineNo + 100);
+      const win = lines.slice(start, end).join('\n');
+      if (_SANITIZER_RE.test(win)) continue;
+      unguarded.push(`${filename}:L${lineNo} — ${line.trim().slice(0, 100)}`);
+    }
+    return { siteCount: sites.length, unguarded };
+  }
+
+  const _allUnguarded = [];
+  let _totalSites = 0;
+  for (const filename of _SWEEP_FILES) {
+    const src = await fetchWithRetry(`js/${filename}`);
+    const { siteCount, unguarded } = _sweepInnerHTML(filename, src);
+    _totalSites += siteCount;
+    _allUnguarded.push(...unguarded);
+  }
+  // Site count drifts deliberately — sharp drop = refactor (good); spike
+  // = batch of new sites needing scrutiny.
+  assert(`production JS innerHTML sites tracked across ${_SWEEP_FILES.length} files (${_totalSites} found)`,
+    _totalSites > 0);
+  assert(
+    `every production JS innerHTML site is sanitized (escapeHTML/safeMarkerId/escapeAttr/applyInlineMarkdown/renderMarkdown) or a static-literal/helper-call`,
+    _allUnguarded.length === 0,
+    _allUnguarded.length ? `${_allUnguarded.length} unguarded:\n  ${_allUnguarded.slice(0, 8).join('\n  ')}` : ''
+  );
+
+  // ═══════════════════════════════════════
   // 4. Division by zero guards (utils.js)
   // ═══════════════════════════════════════
   console.log('%c 4. Division by Zero Guards ', 'font-weight:bold;color:#f59e0b');
