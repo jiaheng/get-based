@@ -253,10 +253,14 @@ return (async function() {
   // every reject as evidence the onerror rail fired.
   console.log('%c 8. IDB onerror rails ', 'font-weight:bold;color:#16a34a');
   {
-    const origGet = IDBObjectStore.prototype.get;
-    const origPut = IDBObjectStore.prototype.put;
-    const origDelete = IDBObjectStore.prototype.delete;
-    const origGetAll = IDBObjectStore.prototype.getAll;
+    const origStoreGet = IDBObjectStore.prototype.get;
+    const origStorePut = IDBObjectStore.prototype.put;
+    const origStoreDelete = IDBObjectStore.prototype.delete;
+    const origStoreGetAll = IDBObjectStore.prototype.getAll;
+    const origStoreOpenCursor = IDBObjectStore.prototype.openCursor;
+    const origStoreCount = IDBObjectStore.prototype.count;
+    const origStoreClear = IDBObjectStore.prototype.clear;
+    const origIndexOpenCursor = IDBIndex.prototype.openCursor;
     function patchOp(orig) {
       return function(...args) {
         const req = orig.apply(this, args);
@@ -269,10 +273,14 @@ return (async function() {
         return req;
       };
     }
-    IDBObjectStore.prototype.get = patchOp(origGet);
-    IDBObjectStore.prototype.put = patchOp(origPut);
-    IDBObjectStore.prototype.delete = patchOp(origDelete);
-    IDBObjectStore.prototype.getAll = patchOp(origGetAll);
+    IDBObjectStore.prototype.get = patchOp(origStoreGet);
+    IDBObjectStore.prototype.put = patchOp(origStorePut);
+    IDBObjectStore.prototype.delete = patchOp(origStoreDelete);
+    IDBObjectStore.prototype.getAll = patchOp(origStoreGetAll);
+    IDBObjectStore.prototype.openCursor = patchOp(origStoreOpenCursor);
+    IDBObjectStore.prototype.count = patchOp(origStoreCount);
+    IDBObjectStore.prototype.clear = patchOp(origStoreClear);
+    IDBIndex.prototype.openCursor = patchOp(origIndexOpenCursor);
     let railsFired = 0;
     try {
       // blob-storage — get / set / delete / getAll
@@ -310,11 +318,18 @@ return (async function() {
       const bk = await import('/js/backup.js?bust=' + Date.now());
       try { await bk.getAutoBackupSnapshots(); } catch (_) { railsFired++; }
       try { await bk.restoreAutoBackup('nonexistent'); } catch (_) { railsFired++; }
+      // wearables-store also has cursor + count + clear paths
+      try { await ws.getDailyRange(STUB_PROFILE, 'oura', '2026-05-01', '2026-05-02'); } catch (_) { railsFired++; }
+      try { await ws.upsertDailyBatch(STUB_PROFILE, [{ source: 'oura', date: '2026-05-01' }]); } catch (_) { railsFired++; }
     } finally {
-      IDBObjectStore.prototype.get = origGet;
-      IDBObjectStore.prototype.put = origPut;
-      IDBObjectStore.prototype.delete = origDelete;
-      IDBObjectStore.prototype.getAll = origGetAll;
+      IDBObjectStore.prototype.get = origStoreGet;
+      IDBObjectStore.prototype.put = origStorePut;
+      IDBObjectStore.prototype.delete = origStoreDelete;
+      IDBObjectStore.prototype.getAll = origStoreGetAll;
+      IDBObjectStore.prototype.openCursor = origStoreOpenCursor;
+      IDBObjectStore.prototype.count = origStoreCount;
+      IDBObjectStore.prototype.clear = origStoreClear;
+      IDBIndex.prototype.openCursor = origIndexOpenCursor;
     }
     // We can't reliably count rails from outside — many wrappers have an
     // internal try/catch that swallows the rejection and returns null/[].
