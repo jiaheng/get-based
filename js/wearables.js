@@ -564,8 +564,12 @@ export function renderWearableStrip() {
     ? (collapsed ? 'Expand biometrics strip' : 'Collapse biometrics strip')
     : (collapsed ? 'Expand wearables strip' : 'Collapse wearables strip');
 
+  // axe nested-interactive: parent is mouse-clickable but keyboard
+  // toggle lives on the chevron button below. The other action buttons
+  // (sync, reorder, demo-pill) keep stopPropagation so they don't trip
+  // the row-click collapse handler.
   let html = `<section class="wearable-strip" id="wearable-strip">
-    <div class="wearable-strip-header" role="button" tabindex="0" aria-expanded="${!collapsed}" aria-label="${ariaLabel}" onclick="toggleWearableStrip()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleWearableStrip()}">
+    <div class="wearable-strip-header" onclick="toggleWearableStrip()" style="cursor:pointer">
       <div class="wearable-strip-title">
         <span class="wearable-strip-icon" aria-hidden="true">⌬</span>
         ${titleHTML}
@@ -578,7 +582,7 @@ export function renderWearableStrip() {
         <button type="button" class="wearable-strip-reorder${reorderMode ? ' active' : ''}" aria-label="${reorderMode ? 'Done reordering' : 'Reorder cards'}" title="${reorderMode ? 'Done reordering' : 'Reorder cards'}" onclick="event.stopPropagation();toggleWearableReorder()">
           ${reorderMode ? 'Done' : '⇄ Reorder'}
         </button>
-        <span class="wearable-collapse-arrow${collapsed ? ' collapsed' : ''}" aria-hidden="true">▾</span>
+        <button type="button" class="wearable-collapse-arrow${collapsed ? ' collapsed' : ''}" aria-expanded="${!collapsed}" aria-label="${ariaLabel}" onclick="event.stopPropagation();toggleWearableStrip()">▾</button>
       </div>
     </div>
     <div class="wearable-card-grid${collapsed ? ' hidden' : ''}${reorderMode ? ' wearable-card-grid-reorder' : ''}">`;

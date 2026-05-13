@@ -1,14 +1,10 @@
 {
-  "critical": {
-    "label": 12,
-    "select-name": 26
-  },
+  "critical": {},
   "serious": {
-    "color-contrast": 1632,
-    "link-in-text-block": 20,
-    "nested-interactive": 164
+    "color-contrast": 124,
+    "nested-interactive": 40
   },
   "moderate": {},
   "minor": {},
-  "_note": "Baseline counts of axe-core violations as of v1.7.4. The CI gate fails when any critical/serious rule INCREASES vs these numbers. Refresh by re-running `A11Y_REBASELINE=1 COVERAGE=1 ./run-tests.sh` and copying the printed JSON over this file (after fixing some violations or accepting the new shape). Don't lower these numbers without an actual fix — the gate would lock in the new lower bound."
+  "_note": "Baseline counts of axe-core violations as of v1.7.4 + a11y sweep 2026-05-13. The CI gate fails when any critical/serious rule INCREASES vs these numbers. Refresh by re-running `A11Y_REBASELINE=1 COVERAGE=1 ./run-tests.sh` and copying the printed JSON over this file (after fixing some violations or accepting the new shape). Don't lower these numbers without an actual fix — the gate would lock in the new lower bound. Remaining: color-contrast (white-on-accent buttons + status-pill rgba blends + a few dim accents) and nested-interactive (light-env disclosure heads). Both tracked for follow-up."
 }

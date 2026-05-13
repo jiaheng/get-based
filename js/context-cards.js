@@ -224,7 +224,11 @@ export function renderProfileContextCards() {
   for (const c of cardDefs) {
     const filled = isContextFilled(c.key);
     const summary = c.summaryFn();
-    html += `<div class="context-card" role="button" tabindex="0" aria-label="${escapeHTML(c.label)}" onclick="${c.editor}()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">
+    // axe nested-interactive: the card body is mouse-clickable but
+    // KEYBOARD interactivity now lives only on the Edit button below.
+    // Both fire the same editor — keyboard users tab to Edit, mouse
+    // users still get the whole-card click affordance.
+    html += `<div class="context-card" onclick="${c.editor}()" style="cursor:pointer">
       <div class="context-card-header">
         <span class="ctx-health-dot ctx-health-dot-gray" id="ctx-dot-${c.key}"></span>
         <span class="context-card-label">${c.emoji} ${c.label}</span>
