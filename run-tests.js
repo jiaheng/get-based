@@ -161,6 +161,16 @@ const PORT = process.env.PORT || 8000;
     console.log('\x1b[31m' + msg + '\x1b[0m');
   });
 
+  // Pipe selected env vars into the page context BEFORE the first
+  // navigation so test-side code (e.g. test-a11y-axe.js) can read them as
+  // `window.X`. Earlier the a11y test's docs claimed `A11Y_REBASELINE=1`
+  // would refresh the baseline, but nothing was wiring the env var
+  // through — the only working path was deleting the JSON by hand.
+  const A11Y_REBASELINE = process.env.A11Y_REBASELINE === '1' || process.env.A11Y_REBASELINE === 'true';
+  if (A11Y_REBASELINE) {
+    await page.evaluateOnNewDocument(() => { window.A11Y_REBASELINE = true; });
+  }
+
   try {
     await page.goto(`http://localhost:${PORT}/app`, { waitUntil: 'networkidle2', timeout: 15000 });
   } catch (e) {
@@ -399,6 +409,19 @@ function writeCoverageReport(entries) {
   // encoded form and fail with ENOENT.
   const outDir = path.dirname(fileURLToPath(import.meta.url));
   const jsonPath = path.join(outDir, 'tests', '.coverage.json');
+
+  // Drift detector: read prior snapshot before overwriting. Static
+  // COVERAGE_MIN floor (90 by default) doesn't catch slow erosion across
+  // many small commits — current 93.47% could drop to 90.05% silently.
+  // Warn (non-fatal) when current dips >0.5pt vs prior.
+  let priorFnPct = null;
+  try {
+    const prior = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
+    if (prior?.totals?.fnTotal > 0) {
+      priorFnPct = (prior.totals.fnCalled / prior.totals.fnTotal) * 100;
+    }
+  } catch (_) { /* first run — no prior snapshot */ }
+
   fs.writeFileSync(jsonPath, JSON.stringify({ globalPct, totals, rows, generatedAt: new Date().toISOString() }, null, 2));
 
   console.log('\n' + '='.repeat(88));
@@ -421,6 +444,16 @@ function writeCoverageReport(entries) {
   const fnBanner = globalFnPct >= 90 ? '\x1b[32m\x1b[1m' : globalFnPct >= 75 ? '\x1b[33m\x1b[1m' : '\x1b[31m\x1b[1m';
   console.log(fnBanner + `  GLOBAL FUNCTIONS: ${totals.fnCalled.toLocaleString()} / ${totals.fnTotal.toLocaleString()} = ${globalFnPct.toFixed(2)}%\x1b[0m`);
   console.log(`  GLOBAL BYTES:     ${totals.covered.toLocaleString()} / ${totals.total.toLocaleString()} = ${globalPct.toFixed(2)}%`);
+  if (priorFnPct != null) {
+    const drift = globalFnPct - priorFnPct;
+    if (drift <= -0.5) {
+      // Yellow drift warning — non-fatal but visible. Use COVERAGE_MIN to
+      // turn this into a hard gate if/when desired.
+      console.log(`\x1b[33m  DRIFT WARNING: function coverage dropped ${drift.toFixed(2)}pt vs prior run (${priorFnPct.toFixed(2)}% → ${globalFnPct.toFixed(2)}%)\x1b[0m`);
+    } else if (drift >= 0.5) {
+      console.log(`\x1b[32m  Δ +${drift.toFixed(2)}pt vs prior run (${priorFnPct.toFixed(2)}% → ${globalFnPct.toFixed(2)}%)\x1b[0m`);
+    }
+  }
   console.log('='.repeat(88));
   return { globalFnPct, globalPct, totals };
 }

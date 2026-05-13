@@ -5466,7 +5466,11 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
 }
 .light-today-vitd {
   font-size: 12px; font-weight: 600;
-  color: var(--text-primary);
+  /* accent-light reads as a vit-D-blue identity (matches surrounding chips)
+     while clearing AA against the translucent accent-tint background.
+     accent itself failed contrast against the blended bg (3.93:1);
+     accent-light passes (4.68:1 on dark bg-card). */
+  color: var(--accent-light);
   display: inline-flex; align-items: center;
   padding: 3px 10px; border-radius: 10px;
   background: var(--accent-bg, rgba(96,165,250,0.10));

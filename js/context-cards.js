@@ -233,7 +233,7 @@ export function renderProfileContextCards() {
         <span class="ctx-health-dot ctx-health-dot-gray" id="ctx-dot-${c.key}"></span>
         <span class="context-card-label">${c.emoji} ${c.label}</span>
         <span class="context-info-icon">i<span class="context-tooltip">${c.tooltip}</span></span>
-        <span id="ctx-tips-${c.key}"></span><button class="diagnoses-edit-btn" onclick="event.stopPropagation();${c.editor}()">${filled ? 'Edit' : '+ Add'}</button>
+        <span id="ctx-tips-${c.key}"></span><button class="diagnoses-edit-btn" aria-label="${filled ? 'Edit' : 'Add'} ${escapeHTML(c.label)}" onclick="event.stopPropagation();${c.editor}()">${filled ? 'Edit' : '+ Add'}</button>
       </div>
       ${summary
         ? `<div class="context-card-body">${escapeHTML(summary)}</div>`

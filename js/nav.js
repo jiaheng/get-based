@@ -201,6 +201,11 @@ export function toggleNavGroup(groupName) {
   if (!header || !items) return;
   const isCollapsed = header.classList.toggle('collapsed');
   items.style.display = isCollapsed ? 'none' : '';
+  // Keep aria-expanded in sync with the visual state. Without this, the
+  // attribute captured at render time goes stale on every toggle and screen
+  // readers announce a wrong expansion state until the next full re-render.
+  const toggleBtn = header.querySelector('.sidebar-group-toggle');
+  if (toggleBtn) toggleBtn.setAttribute('aria-expanded', String(!isCollapsed));
   try { localStorage.setItem(`labcharts-navgroup-${groupName}`, isCollapsed ? 'collapsed' : 'expanded'); } catch(e) {}
 }
 

@@ -648,6 +648,21 @@ function toggleWearableStrip() {
   const hidden = grid.classList.toggle('hidden');
   footer?.classList.toggle('hidden', hidden);
   arrow?.classList.toggle('collapsed', hidden);
+  // Keep aria-expanded + aria-label on the chevron button in sync with the
+  // visual collapse state. Captured-at-render-time attributes go stale on
+  // every toggle without this — silent screen-reader regression.
+  if (arrow) {
+    arrow.setAttribute('aria-expanded', String(!hidden));
+    const expanded = !hidden;
+    const labelBase = arrow.getAttribute('aria-label') || '';
+    // Toggle "Expand"/"Collapse" prefix in-place; preserves the rest of the
+    // label that the renderer composed (e.g. "wearables strip").
+    if (expanded && /^Expand /i.test(labelBase)) {
+      arrow.setAttribute('aria-label', labelBase.replace(/^Expand /i, 'Collapse '));
+    } else if (!expanded && /^Collapse /i.test(labelBase)) {
+      arrow.setAttribute('aria-label', labelBase.replace(/^Collapse /i, 'Expand '));
+    }
+  }
   localStorage.setItem('wearables-strip-collapsed', hidden ? '1' : '0');
 }
 

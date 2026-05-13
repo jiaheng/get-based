@@ -43,7 +43,12 @@ return (async () => {
 
   try {
     // ── 1. Load axe-core from cdnjs ─────────────────────────────────────
-    const AXE_URL = 'https://cdnjs.cloudflare.com/ajax/libs/axe-core/4.10.0/axe.min.js';
+    // Pinned version. The baseline file's `_axeVersion` field is asserted
+    // against this string below — a mismatched bump (e.g. 4.11) would
+    // surface a rule rename as a false regression. If you bump axe, also
+    // bump _axeVersion in tests/.a11y-baseline.json.
+    const PINNED_AXE_VERSION = '4.10.0';
+    const AXE_URL = `https://cdnjs.cloudflare.com/ajax/libs/axe-core/${PINNED_AXE_VERSION}/axe.min.js`;
     if (!window.axe) {
       try {
         await new Promise((resolve, reject) => {
@@ -64,6 +69,9 @@ return (async () => {
       return;
     }
     assert('axe-core loaded', true);
+    if (window.axe.version && window.axe.version !== PINNED_AXE_VERSION) {
+      note(`axe-core version ${window.axe.version} differs from PINNED_AXE_VERSION ${PINNED_AXE_VERSION} — rule renames may show as false regressions`);
+    }
 
     // ── 2. Demo data ────────────────────────────────────────────────────
     // Only load if the dashboard would otherwise be empty. loadDemoData is
@@ -203,6 +211,14 @@ return (async () => {
       const r = await fetch(BASELINE_URL, { cache: 'no-store' });
       if (r.ok) baseline = await r.json();
     } catch (_) {}
+    // axe rules sometimes get renamed across major versions. If the
+    // baseline was captured under a different runtime version than the
+    // one currently loaded, surface a hint — the regression check can
+    // still pass numerically while a rule has silently rotated names.
+    if (baseline?._axeVersion && window.axe?.version
+        && baseline._axeVersion !== window.axe.version) {
+      note(`baseline pins axe ${baseline._axeVersion}, runtime is ${window.axe.version} — refresh baseline if rule shapes drifted`);
+    }
 
     const current = { critical: {}, serious: {}, moderate: {}, minor: {} };
     for (const impact of Object.keys(current)) {
