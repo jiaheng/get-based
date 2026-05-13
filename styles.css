@@ -175,12 +175,20 @@ body {
   display: flex; align-items: center; gap: 8px; padding: 8px 20px; margin-top: 8px;
   font-size: 11px; font-weight: 600; text-transform: uppercase;
   letter-spacing: 1px; color: var(--text-muted); user-select: none;
+  /* Mouse-only click affordance — onclick on the outer div fires
+     toggleNavGroup, the toggle button + AI button stopPropagation. No
+     role / tabindex so axe doesn't flag it as a nested-interactive
+     parent of the inner buttons. */
+  cursor: pointer;
 }
-/* The disclosure toggle now wears the row's interactivity (axe
-   nested-interactive). It must look identical to the old div-as-button
-   while shedding the default <button> chrome. */
+/* The disclosure toggle wears the row's keyboard interactivity (axe
+   nested-interactive). Content-sized — NOT flex:1 — so the AI sibling
+   button sits adjacent to the flag count, and the arrow's margin-left:
+   auto pushes it to the far right. The outer div carries an onclick
+   too (no role/tabindex, so axe ignores it) — covers the gap so mouse
+   users can click anywhere on the row to toggle. */
 .sidebar-group-toggle {
-  flex: 1; display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: 8px;
   background: none; border: 0; padding: 0; margin: 0;
   font: inherit; color: inherit; text-align: left;
   text-transform: inherit; letter-spacing: inherit;

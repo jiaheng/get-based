@@ -164,14 +164,17 @@ export function buildSidebar(data) {
     const aiOn = window.isGroupInAIContext && window.isGroupInAIContext(groupName);
     // axe nested-interactive: the AI toggle button cannot live inside an
     // interactive parent. Disclosure is now its own <button>; AI toggle
-    // is a sibling, not a descendant.
-    html += `<div class="sidebar-group-header${collapsed ? ' collapsed' : ''}" data-group-name="${escapeAttr(groupName)}">
-      <button class="sidebar-group-toggle" onclick="toggleNavGroup('${escapeAttr(groupName)}')" aria-expanded="${!collapsed}" aria-label="${escapeAttr(groupName)} group">
+    // is a sibling, not a descendant. Arrow is also a sibling (decorative
+    // span, aria-hidden) AFTER the AI toggle — restores the original
+    // [label flag] [AI] [arrow] visual order. Sighted users still see
+    // the rotation cue; keyboard users use the toggle button.
+    html += `<div class="sidebar-group-header${collapsed ? ' collapsed' : ''}" data-group-name="${escapeAttr(groupName)}" onclick="toggleNavGroup('${escapeAttr(groupName)}')">
+      <button class="sidebar-group-toggle" onclick="event.stopPropagation();toggleNavGroup('${escapeAttr(groupName)}')" aria-expanded="${!collapsed}" aria-label="${escapeAttr(groupName)} group">
         <span class="sidebar-group-label">${escapeHTML(groupName)}</span>
         ${flagHtml}
-        <span class="sidebar-group-arrow" aria-hidden="true">\u25B8</span>
       </button>
-      <button class="sidebar-ai-toggle${aiOn ? ' active' : ''}" title="${aiOn ? 'Included in AI context' : 'Excluded from AI context — click to include'}" onclick="toggleGroupAIContext('${escapeAttr(groupName)}')" aria-label="Toggle AI context for ${escapeHTML(groupName)}">AI</button>
+      <button class="sidebar-ai-toggle${aiOn ? ' active' : ''}" title="${aiOn ? 'Included in AI context' : 'Excluded from AI context — click to include'}" onclick="event.stopPropagation();toggleGroupAIContext('${escapeAttr(groupName)}')" aria-label="Toggle AI context for ${escapeHTML(groupName)}">AI</button>
+      <span class="sidebar-group-arrow" aria-hidden="true">\u25B8</span>
     </div>`;
     html += `<div class="sidebar-group-items" data-group-items="${escapeHTML(groupName)}"${collapsed ? ' style="display:none"' : ''}>`;
     for (const item of group.items) html += item.html;
