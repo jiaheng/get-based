@@ -385,7 +385,10 @@ function writeCoverageReport(entries) {
   }
 
   const rows = [...perFile.entries()].map(([file, m]) => {
-    const fnRow = fnSummary.get(file) || fnSummary.get('/' + file) || { total: 0, called: 0, names: [] };
+    // perFile keys are stripped paths like `js/emf.js`; fnSummary keys
+    // come from `cleanUrl()` which keeps the leading slash. Always look
+    // up with the slash form.
+    const fnRow = fnSummary.get('/' + file) || { total: 0, called: 0, names: [] };
     return {
       file, total: m.total, covered: m.covered,
       pct: m.total > 0 ? (m.covered / m.total) * 100 : 0,

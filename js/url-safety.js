@@ -54,14 +54,21 @@ export function isValidExternalUrl(raw, { requireHttps = true, allowLocalhost = 
     if (v4Embed) return isValidExternalUrl(`${u.protocol}//${v4Embed[1]}${u.pathname || ''}`, { requireHttps, allowLocalhost });
 
     if (host.startsWith('::ffff:')) {
+      // IPv4-mapped IPv6 = `::ffff:HHHH:HHHH` — exactly two colon-separated
+      // 16-bit hex groups. Parse each group independently. Earlier draft
+      // concatenated the raw hex and left-padded — when leading zeros were
+      // omitted (e.g. `c0a8:101` instead of `c0a8:0101`), the byte boundaries
+      // mis-aligned and `::ffff:c0a8:101` mis-parsed as `12.10.129.1` instead
+      // of `192.168.1.1`, bypassing the RFC-1918 block (Greptile P1 PR #193).
       const tail = host.slice(7);
-      const hex = tail.replace(/:/g, '');
-      if (/^[0-9a-f]{1,8}$/.test(hex)) {
-        const padded = hex.padStart(8, '0');
-        const a = parseInt(padded.slice(0, 2), 16);
-        const b = parseInt(padded.slice(2, 4), 16);
-        const c = parseInt(padded.slice(4, 6), 16);
-        const d = parseInt(padded.slice(6, 8), 16);
+      const groups = tail.split(':');
+      if (groups.length === 2 && groups.every(g => /^[0-9a-f]{1,4}$/.test(g))) {
+        const g0 = parseInt(groups[0], 16);
+        const g1 = parseInt(groups[1], 16);
+        const a = (g0 >> 8) & 0xff;
+        const b = g0 & 0xff;
+        const c = (g1 >> 8) & 0xff;
+        const d = g1 & 0xff;
         return isValidExternalUrl(`${u.protocol}//${a}.${b}.${c}.${d}${u.pathname || ''}`, { requireHttps, allowLocalhost });
       }
     }

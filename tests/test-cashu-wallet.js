@@ -270,6 +270,14 @@ return (async function() {
   await expectMintRejection('https://169.254.169.254/mint', 'cloud metadata');
   await expectMintRejection('http://example.com/mint', 'non-HTTPS public host');
   await expectMintRejection('not a url', 'unparseable');
+  // Regression: IPv4-mapped IPv6 with omitted leading zeros (Greptile P1
+  // PR #193). `::ffff:c0a8:101` is a valid abbreviation for 192.168.1.1
+  // but the earlier hex-concatenate-and-pad logic mis-aligned byte
+  // boundaries to 12.10.129.1, bypassing the RFC-1918 block.
+  await expectMintRejection('https://[::ffff:c0a8:101]/mint', 'IPv4-mapped IPv6 abbreviated → 192.168.1.1');
+  await expectMintRejection('https://[::ffff:c0a8:0101]/mint', 'IPv4-mapped IPv6 padded → 192.168.1.1');
+  await expectMintRejection('https://[::ffff:7f00:1]/mint',  'IPv4-mapped IPv6 abbreviated → 127.0.0.1');
+  await expectMintRejection('https://[::ffff:a9fe:a9fe]/mint', 'IPv4-mapped IPv6 → 169.254.169.254 (cloud metadata)');
 
   // setSelectedNodeUrl — silent no-op on rejection (Nostr/backup-restore
   // paths route here unconditionally, throwing would surface as unhandled

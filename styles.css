@@ -3807,7 +3807,7 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
 /* Detail Modal Genetics Inline */
 .detail-genetics { margin: 12px 0; padding: 10px 12px; background: var(--bg-hover); border-radius: var(--radius-sm); border: 1px solid var(--border); }
 .detail-genetics-ref { color: var(--text-secondary); font-size: 10px; text-decoration: none; border-bottom: 1px dotted currentColor; margin-left: 4px; }
-.detail-genetics-ref:hover { opacity: 1; color: var(--accent); border-bottom-color: var(--accent); }
+.detail-genetics-ref:hover { color: var(--accent); border-bottom-color: var(--accent); }
 
 /* Marker Notes in Detail Modal */
 .marker-note-section { margin: 12px 0; padding: 10px 12px; background: var(--bg-hover); border-radius: var(--radius-sm); border: 1px solid var(--border); }
