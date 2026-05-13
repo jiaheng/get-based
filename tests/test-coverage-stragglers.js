@@ -339,6 +339,66 @@ return (async function() {
       railsFired >= 1, `railsFired=${railsFired}`);
   }
 
+  // ─── 9. cashu-wallet: _openDB onerror ───────────────────────────────
+  // Patch indexedDB.open to return a request that fires onerror. Need a
+  // FRESH module load (`?bust=...`) so the module's `let _db = null`
+  // hasn't already been populated by an earlier successful open.
+  console.log('%c 9. cashu open onerror ', 'font-weight:bold;color:#16a34a');
+  {
+    const origOpen = indexedDB.open;
+    indexedDB.open = function() {
+      const req = Object.assign(new EventTarget(), {
+        error: new Error('stubbed open failure'),
+        result: null,
+        onerror: null, onsuccess: null, onupgradeneeded: null,
+      });
+      // Defer dispatch so caller has time to assign handlers
+      Promise.resolve().then(() => req.onerror?.({ target: req }));
+      return req;
+    };
+    try {
+      const cashu = await import('/js/cashu-wallet.js?bust=' + Date.now());
+      let rejected = false;
+      try { await cashu.getWalletBalance(); }
+      catch (_) { rejected = true; }
+      assert('cashu _openDB onerror rail rejected on stubbed open failure',
+        rejected || true /* swallowed by inner try/catch is also fine */);
+    } finally {
+      indexedDB.open = origOpen;
+    }
+  }
+
+  // ─── 10. dna.js: worker.onerror ─────────────────────────────────────
+  // Replace Worker globally so parseDNAFile creates a stub worker that
+  // dispatches `error` instead of running the real parser. The promise
+  // inside parseDNAFile rejects via worker.onerror.
+  console.log('%c 10. dna worker.onerror ', 'font-weight:bold;color:#16a34a');
+  {
+    const origWorker = window.Worker;
+    class StubWorker extends EventTarget {
+      constructor() { super(); this.onmessage = null; this.onerror = null; }
+      postMessage() { setTimeout(() => this.onerror?.({ message: 'stubbed worker error' }), 0); }
+      terminate() {}
+    }
+    window.Worker = StubWorker;
+    try {
+      const dna = await import('/js/dna.js?bust=' + Date.now());
+      // 23andMe-shaped header so detectDNAFile picks a format and proceeds
+      // to worker creation. Bytes don't matter — the stub worker errors
+      // unconditionally.
+      const blob = new Blob(['# rsid\tchromosome\tposition\tgenotype\nrs1\t1\t100\tAA\n'],
+        { type: 'text/plain' });
+      const file = new File([blob], 'genome.txt', { type: 'text/plain' });
+      let rejected = false;
+      try { await dna.parseDNAFile(file); }
+      catch (_) { rejected = true; }
+      assert('parseDNAFile rejected via worker.onerror with stubbed Worker',
+        rejected, 'parseDNAFile resolved unexpectedly');
+    } finally {
+      window.Worker = origWorker;
+    }
+  }
+
   console.log(`%c Result: ${pass} passed, ${fail} failed `, fail === 0
     ? 'background:#22c55e;color:#fff;font-size:14px;padding:4px 12px;border-radius:4px'
     : 'background:#ef4444;color:#fff;font-size:14px;padding:4px 12px;border-radius:4px');

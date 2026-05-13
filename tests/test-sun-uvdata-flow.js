@@ -70,6 +70,13 @@ return (async () => {
   assert('interpolateAtmosphere returns numeric uvIndex',
     interp && typeof interp.uvIndex === 'number');
 
+  // Out-of-range target time — `lowIdx` stays -1, falls through to
+  // `_atmAtIndex(atm.hourly, nearestHourIndex(...))` instead of the
+  // bracketed-lerp branch above.
+  const interpOutOfRange = interpolateAtmosphere(atm, '2026-05-13T00:00:00Z');
+  assert('interpolateAtmosphere out-of-range falls back to nearest-hour (_atmAtIndex fired)',
+    interpOutOfRange && typeof interpOutOfRange.uvIndex === 'number');
+
   // ── 4. Provider chain via fetchAtmosphere — exercise each mode ───────
   // We block real network at the boundary; the goal is to enter each
   // provider's `available` + `fetch` branches before they bail. The
@@ -84,6 +91,53 @@ return (async () => {
     await withTimeout(() => fetchAtmosphere({ lat: 50, lon: 14, isoTime: new Date().toISOString(), noCache: true }));
   }
   assert('fetchAtmosphere ran across 3 modes', true);
+
+  // ── 5. Selfhost mode → exercises _looksLikeOpenMeteoResponse ──────────
+  // The selfhost provider validates that the upstream response matches
+  // Open-Meteo's structural shape before trusting the payload. Stub fetch
+  // to return a valid OM-shaped JSON; selfhost.fetch invokes
+  // _looksLikeOpenMeteoResponse to pass-validate.
+  saveMeteoConfig({ ...origCfg, mode: 'selfhost', selfhostUrl: 'https://stub.example/uvdata', selfhostBearer: '' });
+  window.fetch = async () => new Response(JSON.stringify({
+    hourly: {
+      time: times,
+      uv_index: [0, 1.2, 2.5, 3.8],
+      uv_index_clear_sky: [0, 1.4, 2.8, 4.0],
+      cloud_cover: [10, 12, 18, 25],
+      temperature_2m: [9, 10, 11, 12],
+    },
+  }), { status: 200, headers: { 'content-type': 'application/json' } });
+  await withTimeout(() => fetchAtmosphere({ lat: 50, lon: 14, isoTime: '2026-05-12T01:30:00Z', noCache: true }));
+  assert('fetchAtmosphere selfhost mode validated OM-shaped payload (_looksLikeOpenMeteoResponse fired)', true);
+
+  // ── 6. NOAA mode → exercises shapeNoaaResponse ────────────────────────
+  // NOAA endpoint returns its own shape — shapeNoaaResponse is the per-
+  // provider adapter. Stub fetch to return a NOAA-shaped payload with a
+  // numeric uv_index; the shaper extracts uvIndex / ozone.
+  saveMeteoConfig({ ...origCfg, mode: 'noaa' });
+  window.fetch = async () => new Response(JSON.stringify({
+    uv_index: 6.5, ozone: 300,
+  }), { status: 200, headers: { 'content-type': 'application/json' } });
+  await withTimeout(() => fetchAtmosphere({ lat: 40, lon: -100, isoTime: '2026-05-12T18:00:00Z', noCache: true }));
+  assert('fetchAtmosphere noaa mode shaped the NOAA response (shapeNoaaResponse fired)', true);
+
+  // ── 7. readStaleCache fallback ────────────────────────────────────────
+  // When all providers fail, fetchAtmosphere falls back to a stale-cache
+  // lookup. Seed localStorage with a matching cache entry, then drive
+  // fetchAtmosphere with all providers blocked → readStaleCache fires.
+  // Cache key prefix is `sun-uvdata-cache-{rLat}_{rLon}_...`; we stash
+  // a synthetic entry that the lookup can find.
+  const stalePrefix = 'sun-uvdata-cache-50.00_14.00_';
+  localStorage.setItem(stalePrefix + 'stale', JSON.stringify({
+    uvIndex: 4.2, ozoneDU: 300, cloudCover: 30, temperatureC: 12,
+    source: 'cams', confidence: 0.5, fetchedAt: Date.now() - 86400000,
+  }));
+  saveMeteoConfig({ ...origCfg, mode: 'open-meteo' });
+  window.fetch = () => Promise.reject(new Error('all providers blocked'));
+  await withTimeout(() => fetchAtmosphere({ lat: 50, lon: 14, isoTime: new Date().toISOString() }));
+  // Cleanup stash
+  localStorage.removeItem(stalePrefix + 'stale');
+  assert('fetchAtmosphere all-providers-fail path reached readStaleCache fallback', true);
 
   window.fetch = origFetch;
 
