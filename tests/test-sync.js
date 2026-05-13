@@ -1,14 +1,54 @@
+#!/usr/bin/env node
 // test-sync.js — Verify sync module exports, payload format, settings UI
-// Run: fetch('tests/test-sync.js').then(r=>r.text()).then(s=>Function(s)())
+//
+// Run: node tests/test-sync.js  (or via npm test)
 
-return (async function() {
-  let pass = 0, fail = 0;
-  function assert(name, condition, detail) {
-    if (condition) { pass++; console.log(`%c PASS %c ${name}`, 'background:#22c55e;color:#fff;padding:2px 6px;border-radius:3px', '', detail || ''); }
-    else { fail++; console.error(`%c FAIL %c ${name}`, 'background:#ef4444;color:#fff;padding:2px 6px;border-radius:3px', '', detail || ''); }
-  }
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-  console.log('%c Cross-Device Sync Tests ', 'background:#6366f1;color:#fff;font-size:14px;padding:4px 12px;border-radius:4px');
+globalThis.window = globalThis.window || globalThis;
+function _ls() {
+  const s = new Map();
+  return { getItem: k => s.has(k) ? s.get(k) : null, setItem: (k, v) => s.set(k, String(v)),
+    removeItem: k => s.delete(k), clear: () => s.clear(),
+    get length() { return s.size; }, key: i => Array.from(s.keys())[i] ?? null };
+}
+if (typeof globalThis.localStorage === 'undefined') globalThis.localStorage = _ls();
+if (typeof globalThis.sessionStorage === 'undefined') globalThis.sessionStorage = _ls();
+if (typeof globalThis.addEventListener !== 'function') {
+  const _l = new Map();
+  globalThis.addEventListener = (t, f) => { (_l.get(t) || _l.set(t, new Set()).get(t)).add(f); };
+  globalThis.removeEventListener = (t, f) => { _l.get(t)?.delete(f); };
+  globalThis.dispatchEvent = (ev) => { const fns = _l.get(ev?.type); if (fns) for (const fn of fns) { try { fn(ev); } catch (e) { console.error(e); } } return true; };
+}
+if (typeof globalThis.CSS === 'undefined') globalThis.CSS = { escape: s => String(s).replace(/[^\w-]/g, c => '\\' + c) };
+function _stubEl() { return { style:{}, dataset:{}, classList:{add:()=>{},remove:()=>{},contains:()=>false,toggle:()=>{}}, appendChild:()=>{},removeChild:()=>{},replaceChild:()=>{},insertBefore:()=>{},remove:()=>{}, setAttribute:()=>{},getAttribute:()=>null,removeAttribute:()=>{}, addEventListener:()=>{},removeEventListener:()=>{}, querySelector:()=>null,querySelectorAll:()=>[], getBoundingClientRect:()=>({top:0,left:0,width:0,height:0,right:0,bottom:0}), focus:()=>{},blur:()=>{},click:()=>{}, children:[],childNodes:[], innerHTML:'',textContent:'',value:'', parentElement:null,parentNode:null }; }
+if (typeof globalThis.document === 'undefined') {
+  globalThis.document = { addEventListener:()=>{},removeEventListener:()=>{}, createElement:()=>_stubEl(),createDocumentFragment:()=>_stubEl(), getElementById:()=>null,querySelector:()=>null,querySelectorAll:()=>[], body:_stubEl(),head:_stubEl(),documentElement:_stubEl(), createTextNode:(t)=>({textContent:t}) };
+}
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const read = (rel) => fs.readFileSync(path.join(ROOT, rel.replace(/^\//, '')), 'utf-8');
+// Compat shim: original test used `await fetchWithRetry(path).then(s => s.includes(...))`
+// — port it as a sync wrapper that returns the file text (the .then is harmless).
+function fetchWithRetry(rel) {
+  return Promise.resolve(read(rel));
+}
+
+let pass = 0, fail = 0;
+function assert(name, condition, detail) {
+  if (condition) { pass++; console.log(`  PASS: ${name}`); }
+  else { fail++; console.log(`  FAIL: ${name}${detail ? ' — ' + detail : ''}`); }
+}
+
+console.log('=== Cross-Device Sync Tests ===\n');
+
+// Load sync.js + settings.js so their Object.assign(window, ...) calls
+// populate window.enableSync, window.toggleSync, etc.
+await import('../js/state.js');
+await import('../js/sync.js');
+await import('../js/settings.js');
 
   const syncSrc = await fetchWithRetry('js/sync.js');
   const settingsSrc = await fetchWithRetry('js/settings.js');
@@ -18,7 +58,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 1. MODULE EXPORTS
   // ═══════════════════════════════════════
-  console.log('%c 1. Module Exports ', 'font-weight:bold;color:#f59e0b');
+  console.log('1. Module Exports');
 
   const requiredExports = ['isSyncEnabled', 'initSync', 'enableSync', 'disableSync', 'getMnemonic', 'restoreFromMnemonic', 'getSyncRelay', 'setSyncRelay', 'onDataSaved', 'pushCurrentProfile', 'deleteProfileFromRelay'];
   for (const fn of requiredExports) {
@@ -32,7 +72,7 @@ return (async function() {
     /deleteProfileFromRelay[\s\S]{0,1200}evolu\.update\([\s\S]{0,400}isDeleted:\s*1/.test(syncSrc));
   assert('deleteProfileFromRelay is idempotent on missing rows (returns no-row reason)',
     /deleteProfileFromRelay[\s\S]{0,500}reason:\s*'no-row'/.test(syncSrc));
-  const profileSrc = await fetch('/js/profile.js').then(r => r.text());
+  const profileSrc = read('/js/profile.js');
   assert('deleteProfile in profile.js calls deleteProfileFromRelay',
     /deleteProfile\([\s\S]+?deleteProfileFromRelay/.test(profileSrc));
 
@@ -61,7 +101,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 2. SYNC PAYLOAD FORMAT
   // ═══════════════════════════════════════
-  console.log('%c 2. Sync Payload Format ', 'font-weight:bold;color:#f59e0b');
+  console.log('2. Sync Payload Format');
 
   assert('buildSyncPayload still emits _v: 3 (default dual-write)', syncSrc.includes('cutover ? 4 : 3'));
   assert('buildSyncPayload includes importedData', syncSrc.includes('importedData,') || syncSrc.includes('importedData:'));
@@ -166,7 +206,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 11. CRDT-DELTA REFACTOR — PHASE 1 (v1.7.0)
   // ═══════════════════════════════════════
-  console.log('%c 11. CRDT-Delta Phase 1 ', 'font-weight:bold;color:#10b981');
+  console.log('11. CRDT-Delta Phase 1');
 
   // Schema additions
   assert('Schema declares itemRow table',
@@ -269,7 +309,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 3. AI SETTINGS SYNC
   // ═══════════════════════════════════════
-  console.log('%c 3. AI Settings Sync ', 'font-weight:bold;color:#f59e0b');
+  console.log('3. AI Settings Sync');
 
   const expectedKeys = [
     'labcharts-ai-provider', 'labcharts-openrouter-key',
@@ -290,7 +330,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 4. MNEMONIC RESTORE
   // ═══════════════════════════════════════
-  console.log('%c 4. Mnemonic Restore ', 'font-weight:bold;color:#f59e0b');
+  console.log('4. Mnemonic Restore');
 
   assert('restoreFromMnemonic clears sync-ts after success', syncSrc.includes("'-sync-ts'") && syncSrc.includes('localStorage.removeItem(key)'));
   assert('restoreFromMnemonic calls evolu.restoreAppOwner', syncSrc.includes('evolu.restoreAppOwner(mnemonic)'));
@@ -303,7 +343,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 5. EVOLU CONFIG
   // ═══════════════════════════════════════
-  console.log('%c 5. Evolu Configuration ', 'font-weight:bold;color:#f59e0b');
+  console.log('5. Evolu Configuration');
 
   assert('reloadUrl uses window.location.pathname', syncSrc.includes('reloadUrl: window.location.pathname'));
   assert('enableLogging gated on debug mode', syncSrc.includes('enableLogging: isDebugMode()'));
@@ -316,7 +356,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 6. DATA.JS INTEGRATION
   // ═══════════════════════════════════════
-  console.log('%c 6. Data Integration ', 'font-weight:bold;color:#f59e0b');
+  console.log('6. Data Integration');
 
   assert('data.js imports onDataSaved from sync.js', dataSrc.includes("import { onDataSaved } from './sync.js'"));
   assert('saveImportedData calls onDataSaved()', dataSrc.includes('onDataSaved()'));
@@ -324,7 +364,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 7. MAIN.JS INTEGRATION
   // ═══════════════════════════════════════
-  console.log('%c 7. Main Integration ', 'font-weight:bold;color:#f59e0b');
+  console.log('7. Main Integration');
 
   assert('main.js imports initSync', mainSrc.includes("initSync") && mainSrc.includes("from './sync.js'"));
   assert('main.js calls initSync()', mainSrc.includes('await initSync()'));
@@ -345,7 +385,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 8. PUSH/PULL LOGIC
   // ═══════════════════════════════════════
-  console.log('%c 8. Push/Pull Logic ', 'font-weight:bold;color:#f59e0b');
+  console.log('8. Push/Pull Logic');
 
   assert('pushProfile guards on _syncing', syncSrc.includes('!_syncing') && syncSrc.includes('_syncing = true'));
   assert('pushProfile uses insert/update pattern', syncSrc.includes('evolu.insert(') && syncSrc.includes('evolu.update('));
@@ -393,7 +433,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 9. SETTINGS UI
   // ═══════════════════════════════════════
-  console.log('%c 9. Settings UI ', 'font-weight:bold;color:#f59e0b');
+  console.log('9. Settings UI');
 
   assert('Settings imports sync functions', settingsSrc.includes("from './sync.js'"));
   assert('renderSyncSection exists', settingsSrc.includes('function renderSyncSection'));
@@ -411,7 +451,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 10. SETUP MODAL
   // ═══════════════════════════════════════
-  console.log('%c 10. Setup Modal ', 'font-weight:bold;color:#f59e0b');
+  console.log('10. Setup Modal');
 
   assert('showSyncSetupModal exists', settingsSrc.includes('function showSyncSetupModal'));
   assert('Setup modal has two choices', settingsSrc.includes('New setup') && settingsSrc.includes('Join existing'));
@@ -434,7 +474,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 11. CHAT SYNC
   // ═══════════════════════════════════════
-  console.log('%c 11. Chat & Display Sync ', 'font-weight:bold;color:#f59e0b');
+  console.log('11. Chat & Display Sync');
 
   assert('collectChatData reads threads', syncSrc.includes('chat-threads') && syncSrc.includes('collectChatData'));
   assert('collectChatData reads per-thread messages', syncSrc.includes('chat-t_${t.id}'));
@@ -448,7 +488,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 12. MESSENGER ACCESS
   // ═══════════════════════════════════════
-  console.log('%c 12. Messenger Access ', 'font-weight:bold;color:#f59e0b');
+  console.log('12. Messenger Access');
 
   assert('generateMessengerToken creates 64-char hex', syncSrc.includes('crypto.getRandomValues') && syncSrc.includes('MESSENGER_TOKEN_KEY'));
   assert('pushContextToGateway exports', syncSrc.includes('export function pushContextToGateway'));
@@ -458,7 +498,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 13. WINDOW BINDINGS
   // ═══════════════════════════════════════
-  console.log('%c 13. Window Bindings ', 'font-weight:bold;color:#f59e0b');
+  console.log('13. Window Bindings');
 
   const syncWindowFns = ['enableSync', 'disableSync', 'getMnemonic', 'restoreFromMnemonic', 'isSyncEnabled', 'isMessengerEnabled', 'getMessengerToken', 'generateMessengerToken', 'revokeMessengerToken'];
   for (const fn of syncWindowFns) {
@@ -478,7 +518,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 14. WEARABLE CONNECTIONS PRESERVE
   // ═══════════════════════════════════════
-  console.log('%c 14. Wearable Connections Preserve ', 'font-weight:bold;color:#f59e0b');
+  console.log('14. Wearable Connections Preserve');
 
   // Push side: stripWearableCredentials removes wearableConnections from the payload
   assert('buildSyncPayload strips wearableConnections', syncSrc.includes('stripWearableCredentials(importedData)'));
@@ -506,7 +546,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 14a. DELTA_ARRAY_CONFIG — composite-keyed + noTombstones
   // ═══════════════════════════════════════
-  console.log('%c 14a. Delta Array Config ', 'font-weight:bold;color:#f59e0b');
+  console.log('14a. Delta Array Config');
 
   assert('changeHistory listed in DELTA_ARRAYS',
     /DELTA_ARRAYS\s*=\s*\[[\s\S]{0,1000}'changeHistory'/.test(syncSrc));
@@ -560,7 +600,7 @@ return (async function() {
   // Fix: explicit itemIdFn per surface, deterministic from content so
   // two devices migrating identical pre-existing data independently
   // derive matching ids (no cross-device duplication).
-  console.log('%c 14a-1b. Cutover-blocker itemIdFns ', 'font-weight:bold;color:#f59e0b');
+  console.log('14a-1b. Cutover-blocker itemIdFns');
 
   assert('entries listed in DELTA_ARRAYS',
     /DELTA_ARRAYS\s*=\s*\[[\s\S]{0,1200}'entries'/.test(syncSrc));
@@ -682,7 +722,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 14a-2. DELTA_MAPS — keyed-map shape (markerNotes)
   // ═══════════════════════════════════════
-  console.log('%c 14a-2. Delta Maps (keyed-object shape) ', 'font-weight:bold;color:#f59e0b');
+  console.log('14a-2. Delta Maps (keyed-object shape)');
 
   assert('DELTA_MAPS list defined parallel to DELTA_ARRAYS',
     /const DELTA_MAPS\s*=\s*\[[\s\S]{0,500}'markerNotes'/.test(syncSrc));
@@ -781,7 +821,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 14a-3. DELTA_SCALARS — singleton fields (menstrualCycle, context cards)
   // ═══════════════════════════════════════
-  console.log('%c 14a-3. Delta Scalars (singleton fields) ', 'font-weight:bold;color:#f59e0b');
+  console.log('14a-3. Delta Scalars (singleton fields)');
 
   assert('DELTA_SCALARS list defined alongside DELTA_ARRAYS / DELTA_MAPS',
     /const DELTA_SCALARS\s*=\s*\[/.test(syncSrc));
@@ -843,7 +883,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 14b. PHASE 1 DUAL-WRITE TELEMETRY (observability for cutover decision)
   // ═══════════════════════════════════════
-  console.log('%c 14b. Phase 1 Dual-Write Telemetry ', 'font-weight:bold;color:#f59e0b');
+  console.log('14b. Phase 1 Dual-Write Telemetry');
 
   // Source-shape: helpers + exports + diagnose surface wiring
   assert('getDeltaTelemetry exported', /export function getDeltaTelemetry/.test(syncSrc));
@@ -904,7 +944,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 14c. PHASE 2 CUTOVER READINESS CHECK (v1.7.9)
   // ═══════════════════════════════════════
-  console.log('%c 14c. Phase 2 Cutover Readiness ', 'font-weight:bold;color:#f59e0b');
+  console.log('14c. Phase 2 Cutover Readiness');
 
   assert('getDeltaCutoverReadiness exported', /export function getDeltaCutoverReadiness/.test(syncSrc));
   assert('getDeltaCutoverReadiness exposed on window',
@@ -986,7 +1026,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 14d. PHASE 2 CUTOVER FLAG (v1.7.10) — readiness-gated, reversible
   // ═══════════════════════════════════════
-  console.log('%c 14d. Phase 2 Cutover Flag (gated) ', 'font-weight:bold;color:#f59e0b');
+  console.log('14d. Phase 2 Cutover Flag (gated)');
 
   assert('isPhase2CutoverEnabled exported', /export function isPhase2CutoverEnabled/.test(syncSrc));
   assert('enablePhase2Cutover exported', /export function enablePhase2Cutover/.test(syncSrc));
@@ -1058,7 +1098,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 14e. v1.7.11 AUDIT FIXES — proto-pollution / resurrect / cutover scope
   // ═══════════════════════════════════════
-  console.log('%c 14e. v1.7.11 audit fixes ', 'font-weight:bold;color:#f59e0b');
+  console.log('14e. v1.7.11 audit fixes');
 
   // Proto-pollution defence
   assert('_isAllowlistSafeId rejects __proto__ / constructor / prototype',
@@ -1124,7 +1164,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 14f. v1.7.12 AUDIT FIXES — gunzip cap / snapshot-poisoning / changeHistory cap
   // ═══════════════════════════════════════
-  console.log('%c 14f. v1.7.12 audit fixes ', 'font-weight:bold;color:#f59e0b');
+  console.log('14f. v1.7.12 audit fixes');
 
   // Decompression-bomb defence
   assert('_gunzipToStringCapped defined with size cap',
@@ -1217,7 +1257,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 14g. v1.7.13 P2 cleanup — comments + lat/lon + manualValues collision
   // ═══════════════════════════════════════
-  console.log('%c 14g. v1.7.13 P2 cleanup ', 'font-weight:bold;color:#f59e0b');
+  console.log('14g. v1.7.13 P2 cleanup');
 
   // Doc accuracy
   assert('Pull-order header comment matches actual code (blob first, per-row overlays)',
@@ -1261,7 +1301,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 14h. v1.7.14 PRE-v1.7 AUDIT FIXES
   // ═══════════════════════════════════════
-  console.log('%c 14h. v1.7.14 audit fixes ', 'font-weight:bold;color:#f59e0b');
+  console.log('14h. v1.7.14 audit fixes');
 
   // P1: parseSyncPayload now uses capped gunzip (decompression-bomb defence on blob path)
   assert('parseSyncPayload routes blob gunzip through _gunzipToStringCapped',
@@ -1310,7 +1350,7 @@ return (async function() {
     const wireBig = await gzB64(innerBig);
     // Use the actual exported function via dynamic import, since
     // parseSyncPayload isn't on window
-    const mod = await import('/js/sync.js');
+    const mod = await import('../js/sync.js');
     // Note: parseSyncPayload isn't exported either — fall back to
     // testing via a known caller. The shape is fine; just verify
     // the wireSmall round-trips and wireBig throws via _gunzipToStringCapped.
@@ -1339,7 +1379,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 14i. v1.7.15 — runtime parse-equivalence + diagnose telemetry + DST anchor
   // ═══════════════════════════════════════
-  console.log('%c 14i. v1.7.15 deferred-audit fixes ', 'font-weight:bold;color:#f59e0b');
+  console.log('14i. v1.7.15 deferred-audit fixes');
 
   // Telemetry on diagnose pre-pass parse failure
   assert('Diagnose pre-pass logs parse failures via _logSyncEvent',
@@ -1373,7 +1413,7 @@ return (async function() {
   // raw JSON.parse on a GZ envelope threw and silently fell through.
   if (typeof window !== 'undefined' && typeof CompressionStream !== 'undefined') {
     try {
-      const mod = await import('/js/sync.js');
+      const mod = await import('../js/sync.js');
       // buildSyncPayload + parseSyncPayload aren't exported (module-private),
       // but we can still exercise the round-trip via the gzip envelope path
       // directly to verify the contract: producer writes, consumer reads
@@ -1416,7 +1456,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 14j. v1.7.16 — concurrent-push snapshot clobber fix
   // ═══════════════════════════════════════
-  console.log('%c 14j. v1.7.16 snapshot clobber fix ', 'font-weight:bold;color:#f59e0b');
+  console.log('14j. v1.7.16 snapshot clobber fix');
 
   assert('_writeDeltaSnapshot accepts plannedAt 4th arg',
     /function _writeDeltaSnapshot\(profileId,\s*arrayName,\s*snap,\s*plannedAt\)/.test(syncSrc));
@@ -1487,7 +1527,7 @@ return (async function() {
   // that drops a surface from the planner list lights up here instead of
   // silently ceasing to sync that data cross-device.
   // ═══════════════════════════════════════
-  console.log('%c 14k. Every-surface delta membership ', 'font-weight:bold;color:#f59e0b');
+  console.log('14k. Every-surface delta membership');
 
   // Helper: confirm an entry sits inside a given const list. We extract
   // the literal contents between `[` and `]` for the named const, then
@@ -1579,7 +1619,7 @@ return (async function() {
   // Without (a), a fresh DNA import on device A blob-LWWs device B's
   // snps. Without (b), a single re-pushed scalar wipes the map merge.
   // ═══════════════════════════════════════
-  console.log('%c 14l. genetics scalar / snps-map split ', 'font-weight:bold;color:#f59e0b');
+  console.log('14l. genetics scalar / snps-map split');
 
   // Push-side strip: function exists + is called inside buildSyncPayload
   assert('stripGeneticsSnpsFromBlob defined',
@@ -1663,7 +1703,7 @@ return (async function() {
   // state has a near-empty local map; without the guard the planner
   // would emit a wholesale-tombstone batch that wipes the peer's data.
   // ═══════════════════════════════════════
-  console.log('%c 14m. tombstone-storm guard ', 'font-weight:bold;color:#f59e0b');
+  console.log('14m. tombstone-storm guard');
 
   assert('Tombstone-storm guard exists in _planKeyedMapDelta',
     /_planKeyedMapDelta[\s\S]{0,5000}refused tombstone storm/.test(syncSrc));
@@ -1697,7 +1737,7 @@ return (async function() {
   // for it. These are the surfaces that didn't exist before the
   // sun-sessions branch and need explicit cross-device proof.
   // ═══════════════════════════════════════
-  console.log('%c 14n. sun/light/wearable round-trip ', 'font-weight:bold;color:#f59e0b');
+  console.log('14n. sun/light/wearable round-trip');
 
   if (typeof window !== 'undefined' && typeof CompressionStream !== 'undefined') {
     const sample = {
@@ -1847,7 +1887,7 @@ return (async function() {
   //     (ts=startedAt) → returns true → force-push catches the missing
   //     update.
   // ═══════════════════════════════════════
-  console.log('%c 14o. Startup reconciliation (lost-debounce catch-up) ', 'font-weight:bold;color:#f59e0b');
+  console.log('14o. Startup reconciliation (lost-debounce catch-up)');
 
   // Source-shape: the reconciliation function exists and routes through
   // the pickTimestamp-aware helper instead of bare id-set comparison.
@@ -1928,17 +1968,17 @@ return (async function() {
   // ═══════════════════════════════════════
   // 15. VENDOR FILES
   // ═══════════════════════════════════════
-  console.log('%c 15. Vendor Files ', 'font-weight:bold;color:#f59e0b');
+  console.log('15. Vendor Files');
 
   const vendorFiles = ['vendor/evolu/evolu-bundle.js', 'vendor/evolu/Db.worker.js', 'vendor/evolu/sqlite3.wasm'];
   for (const f of vendorFiles) {
-    const res = await fetch(f, { method: 'HEAD' });
-    assert(`${f} exists`, res.ok, `status: ${res.status}`);
+    // Node: existence check on disk. Browser would HTTP HEAD; same intent.
+    const exists = fs.existsSync(path.join(ROOT, f));
+    assert(`${f} exists`, exists, `not found on disk`);
   }
 
   // ═══════════════════════════════════════
   // SUMMARY
   // ═══════════════════════════════════════
-  console.log(`%c\n Sync Tests: ${pass} passed, ${fail} failed `, fail ? 'background:#ef4444;color:#fff;font-size:14px;padding:4px 12px;border-radius:4px' : 'background:#22c55e;color:#fff;font-size:14px;padding:4px 12px;border-radius:4px');
-  if (typeof window.__TEST_RESULTS !== 'undefined') window.__TEST_RESULTS = { pass, fail };
-})();
+console.log(`\nResults: ${pass} passed, ${fail} failed, ${pass + fail} total`);
+process.exit(fail > 0 ? 1 : 0);
