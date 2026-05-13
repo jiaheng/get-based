@@ -110,6 +110,19 @@ return (async function() {
     assert('Whoop personalInfo ok=false on 401',
       whErr?.ok === false);
 
+    // ─── Polar (logDebug coverage) ──────────────────────────────────────
+    // Polar's existing test-ai-verdict-engine-instance.js covers register /
+    // personalInfo / commit. The remaining gap is `logDebug`, which only
+    // fires when individual transaction sub-fetches fail. Drive
+    // fetchPolarDailyRange with everything 500 to exercise it.
+    console.log('%c Polar (logDebug) ', 'font-weight:bold;color:#0ea5e9');
+    const polar = await import('/js/wearables-polar.js?bust=' + Date.now());
+    stubAll({ error: 'down' }, 500);
+    const polarRows = await polar.fetchPolarDailyRange('stub-token',
+      '2026-05-01', '2026-05-02', { userId: 'stub-user' });
+    assert('Polar dailyRange returns array when every sub-tx 500s (logDebug fired)',
+      Array.isArray(polarRows));
+
   } finally {
     window.fetch = origFetch;
   }
