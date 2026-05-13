@@ -278,6 +278,13 @@ return (async function() {
   await expectMintRejection('https://[::ffff:c0a8:0101]/mint', 'IPv4-mapped IPv6 padded → 192.168.1.1');
   await expectMintRejection('https://[::ffff:7f00:1]/mint',  'IPv4-mapped IPv6 abbreviated → 127.0.0.1');
   await expectMintRejection('https://[::ffff:a9fe:a9fe]/mint', 'IPv4-mapped IPv6 → 169.254.169.254 (cloud metadata)');
+  // Greptile follow-up on PR #194: 10/8 + 172.16/12 also bypassable under
+  // the old `hex.padStart(8,'0')` logic. `::ffff:a00:1` produced
+  // `0.0.160.1` (not 10.0.0.1); `::ffff:ac10:1` produced `0.10.193.1`
+  // (not 172.16.0.1). Both ranges are RFC-1918; the fix handles them
+  // mathematically — these asserts pin the regression coverage explicit.
+  await expectMintRejection('https://[::ffff:a00:1]/mint',   'IPv4-mapped IPv6 abbreviated → 10.0.0.1 (RFC-1918 10/8)');
+  await expectMintRejection('https://[::ffff:ac10:1]/mint',  'IPv4-mapped IPv6 abbreviated → 172.16.0.1 (RFC-1918 172.16/12)');
 
   // setSelectedNodeUrl — silent no-op on rejection (Nostr/backup-restore
   // paths route here unconditionally, throwing would surface as unhandled
