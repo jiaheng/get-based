@@ -1,26 +1,54 @@
+#!/usr/bin/env node
 // test-change-history.js — Verify change history recording, dedup, cap, AI context, export/import
-// Run: fetch('tests/test-change-history.js').then(r=>r.text()).then(s=>Function(s)())
+//
+// Run: node tests/test-change-history.js  (or via npm test)
 
-return (async function() {
-  let pass = 0, fail = 0;
-  function assert(name, condition, detail) {
-    if (condition) { pass++; console.log(`%c PASS %c ${name}`, 'background:#22c55e;color:#fff;padding:2px 6px;border-radius:3px', '', detail || ''); }
-    else { fail++; console.error(`%c FAIL %c ${name}`, 'background:#ef4444;color:#fff;padding:2px 6px;border-radius:3px', '', detail || ''); }
-  }
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-  console.log('%c Change History Tests ', 'background:#6366f1;color:#fff;font-size:14px;padding:4px 12px;border-radius:4px');
+globalThis.window = globalThis.window || globalThis;
+function _ls() {
+  const s = new Map();
+  return { getItem: k => s.has(k) ? s.get(k) : null, setItem: (k, v) => s.set(k, String(v)),
+    removeItem: k => s.delete(k), clear: () => s.clear(),
+    get length() { return s.size; }, key: i => Array.from(s.keys())[i] ?? null };
+}
+if (typeof globalThis.localStorage === 'undefined') globalThis.localStorage = _ls();
+if (typeof globalThis.sessionStorage === 'undefined') globalThis.sessionStorage = _ls();
+if (typeof globalThis.addEventListener !== 'function') {
+  const _l = new Map();
+  globalThis.addEventListener = (t, f) => { (_l.get(t) || _l.set(t, new Set()).get(t)).add(f); };
+  globalThis.removeEventListener = (t, f) => { _l.get(t)?.delete(f); };
+  globalThis.dispatchEvent = (ev) => { const fns = _l.get(ev?.type); if (fns) for (const fn of fns) { try { fn(ev); } catch (e) { console.error(e); } } return true; };
+}
+if (typeof globalThis.CSS === 'undefined') globalThis.CSS = { escape: s => String(s).replace(/[^\w-]/g, c => '\\' + c) };
 
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf-8');
+
+let pass = 0, fail = 0;
+function assert(name, condition, detail) {
+  if (condition) { pass++; console.log(`  PASS: ${name}`); }
+  else { fail++; console.log(`  FAIL: ${name}${detail ? ' — ' + detail : ''}`); }
+}
+
+console.log('=== Change History Tests ===\n');
+
+// context-cards.js exposes recordChange via Object.assign(window, ...).
+await import('../js/state.js');
+await import('../js/context-cards.js');
   // ═══════════════════════════════════════
   // 1. recordChange function exists
   // ═══════════════════════════════════════
-  console.log('%c 1. Function Exports ', 'font-weight:bold;color:#f59e0b');
+  console.log('1. Function Exports');
 
   assert('recordChange is a window function', typeof window.recordChange === 'function');
 
   // ═══════════════════════════════════════
   // 2. Basic recording
   // ═══════════════════════════════════════
-  console.log('%c 2. Basic Recording ', 'font-weight:bold;color:#f59e0b');
+  console.log('2. Basic Recording');
 
   // Save original state
   const origHistory = window._labState.importedData.changeHistory;
@@ -41,7 +69,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 3. Dedup: identical snapshot skipped
   // ═══════════════════════════════════════
-  console.log('%c 3. Dedup — Identical Snapshot ', 'font-weight:bold;color:#f59e0b');
+  console.log('3. Dedup — Identical Snapshot');
 
   window.recordChange('diet');
   assert('Identical snapshot not duplicated', window._labState.importedData.changeHistory.length === 1);
@@ -49,7 +77,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 4. Dedup: same field + same day overwrites
   // ═══════════════════════════════════════
-  console.log('%c 4. Dedup — Same Day Overwrite ', 'font-weight:bold;color:#f59e0b');
+  console.log('4. Dedup — Same Day Overwrite');
 
   window._labState.importedData.diet = { type: 'low-carb', restrictions: ['gluten'], pattern: '2 meals', note: '' };
   window.recordChange('diet');
@@ -59,7 +87,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 5. Different fields tracked independently
   // ═══════════════════════════════════════
-  console.log('%c 5. Multiple Fields ', 'font-weight:bold;color:#f59e0b');
+  console.log('5. Multiple Fields');
 
   window._labState.importedData.exercise = { frequency: '3x/week', types: ['strength'], intensity: 'moderate', note: '' };
   window.recordChange('exercise');
@@ -69,7 +97,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 6. Null snapshot for cleared fields
   // ═══════════════════════════════════════
-  console.log('%c 6. Null Snapshot ', 'font-weight:bold;color:#f59e0b');
+  console.log('6. Null Snapshot');
 
   // Simulate clearing by setting to different date first
   const h = window._labState.importedData.changeHistory;
@@ -83,7 +111,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 7. Cap at 200 entries
   // ═══════════════════════════════════════
-  console.log('%c 7. Cap at 200 ', 'font-weight:bold;color:#f59e0b');
+  console.log('7. Cap at 200');
 
   window._labState.importedData.changeHistory = [];
   for (let i = 0; i < 210; i++) {
@@ -100,7 +128,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 8. String fields (interpretiveLens)
   // ═══════════════════════════════════════
-  console.log('%c 8. String Fields ', 'font-weight:bold;color:#f59e0b');
+  console.log('8. String Fields');
 
   window._labState.importedData.changeHistory = [];
   window._labState.importedData.interpretiveLens = 'Functional medicine';
@@ -111,7 +139,7 @@ return (async function() {
   // ═══════════════════════════════════════
   // 9. Array fields (healthGoals)
   // ═══════════════════════════════════════
-  console.log('%c 9. Array Fields ', 'font-weight:bold;color:#f59e0b');
+  console.log('9. Array Fields');
 
   window._labState.importedData.changeHistory = [];
   window._labState.importedData.healthGoals = [{ text: 'Reduce inflammation', severity: 'major' }];
@@ -123,31 +151,31 @@ return (async function() {
   // ═══════════════════════════════════════
   // 10. Migration guard
   // ═══════════════════════════════════════
-  console.log('%c 10. Migration ', 'font-weight:bold;color:#f59e0b');
+  console.log('10. Migration');
 
-  const profileSrc = await fetchWithRetry('js/profile.js');
+  const profileSrc = read('js/profile.js');
   assert('Migration guard for changeHistory', profileSrc.includes("data.changeHistory === undefined") && profileSrc.includes("data.changeHistory = []"));
 
   // ═══════════════════════════════════════
   // 11. State default
   // ═══════════════════════════════════════
-  console.log('%c 11. State Default ', 'font-weight:bold;color:#f59e0b');
+  console.log('11. State Default');
 
-  const stateSrc = await fetchWithRetry('js/state.js');
+  const stateSrc = read('js/state.js');
   assert('state.js has changeHistory default', stateSrc.includes('changeHistory: []'));
 
   // ═══════════════════════════════════════
   // 12. Export includes changeHistory
   // ═══════════════════════════════════════
-  console.log('%c 12. Export ', 'font-weight:bold;color:#f59e0b');
+  console.log('12. Export');
 
-  const exportSrc = await fetchWithRetry('js/export.js');
+  const exportSrc = read('js/export.js');
   assert('Export includes changeHistory', exportSrc.includes('changeHistory: data.changeHistory'));
 
   // ═══════════════════════════════════════
   // 13. Import handles changeHistory
   // ═══════════════════════════════════════
-  console.log('%c 13. Import ', 'font-weight:bold;color:#f59e0b');
+  console.log('13. Import');
 
   assert('Import merges changeHistory (single-file path)', exportSrc.includes("Array.isArray(json.changeHistory)"));
   assert('Import merges changeHistory (bundle path)', exportSrc.includes("Array.isArray(importData.changeHistory)"));
@@ -155,9 +183,9 @@ return (async function() {
   // ═══════════════════════════════════════
   // 14. AI context integration
   // ═══════════════════════════════════════
-  console.log('%c 14. AI Context ', 'font-weight:bold;color:#f59e0b');
+  console.log('14. AI Context');
 
-  const labCtxSrc = await fetchWithRetry('js/lab-context.js');
+  const labCtxSrc = read('js/lab-context.js');
   assert('buildLabContext reads changeHistory', labCtxSrc.includes('changeHistory'));
   assert('Context Change Timeline section', labCtxSrc.includes('Context Change Timeline'));
   assert('summarizeChange helper exists', labCtxSrc.includes('function summarizeChange'));
@@ -165,9 +193,9 @@ return (async function() {
   // ═══════════════════════════════════════
   // 15. saveAndRefresh accepts field param
   // ═══════════════════════════════════════
-  console.log('%c 15. saveAndRefresh Field Param ', 'font-weight:bold;color:#f59e0b');
+  console.log('15. saveAndRefresh Field Param');
 
-  const ctxSrc = await fetchWithRetry('js/context-cards.js');
+  const ctxSrc = read('js/context-cards.js');
   assert('saveAndRefresh has field parameter', ctxSrc.includes('function saveAndRefresh(msg, field)'));
   assert('Diet passes field to saveAndRefresh', ctxSrc.includes("saveAndRefresh('Diet & Digestion saved', 'diet')"));
   assert('Exercise passes field to saveAndRefresh', ctxSrc.includes("saveAndRefresh('Exercise saved', 'exercise')"));
@@ -181,14 +209,14 @@ return (async function() {
   // ═══════════════════════════════════════
   // 16. Inline save paths call recordChange
   // ═══════════════════════════════════════
-  console.log('%c 16. Inline Save Paths ', 'font-weight:bold;color:#f59e0b');
+  console.log('16. Inline Save Paths');
 
   assert('addCondition calls recordChange', ctxSrc.includes("recordChange('diagnoses')"));
   assert('addHealthGoal calls recordChange', ctxSrc.includes("recordChange('healthGoals')"));
   assert('saveInterpretiveLens calls recordChange', ctxSrc.includes("recordChange('interpretiveLens')"));
   assert('debounceContextNotes calls recordChange', ctxSrc.includes("recordChange('contextNotes')"));
 
-  const cycleSrc = await fetchWithRetry('js/cycle.js');
+  const cycleSrc = read('js/cycle.js');
   assert('saveMenstrualCycle calls recordChange', cycleSrc.includes("recordChange('menstrualCycle')"));
 
   // Restore original state
@@ -196,7 +224,5 @@ return (async function() {
   window._labState.importedData.diet = origDiet;
 
   // ═══════════════════════════════════════
-  console.log(`\n=== Results ===\n${pass} passed, ${fail} failed`);
-  if (fail === 0) console.log('%c All tests passed! ', 'background:#22c55e;color:#fff;font-size:14px;padding:4px 12px;border-radius:4px');
-  return { pass, fail };
-})();
+console.log(`\nResults: ${pass} passed, ${fail} failed, ${pass + fail} total`);
+process.exit(fail > 0 ? 1 : 0);
