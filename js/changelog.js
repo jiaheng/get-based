@@ -5,6 +5,14 @@ import { escapeHTML } from './utils.js';
 
 const CHANGELOG = [
   {
+    version: '1.7.7', date: '2026-05-13', title: 'Oura RHR matches the Oura app + zero-sentinel cleanup',
+    items: [
+      '<b>RHR now matches what your Oura app shows.</b> Resting Heart Rate on the dashboard used the night-long average from Oura\'s sleep payload, which runs 5–10 bpm higher than the true RHR. The Oura app\'s "Resting Heart Rate" card and trend graph use the lowest 5-min average during sleep (typically hit in deep sleep) — we now source from the same field. Existing rows refresh on the next sync.',
+      '<b>Bad-night zeros render as gaps instead of floor dots.</b> Oura emits a literal <code>0</code> for HRV/HR scalars when a sleep session has no usable data (ring not worn, signal lost, sub-threshold session). Those zeros used to flow through to the history chart as a dot at the floor and drag the weekly mean down. Now treated as missing across HR, HRV, weight, body composition, and sleep durations — legitimate zeros (rest-day steps, no high-stress minutes, perfect-sleep awake time, body-temp deviation centered at 0) still display normally.',
+      '<b>Oura Rest Mode still gets its dedicated hint.</b> When Rest Mode is on, activity_score is 0 every day by design — the card stays visible and the detail modal shows a short explanation pointing you to the Steps card for raw movement data.',
+    ]
+  },
+  {
     version: '1.7.6', date: '2026-05-13', title: 'MyHeritage Low-pass WGS: strand-aware SNP matching',
     items: [
       '<b>The "Genotype not in lookup" group is gone.</b> MyHeritage\'s 2025 Low-pass WGS export reports every SNP on the build37 forward strand, but our catalog stored a handful of variants keyed on the opposite strand — so calls like <code>AC</code> for <b>PCSK9 R46L</b> or <code>TT</code> for <b>UGT1A1 G71R</b> silently missed the table and ended up labeled "not in lookup" even though they\'re standard, well-characterized genotypes. SNP lookups now try the reverse-complement as a fallback when the direct read misses, so MyHeritage forward-strand calls resolve to the right catalog entry across all eight affected loci (PCSK9, MTR, UGT1A1, MTRR, BHMT, FADS1 coding, LIPC -514, MC1R). Palindromic A/T and C/G SNPs (where strand flipping is ambiguous) keep the strict lookup to avoid false positives.',
