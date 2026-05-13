@@ -87,6 +87,7 @@ const TEST_FILES = [
   'tests/test-ai-verdict-engine.js',
   'tests/test-sun-ai-analysis.js',
   'tests/test-light-device-ai-analysis.js',
+  'tests/test-vendor-personal-info.js',
   'tests/test-light-ai-renders.js',
   'tests/test-light-env.js',
   'tests/test-light-tools.js',
