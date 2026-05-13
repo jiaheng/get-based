@@ -17,7 +17,7 @@
 
 import { escapeHTML, showNotification, showConfirmDialog } from './utils.js';
 import { state } from './state.js';
-import { ADAPTERS, adapterById, canonicalMetric, metricsForSources, visibleAdapters, getOAuthClientId } from './wearable-adapters.js';
+import { ADAPTERS, adapterById, canonicalMetric, metricsForSources, visibleAdapters, getOAuthClientId, isMetricValueMeaningful } from './wearable-adapters.js';
 import { brandMarkMono } from './brand-assets.js';
 
 // Vendor logo / mark beside the adapter name. Backed by brands/<vendor>/
@@ -704,8 +704,16 @@ async function openWearableDetail(metricId) {
 
   const series = rows
     .map(r => ({ date: r.date, v: r[metricId] }))
-    .filter(p => typeof p.v === 'number' && isFinite(p.v))
+    .filter(p => isMetricValueMeaningful(metricId, p.v))
     .sort((a, b) => a.date.localeCompare(b.date));
+
+  // activity_score is allowlisted in isMetricValueMeaningful, so 0s pass
+  // through into `series` — that lets us detect Oura Rest Mode here and
+  // fire the dedicated hint from the detail modal instead of hiding the
+  // metric entirely.
+  const allZeroActivity = metricId === 'activity_score'
+    && series.length > 0
+    && series.every(p => p.v === 0);
 
   // Separately pull ALL manual rows (not just primary-source rows) so the
   // detail modal's "Manual entries" list shows manual readings even when
@@ -721,7 +729,7 @@ async function openWearableDetail(metricId) {
   }
   const manualEntries = manualRows
     .map(r => ({ date: r.date, v: r[metricId], tags: r.tags, note: r.note }))
-    .filter(p => typeof p.v === 'number' && isFinite(p.v))
+    .filter(p => isMetricValueMeaningful(metricId, p.v))
     .sort((a, b) => b.date.localeCompare(a.date)); // reverse-chron for display
 
   const modal = document.getElementById('detail-modal');
@@ -734,7 +742,7 @@ async function openWearableDetail(metricId) {
     delete state.chartInstances['modal'];
   }
 
-  modal.innerHTML = buildWearableDetailHtml(canon, m, series, metricId, manualEntries);
+  modal.innerHTML = buildWearableDetailHtml(canon, m, series, metricId, manualEntries, { allZeroActivity });
   overlay.classList.add('show');
   // Move focus to the close button so keyboard users land inside the modal.
   modal.querySelector('.modal-close')?.focus?.();
@@ -852,7 +860,7 @@ function buildManualEntriesSection(metricId, manualEntries, primarySource) {
   </section>`;
 }
 
-function buildWearableDetailHtml(canon, m, series, metricId, manualEntries = []) {
+function buildWearableDetailHtml(canon, m, series, metricId, manualEntries = [], opts = {}) {
   const adapter = adapterById(m.primarySource);
   const sourceName = adapter?.displayName || m.primarySource;
   const unit = canon.unit || '';
@@ -961,10 +969,10 @@ function buildWearableDetailHtml(canon, m, series, metricId, manualEntries = [])
       ${sub ? `<div class="wearable-detail-stat-sub">${escapeHTML(sub)}</div>` : ''}
     </div>`).join('');
 
-  const emptyHint = series.length === 0
-    ? `<div class="wearable-detail-empty">No daily samples for this metric in the last 90 days. Either your wearable doesn't share this metric, the feature is off on your device, or you didn't wear it. Try Sync now, or reconnect to refresh permissions.</div>`
-    : (metricId === 'activity_score' && series.every(p => p.v === 0))
-      ? `<div class="wearable-detail-empty">Every day shows 0 — Oura suppresses the Activity composite score while Rest Mode is on. Check the <b>Steps</b> card for raw movement data, or disable Rest Mode in the Oura app.</div>`
+  const emptyHint = opts.allZeroActivity
+    ? `<div class="wearable-detail-empty">Every day shows 0 — Oura suppresses the Activity composite score while Rest Mode is on. Check the <b>Steps</b> card for raw movement data, or disable Rest Mode in the Oura app.</div>`
+    : series.length === 0
+      ? `<div class="wearable-detail-empty">No daily samples for this metric in the last 90 days. Either your wearable doesn't share this metric, the feature is off on your device, or you didn't wear it. Try Sync now, or reconnect to refresh permissions.</div>`
       : '';
 
   // Show the source-swap button whenever ≥2 wearables are connected — the
