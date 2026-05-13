@@ -949,6 +949,44 @@ export function refreshOpenRouterBalance() {
   });
 }
 
+// Persistent modal shown when an OpenRouter API call returns 402 (out of
+// credit). Previously this surfaced as a toast that vanished in seconds
+// and left the user stuck. Single actionable path: add credits via OR's
+// settings page in a new tab. The "switch to a free model" branch was
+// removed — OpenRouter's free tier has no vision-capable models so
+// image-mode imports broke silently, and the privacy story (free
+// providers log + may train on prompts) is bad for medical data.
+export function showInsufficientBalanceDialog() {
+  let overlay = document.getElementById('or-no-balance-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'or-no-balance-overlay';
+    overlay.className = 'confirm-overlay';
+    document.body.appendChild(overlay);
+  }
+  overlay.innerHTML = '<div class="confirm-dialog ai-needed-dialog" role="dialog" aria-modal="true" aria-label="OpenRouter balance empty" style="max-width:480px">' +
+    '<p class="confirm-message"><strong>Your OpenRouter balance is empty</strong></p>' +
+    '<p style="font-size:13px;color:var(--text-muted);margin:0 0 14px">Add credits at OpenRouter to keep using AI. $10 covers weeks of typical use — chat, lab interpretation, and PDF imports.</p>' +
+    '<button class="chat-quiz-option chat-quiz-recommended" id="or-add-credits" style="margin-bottom:8px">' +
+      '<span class="chat-quiz-icon" aria-hidden="true">&#128179;</span>' +
+      '<span class="chat-quiz-body"><strong>Add credits at openrouter.ai</strong>' +
+      '<span>Opens in a new tab. Come back to getbased when done — the page picks up automatically.</span></span>' +
+      '<span class="chat-quiz-arrow" aria-hidden="true">&rarr;</span>' +
+    '</button>' +
+    '<div style="text-align:right;margin-top:14px">' +
+      '<button class="confirm-btn confirm-btn-cancel" id="or-nb-cancel">Not now</button>' +
+    '</div>' +
+  '</div>';
+  overlay.classList.add('show');
+  const close = function() { overlay.classList.remove('show'); };
+  document.getElementById('or-add-credits').onclick = function() {
+    close();
+    window.open('https://openrouter.ai/settings/credits', '_blank', 'noopener');
+  };
+  document.getElementById('or-nb-cancel').onclick = close;
+  overlay.onclick = function(e) { if (e.target === overlay) close(); };
+}
+
 export async function applyCustomOpenRouterModel(modelId) {
   const id = modelId.trim();
   if (!id) return;
@@ -2303,6 +2341,7 @@ Object.assign(window, {
   doPpqTopupCustom,
   cancelPpqTopup,
   refreshOpenRouterBalance,
+  showInsufficientBalanceDialog,
   handleSaveCustomApi,
   handleRemoveCustomApi,
   renderCustomApiModelDropdown,

@@ -2881,13 +2881,55 @@ details[open] > .cl-archived-header::before { content: '\25BE '; }
   padding: 20px;
 }
 .chat-empty-icon { font-size: 32px; margin-bottom: 8px; }
-.chat-setup-providers { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
-.chat-setup-provider { padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-card); }
-.chat-setup-provider strong { font-size: 13px; }
-.chat-setup-rec { font-size: 11px; color: var(--accent); font-weight: 500; }
-.chat-setup-detail { font-size: 12px; color: var(--text-muted); }
-.chat-setup-provider a { font-size: 12px; color: var(--accent); text-decoration: none; }
-.chat-setup-provider a:hover { text-decoration: underline; }
+/* Onboarding provider quiz (Stage 2 — chat-driven AI picker). */
+.chat-quiz-options { display: flex; flex-direction: column; gap: 8px; margin: 12px 0 10px; }
+.chat-quiz-option {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; padding: 12px 14px;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px;
+  color: var(--text-primary); text-align: left; cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.05s;
+  font: inherit;
+}
+.chat-quiz-option:hover { border-color: var(--accent); background: rgba(124, 58, 237, 0.06); }
+.chat-quiz-option:active { transform: translateY(1px); }
+.chat-quiz-option:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chat-quiz-recommended { border-color: rgba(124, 58, 237, 0.5); }
+.chat-quiz-recommended:hover { border-color: var(--accent); }
+.chat-quiz-icon { font-size: 22px; line-height: 1; flex: 0 0 28px; text-align: center; }
+.chat-quiz-body { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.chat-quiz-body strong { font-size: 13.5px; }
+.chat-quiz-body span { font-size: 12px; color: var(--text-muted); line-height: 1.35; }
+.chat-quiz-body em.chat-quiz-rec { font-style: normal; color: var(--accent); font-weight: 500; }
+.chat-quiz-arrow { font-size: 16px; color: var(--text-muted); flex: 0 0 auto; }
+.chat-quiz-option:hover .chat-quiz-arrow { color: var(--accent); }
+.chat-quiz-back {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: transparent; border: none; color: var(--text-muted);
+  font-size: 12px; cursor: pointer; padding: 0 0 8px;
+}
+.chat-quiz-back:hover { color: var(--accent); }
+.chat-quiz-skip { text-align: center; margin-top: 14px; }
+.chat-quiz-skip-btn {
+  background: transparent; border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text-secondary); padding: 8px 14px; font-size: 12.5px;
+  cursor: pointer; transition: border-color 0.15s, color 0.15s;
+  font-family: inherit;
+}
+.chat-quiz-skip-btn:hover { border-color: var(--accent); color: var(--accent); }
+/* Onboarding progress crumbs (Stage 1..4). */
+.chat-onboard-crumbs {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; padding: 0 2px 10px;
+  border-bottom: 1px solid var(--border); margin-bottom: 12px;
+}
+.chat-onboard-crumbs-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; }
+.chat-onboard-crumbs-dots { display: inline-flex; gap: 5px; align-items: center; }
+.chat-onboard-crumb {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--border); transition: background 0.2s;
+}
+.chat-onboard-crumb.active { background: var(--accent); }
 .chat-setup-btn {
   display: inline-flex; align-items: center; gap: 6px; padding: 8px 20px;
   border-radius: 8px; border: none; background: var(--accent-gradient);
@@ -2898,15 +2940,28 @@ details[open] > .cl-archived-header::before { content: '\25BE '; }
 /* Chat onboarding form */
 .chat-onboard-form { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
 .chat-onboard-row { display: flex; align-items: center; gap: 10px; }
-.chat-onboard-label { font-size: 13px; color: var(--text-secondary); min-width: 42px; }
+.chat-onboard-label { font-size: 13px; color: var(--text-secondary); flex: 0 0 58px; }
 .chat-onboard-input {
-  flex: 1; background: var(--bg-input, var(--bg-sidebar)); border: 1px solid var(--border);
+  flex: 1; min-width: 0; background: var(--bg-input, var(--bg-sidebar)); border: 1px solid var(--border);
   border-radius: var(--radius); color: var(--text-primary); padding: 7px 10px; font-size: 13px;
   font-family: var(--font-body); transition: border-color 0.2s;
 }
 .chat-onboard-input:focus { border-color: var(--accent); outline: none; }
-select.chat-onboard-input { background: var(--bg-secondary); color: var(--text-primary); }
+select.chat-onboard-input { background: var(--bg-input, var(--bg-sidebar)); color: var(--text-primary); }
 select.chat-onboard-input option { background: var(--bg-secondary); color: var(--text-primary); }
+/* number-input + unit-select pair (Height, Weight). min-width:0 lets the
+   input shrink past its UA-default min, so the select doesn't push past
+   the chat bubble on narrow viewports. */
+.chat-onboard-input-with-unit { display: flex; gap: 6px; flex: 1; min-width: 0; }
+.chat-onboard-input-with-unit .chat-onboard-input { min-width: 0; }
+select.chat-onboard-unit-select {
+  flex: 0 0 62px; appearance: none; -webkit-appearance: none; -moz-appearance: none;
+  padding-right: 22px; cursor: pointer;
+  background-color: var(--bg-input, var(--bg-sidebar));
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238b8b9a' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 8px center;
+}
+select.chat-onboard-unit-select:hover { border-color: var(--accent); }
 .chat-onboard-sex { display: flex; gap: 4px; }
 .chat-onboard-next {
   align-self: flex-end; padding: 7px 18px; border-radius: 8px; border: none;
@@ -3527,6 +3582,16 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
   background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
   margin-top: 16px;
 }
+/* When AI isn't configured, flip the order so demo cards lead the page
+   and the drop zone follows. Lets a non-tech user see the app working
+   before being asked to set up an AI provider. */
+.welcome-hero-noai { display: flex; flex-direction: column; }
+.welcome-hero-noai > h2 { order: 1; }
+.welcome-hero-noai > .welcome-hero-subtitle { order: 2; }
+.welcome-hero-noai > .demo-cards { order: 3; }
+.welcome-hero-noai > .onboarding-divider { order: 4; }
+.welcome-hero-noai > .drop-zone { order: 5; }
+.welcome-hero-noai > .welcome-wearable-hint { order: 6; }
 .welcome-hero h2 { font-family: var(--font-display); font-size: 22px; color: var(--text-primary); margin: 0 0 6px; }
 .welcome-hero-subtitle { color: var(--text-secondary); font-size: 14px; margin: 0 0 24px; }
 .welcome-sex-btn {
@@ -3594,6 +3659,78 @@ select.chat-onboard-input option { background: var(--bg-secondary); color: var(-
 .onboarding-banner {
   background: var(--bg-card); border: 1px solid var(--accent); border-radius: var(--radius);
   padding: 24px; margin-top: 16px; text-align: center;
+}
+/* Onboarding focus mode — dims everything on the empty dashboard
+   except the section the user is meant to interact with. Chat panel
+   stays open as a guide. Triggered by setOnboardingFocus(mode). */
+body.cards-focus .welcome-hero > h2,
+body.cards-focus .welcome-hero > .welcome-hero-subtitle,
+body.cards-focus .welcome-hero > .welcome-hero-cta,
+body.cards-focus .welcome-hero > .drop-zone,
+body.cards-focus .welcome-hero > .demo-cards,
+body.cards-focus .welcome-hero > .onboarding-divider,
+body.cards-focus .welcome-hero > .welcome-wearable-hint,
+body.cards-focus .light-today-strip,
+body.cards-focus .wearable-strip,
+body.cards-focus .wearable-strip-empty,
+body.cards-focus .genetics-section,
+body.cards-focus .ai-reminder-banner,
+body.cards-focus .onboarding-banner,
+body.import-focus .welcome-hero > .welcome-hero-cta,
+body.import-focus .welcome-hero > .demo-cards,
+body.import-focus .welcome-hero > .onboarding-divider,
+body.import-focus .welcome-hero > .welcome-wearable-hint,
+body.import-focus .welcome-context-details,
+body.import-focus .light-today-strip,
+body.import-focus .wearable-strip,
+body.import-focus .wearable-strip-empty,
+body.import-focus .genetics-section,
+body.import-focus .ai-reminder-banner,
+body.import-focus .onboarding-banner {
+  opacity: 0.18;
+  filter: blur(1px) grayscale(0.6);
+  pointer-events: none;
+  transition: opacity 0.35s, filter 0.35s;
+}
+/* Glow on the highlighted target so it reads as "do this".
+   .welcome-context-details is the empty-state target;
+   .profile-context-cards is the has-data target. */
+body.cards-focus .welcome-context-details,
+body.cards-focus .profile-context-cards,
+body.import-focus .welcome-hero > .drop-zone {
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.4), 0 0 30px rgba(124, 58, 237, 0.18);
+  border-radius: 12px;
+  transition: box-shadow 0.35s;
+}
+/* Dashboard reminder for users who skipped the AI provider quiz. */
+.ai-reminder-banner {
+  display: flex; align-items: center; gap: 12px;
+  background: rgba(124, 58, 237, 0.06); border: 1px solid rgba(124, 58, 237, 0.25);
+  border-radius: var(--radius); padding: 12px 16px; margin-top: 16px;
+}
+.ai-reminder-icon { font-size: 22px; line-height: 1; flex: 0 0 28px; text-align: center; }
+.ai-reminder-body { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ai-reminder-body strong { font-size: 13.5px; color: var(--text-primary); }
+.ai-reminder-body span { font-size: 12px; color: var(--text-muted); line-height: 1.35; }
+.ai-reminder-cta {
+  background: var(--accent-gradient); border: none; border-radius: 8px;
+  color: white; font-size: 13px; font-weight: 500; padding: 8px 16px;
+  cursor: pointer; transition: opacity 0.15s, transform 0.05s;
+  font-family: inherit; flex: 0 0 auto;
+}
+.ai-reminder-cta:hover { opacity: 0.9; }
+.ai-reminder-cta:active { transform: translateY(1px); }
+.ai-reminder-dismiss {
+  background: transparent; border: none; color: var(--text-muted);
+  font-size: 20px; line-height: 1; padding: 4px 8px; cursor: pointer;
+  flex: 0 0 auto; transition: color 0.15s;
+}
+.ai-reminder-dismiss:hover { color: var(--text-primary); }
+@media (max-width: 600px) {
+  .ai-reminder-banner { flex-wrap: wrap; }
+  .ai-reminder-body { flex: 1 1 100%; order: 2; }
+  .ai-reminder-icon { order: 1; }
+  .ai-reminder-cta, .ai-reminder-dismiss { order: 3; }
 }
 .onboarding-title { font-family: var(--font-display); font-size: 17px; color: var(--text-primary); margin: 12px 0 4px; }
 .onboarding-subtitle { color: var(--text-secondary); font-size: 13px; margin: 0 0 18px; }

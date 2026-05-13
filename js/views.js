@@ -2711,6 +2711,12 @@ export function showDashboard(data) {
   const importFab = document.getElementById('import-fab');
   if (importFab) importFab.classList.toggle('hidden', !hasData);
 
+  // Clear any onboarding focus mode once the user has data — the
+  // welcome-hero / context-details targets no longer exist in the
+  // data view, so the dimmed-peer rules would be no-ops anyway,
+  // but stripping the classes keeps body state clean.
+  if (hasData) document.body.classList.remove('cards-focus', 'import-focus');
+
   // ── Demo-load in flight: short-lived placeholder while
   //    importDataJSON parses the demo blob (typically 2–3s). Without
   //    this the empty Welcome hero flashes for the duration. The flag
@@ -2725,20 +2731,24 @@ export function showDashboard(data) {
 
   // ── Empty state: welcome hero + collapsed context ──
   if (!hasData) {
-    let html = `<div class="welcome-hero">
+    // No AI configured? Tag the hero so CSS reorders children: demo-cards
+    // lift above the drop zone ("try before set-up"). With AI configured,
+    // drop zone leads since the user almost certainly intends to import.
+    const heroClass = hasAIProvider() ? 'welcome-hero' : 'welcome-hero welcome-hero-noai';
+    let html = `${renderAIConnectionReminder()}<div class="${escapeHTML(heroClass)}">
       <h2>Welcome to getbased</h2>
       <p class="welcome-hero-subtitle">Health intelligence that's actually yours — five lenses on your biology, one private dashboard.</p>
       <div class="drop-zone" id="drop-zone">
         <div class="drop-zone-icon">\uD83D\uDCC4</div>
         <div class="drop-zone-text">Drop PDF, image, JSON, or DNA raw data file here, or click to browse</div>
-        <div class="drop-zone-hint">AI-powered — works with any lab report (PDF, photo, screenshot) or getbased JSON export</div>
-        ${!hasAIProvider() ? `<div class="drop-zone-api-hint">${isAIPaused() ? 'AI features are paused — <a href="#" onclick="event.preventDefault();event.stopPropagation();window.openSettingsModal(\'ai\')">re-enable in Settings</a>' : 'Requires an AI connection — <a href="#" onclick="event.preventDefault();event.stopPropagation();closeChatPanel();window.openSettingsModal(\'ai\')">set up in 30 seconds</a>'}</div>` : ''}</div>
+        <div class="drop-zone-hint">Reads any lab report (PDF or photo). Also handles getbased JSON exports.</div>
+        ${!hasAIProvider() ? `<div class="drop-zone-api-hint">${isAIPaused() ? 'AI features are paused — <a href="#" onclick="event.preventDefault();event.stopPropagation();window.openSettingsModal(\'ai\')">re-enable in Settings</a>' : 'Needs a one-time AI setup so the app can read your values — <a href="#" onclick="event.preventDefault();event.stopPropagation();closeChatPanel();window.openSettingsModal(\'ai\')">walk me through it</a>'}</div>` : ''}</div>
       <div class="welcome-wearable-hint">
         ⧬ Got an Oura, Withings, Fitbit, Polar, or Apple Health export? <a href="#" onclick="event.preventDefault();window.openSettingsModal('wearables')">Connect it</a> to see HRV, sleep, recovery, and body composition trends alongside your other lenses.
       </div>
       <div class="onboarding-divider">
         <span class="onboarding-divider-line"></span>
-        <span class="onboarding-divider-text">or explore with demo data</span>
+        <span class="onboarding-divider-text">${hasAIProvider() ? 'or explore with demo data' : 'or import your own labs'}</span>
         <span class="onboarding-divider-line"></span>
       </div>
       <div class="demo-cards">
@@ -2774,6 +2784,21 @@ export function showDashboard(data) {
     html += renderGeneticsSection();
     main.innerHTML = html;
     setupDropZone();
+    // First-time visitor: auto-open chat onboarding after a short delay so
+    // the wizard (profile → AI quiz → extras → cards) carries them through.
+    // Without this nudge, new users land on the welcome hero and miss the
+    // chat-driven setup entirely. Skip if any chat history exists, or if
+    // something opened the panel between dashboard render and the timeout
+    // firing — openChatPanel idempotently re-toggles chat-panel-fullscreen
+    // from localStorage, which would stomp manual class state set by tests
+    // (or any other in-flight UI gesture).
+    if (state.chatHistory.length === 0) {
+      setTimeout(() => {
+        if (!document.getElementById('chat-panel')?.classList.contains('open')) {
+          window.openChatPanel?.();
+        }
+      }, 800);
+    }
     return;
   }
 
@@ -2785,6 +2810,7 @@ export function showDashboard(data) {
 
   // ── 2. Onboarding Banner (Step 2) ──
   html += renderOnboardingBanner();
+  html += renderAIConnectionReminder();
 
   // Knowledge Base is now discoverable via the dashboard CTA pill
   // ("Connect a knowledge base") and lives in its own dedicated modal —
@@ -2927,14 +2953,13 @@ export function showDashboard(data) {
   // Preload catalog so rec sections and sorting use it immediately
   if (window.loadCatalog) window.loadCatalog().then(c => { window._cachedCatalog = c; });
 
-  // Auto-trigger guided tour on first visit — but skip if no data (chat onboarding handles new users)
+  // Auto-trigger guided tour on first visit once the user has data —
+  // the no-data path auto-opens the chat onboarding instead (handled
+  // inline in the welcome-hero branch above, before its early return).
   const _p = window.getProfiles?.()?.find(p => p.id === state.currentProfile);
   const _hasProfile = _p?.name && _p.name !== 'Default' && state.profileSex;
   if (_hasProfile && hasData) {
     if (window.startTour) window.startTour(true);
-  } else if (!hasData) {
-    // First-time visitor: auto-open chat onboarding after a short delay
-    setTimeout(() => window.openChatPanel?.(), 800);
   }
 }
 
@@ -3308,6 +3333,97 @@ export function dismissOnboarding() {
     setTimeout(() => banner.remove(), 300);
   }
   showNotification('You can set sex and DOB anytime in Settings.', 'info');
+}
+
+// Lightweight reminder shown to users who skipped the AI provider setup
+// during onboarding. Without it, "Skip for now" leads to a chat panel
+// with a disabled input and no obvious way back into setup. Renders
+// only when: provider was explicitly skipped, no AI is currently
+// configured, and the user hasn't dismissed this banner. Dismissal is
+// per-profile (so a fresh profile still sees it).
+export function renderAIConnectionReminder() {
+  if (hasAIProvider()) return '';
+  const skipKey = `labcharts-onboard-provider-skipped-${state.currentProfile}`;
+  const skipped = localStorage.getItem(skipKey);
+  if (!skipped) return '';
+  const dismissKey = profileStorageKey(state.currentProfile, 'ai-reminder-dismissed');
+  if (localStorage.getItem(dismissKey)) return '';
+  return `<div class="ai-reminder-banner" id="ai-reminder-banner" role="region" aria-label="Connect AI to unlock lab analysis">
+    <span class="ai-reminder-icon" aria-hidden="true">&#129504;</span>
+    <span class="ai-reminder-body">
+      <strong>Connect AI to unlock lab analysis</strong>
+      <span>PDF import, trend insights, and chat all need an AI provider. About 30 seconds.</span>
+    </span>
+    <button type="button" class="ai-reminder-cta" onclick="window.openChatProviderQuiz()">Connect now</button>
+    <button type="button" class="ai-reminder-dismiss" onclick="window.dismissAIReminder()" aria-label="Dismiss">&times;</button>
+  </div>`;
+}
+
+export function dismissAIReminder() {
+  const dismissKey = profileStorageKey(state.currentProfile, 'ai-reminder-dismissed');
+  localStorage.setItem(dismissKey, '1');
+  const banner = document.getElementById('ai-reminder-banner');
+  if (banner) {
+    banner.style.transition = 'opacity 0.3s, transform 0.3s';
+    banner.style.opacity = '0';
+    banner.style.transform = 'translateY(-10px)';
+    setTimeout(() => banner.remove(), 300);
+  }
+}
+
+// Focus mode for onboarding — dims everything on the empty dashboard
+// except the section the user is meant to interact with, while keeping
+// the chat panel open as a guide. Mode is 'cards' (highlight lifestyle
+// cards) or 'import' (highlight PDF drop zone), or null to clear.
+//
+// Force chat out of fullscreen so the highlighted section is visible
+// alongside the chat panel. Scroll the target into view so the user
+// doesn't have to hunt for it.
+export function setOnboardingFocus(mode) {
+  const body = document.body;
+  body.classList.remove('cards-focus', 'import-focus');
+  if (!mode) return;
+  if (mode === 'cards') {
+    body.classList.add('cards-focus');
+  } else if (mode === 'import') {
+    body.classList.add('import-focus');
+  }
+  if (body.classList.contains('chat-fullscreen')) {
+    body.classList.remove('chat-fullscreen');
+    localStorage.setItem('labcharts-chat-fullscreen', 'false');
+  }
+  if (mode === 'cards') {
+    // Empty-state cards live inside <details class="welcome-context-details">;
+    // has-data cards render as `.profile-context-cards` (no details wrapper).
+    // Prefer the welcome details when it's present, fall back to the has-data
+    // section so the button works in both dashboards.
+    const details = document.querySelector('.welcome-context-details');
+    if (details) {
+      if (!details.open) details.setAttribute('open', '');
+      sessionStorage.setItem('welcome-details-open', '1');
+      setTimeout(() => details.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+    } else {
+      const cards = document.querySelector('.profile-context-cards');
+      setTimeout(() => cards?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+    }
+  } else if (mode === 'import') {
+    setTimeout(() => document.querySelector('.welcome-hero .drop-zone')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
+  }
+}
+
+// Re-open the chat provider quiz: clear the skipped flag so the chat
+// renders Stage 2, then open the chat panel. Also clear any
+// sub-branch the user landed on before skipping — a user clicking
+// "Connect now" wants to re-evaluate the four options, not get
+// dropped back into the specific provider they previously bounced
+// off of (mirrors what skipProviderSetup does on entry).
+export function openChatProviderQuiz() {
+  const skipKey = `labcharts-onboard-provider-skipped-${state.currentProfile}`;
+  localStorage.removeItem(skipKey);
+  sessionStorage.removeItem(`chat-onboard-provider-branch-${state.currentProfile}`);
+  if (window.openChatPanel) window.openChatPanel();
+  else if (window.toggleChatPanel) window.toggleChatPanel();
+  if (window.renderChatMessages) window.renderChatMessages();
 }
 
 // ═══════════════════════════════════════════════
@@ -5225,6 +5341,10 @@ Object.assign(window, {
   loadFocusCard,
   refreshFocusCard,
   renderOnboardingBanner,
+  renderAIConnectionReminder,
+  dismissAIReminder,
+  openChatProviderQuiz,
+  setOnboardingFocus,
   completeOnboardingSex,
   completeOnboardingProfile,
   dismissOnboarding,
