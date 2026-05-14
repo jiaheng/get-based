@@ -3,19 +3,11 @@
 //
 // Run: node tests/test-data-pipeline.js  (or via npm test)
 
+import './_node-shim.js';
+
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-
-globalThis.window = globalThis.window || globalThis;
-function _ls() {
-  const s = new Map();
-  return { getItem: k => s.has(k) ? s.get(k) : null, setItem: (k, v) => s.set(k, String(v)),
-    removeItem: k => s.delete(k), clear: () => s.clear(),
-    get length() { return s.size; }, key: i => Array.from(s.keys())[i] ?? null };
-}
-if (typeof globalThis.localStorage === 'undefined') globalThis.localStorage = _ls();
-if (typeof globalThis.sessionStorage === 'undefined') globalThis.sessionStorage = _ls();
 
 const _ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const _realFetch = globalThis.fetch;
