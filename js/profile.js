@@ -369,7 +369,7 @@ export async function loadProfile(profileId) {
   window.loadChatPersonality();
   window.destroyAllCharts();
   window.buildSidebar();
-  window.showDashboard();
+  window.navigate(window.getInitialView?.() || 'dashboard');
   window.updateHeaderDates();
   window.updateHeaderRangeToggle();
   window.renderProfileButton();
@@ -484,6 +484,7 @@ export async function deleteProfile(profileId, onComplete) {
     localStorage.removeItem(`labcharts-${profileId}-focusCard`);
     localStorage.removeItem(`labcharts-${profileId}-contextHealth`);
     localStorage.removeItem(`labcharts-${profileId}-onboarded`);
+    localStorage.removeItem(`labcharts-${profileId}-emptyTour`);
     localStorage.removeItem(`labcharts-${profileId}-tour`);
     localStorage.removeItem(`labcharts-${profileId}-cycleTour`);
     localStorage.removeItem(`labcharts-${profileId}-phaseOverlay`);

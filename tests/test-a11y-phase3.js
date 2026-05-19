@@ -52,10 +52,12 @@ console.log('=== Phase 3 A11y Tests ===\n');
     viewsSrc.includes('class="focus-card-refresh" onclick="refreshFocusCard()" aria-label="Regenerate insight"'));
 
   const cycleSrc = read('/js/cycle.js');
-  assert('cycle-prompt has role+tabindex',
-    cycleSrc.includes('class="cycle-prompt" role="button" tabindex="0"'));
-  assert('cycle-summary has role+tabindex',
-    cycleSrc.includes('class="cycle-summary" role="button" tabindex="0"'));
+  assert('cycle-prompt is a semantic button',
+    cycleSrc.includes('<button type="button" class="cycle-prompt"'));
+  assert('cycle-summary is a semantic button',
+    cycleSrc.includes('<button type="button" class="cycle-summary-card"'));
+  assert('cycle editable cards keep keyboard activation handler',
+    cycleSrc.includes('CYCLE_KEY_ACTIVATE_EDITOR'));
 
   const suppSrc = read('/js/supplements.js');
   assert('supp-bar-row has role+tabindex',
@@ -136,8 +138,27 @@ console.log('=== Phase 3 A11y Tests ===\n');
   const indexSrc = read('/index.html');
   assert('theme-color has light-mode variant',
     indexSrc.includes('media="(prefers-color-scheme: light)"'));
+  assert('saved theme applies browser chrome color before app boot',
+    indexSrc.includes("'synth-sunrise': '#0d0524'") &&
+    indexSrc.includes("document.documentElement.style.colorScheme") &&
+    indexSrc.includes("document.querySelectorAll('meta[name=\"theme-color\"]')"),
+    'mobile system bars should not wait for main.js to pick up the stored app theme');
+  const themeSrc = read('/js/theme.js');
+  assert('runtime theme changes update browser chrome color scheme',
+    themeSrc.includes('function applyThemeChrome') &&
+    themeSrc.includes('getThemeColorScheme') &&
+    themeSrc.includes('document.documentElement.style.colorScheme'),
+    'custom dark themes need dark system controls after switching themes');
+  assert('document root defaults to dark browser controls outside light theme',
+    /html\s*\{[^}]*background:\s*var\(--bg-primary\)[^}]*color-scheme:\s*dark/.test(cssSrc) &&
+    /\[data-theme="light"\]\s*\{[^}]*color-scheme:\s*light/.test(cssSrc));
   assert('footer drops the heart emoji',
     !indexSrc.includes('Built with ❤️') && indexSrc.includes('Built by'));
+  assert('header brand wordmark keeps theme gradient like footer',
+    /\.brand-mark,[\s\S]*?\.header h1\.brand-mark[\s\S]*?background:\s*var\(--accent-gradient\)[\s\S]*?-webkit-text-fill-color:\s*transparent/.test(cssSrc));
+  const themesSrc = read('/themes-extra.css');
+  assert('cyberterm brand prompt stays visible over gradient wordmark',
+    /\[data-theme="cyberterm"\] \.brand-mark::before[\s\S]*?-webkit-text-fill-color:\s*var\(--text-muted\)/.test(themesSrc));
 
   // ─── 12. Weight input respects unit system ───
   const wearSrc = read('/js/wearables.js');

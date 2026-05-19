@@ -9,6 +9,7 @@ import { getTheme, setTheme } from './theme.js';
 import { exchangeOpenRouterCode, saveOpenRouterKey, setAIProvider, fetchOpenRouterModels } from './api.js';
 import { saveProfiles, getActiveProfileId, setActiveProfileId, getProfileSex, getProfileDob, profileStorageKey, migrateProfileData, initProfilesCache } from './profile.js';
 import { updateHeaderDates, updateHeaderRangeToggle, registerRefreshCallback } from './data.js';
+import { loadPdfImport } from './import-loader.js';
 import './pii.js';
 import './charts.js';
 import './notes.js';
@@ -21,7 +22,6 @@ const _emfFns = ['openEMFAssessmentEditor','addEMFAssessment','toggleEMFAssessme
 for (const fn of _emfFns) {
   window[fn] = async function(...args) { const mod = await import('./emf.js'); for (const f of _emfFns) window[f] = mod[f]; return mod[fn](...args); };
 }
-import './pdf-import.js';
 import { ensureSNPTable, ensureHaplogroupTable } from './dna.js';
 import './wearables.js';
 import { initWearableScheduler, handleOAuthCallbackOnLoad, loadWearableRuntimeConfig } from './wearables-connect.js';
@@ -60,7 +60,7 @@ import { buildSidebar, renderProfileDropdown } from './nav.js';
 import './client-list.js';
 import './views.js';
 import { initEncryption, initBroadcastChannel, initFolderBackup, encryptedGetItem, maybeShowBackupNudge } from './crypto.js';
-import { initSync, renderSyncIndicator } from './sync.js';
+import { initSync, primeSyncState, renderSyncIndicator } from './sync.js';
 import { initMeteoConfigCache } from './sun-uvdata.js';
 
 // ═══════════════════════════════════════════════
@@ -204,11 +204,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  // Initialize Evolu sync after profile is loaded (needs state.currentProfile)
-  await initSync();
-  renderSyncIndicator();
-  ensureSNPTable(); // Eagerly load SNP table if genetics data exists (e.g. after JSON import)
-  ensureHaplogroupTable(); // Eagerly load haplogroup table if mtDNA data exists
+  // Prime sync state for UI, but let Evolu boot after first paint. Its
+  // worker/OPFS startup is expensive and should not block dashboard LCP.
+  primeSyncState();
   const savedUnits = localStorage.getItem(profileStorageKey(state.currentProfile, 'units'));
   if (savedUnits === 'US') state.unitSystem = 'US';
   const savedRange = localStorage.getItem(profileStorageKey(state.currentProfile, 'rangeMode'));
@@ -231,7 +229,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   const vTextEl = document.getElementById('app-version-text');
   if (vTextEl) vTextEl.textContent = window.APP_VERSION || '';
   buildSidebar();
-  window.showDashboard();
+  renderSyncIndicator();
+  window.navigate(window.getInitialView?.() || 'dashboard');
+  requestAnimationFrame(() => setTimeout(() => {
+    initSync()
+      .then(() => renderSyncIndicator())
+      .catch(e => console.warn('[sync] deferred init failed:', e));
+    ensureSNPTable(); // Eagerly load SNP table if genetics data exists (e.g. after JSON import)
+    ensureHaplogroupTable(); // Eagerly load haplogroup table if mtDNA data exists
+  }, 0));
   maybeShowChangelog();
   // First-launch transparency banner about anonymous analytics — appears once,
   // never again after the user clicks either "Got it" or "Turn off".
@@ -259,8 +265,16 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("pdf-input").addEventListener("change", async e => {
     if (window.isImportRunning && window.isImportRunning()) { e.target.value = ''; return; }
     if (e.target.files.length > 0) {
+      let importMod;
+      try {
+        importMod = await loadPdfImport();
+      } catch (err) {
+        showNotification('Could not load import module - check your connection and try again.', 'error');
+        e.target.value = '';
+        return;
+      }
       const files = Array.from(e.target.files);
-      const { jsonFiles, pdfFiles, imageFiles, dnaFiles, textFiles, unsupportedCount } = await window.classifyImportFiles(files);
+      const { jsonFiles, pdfFiles, imageFiles, dnaFiles, textFiles, unsupportedCount } = await importMod.classifyImportFiles(files);
       if (unsupportedCount > 0 && jsonFiles.length === 0 && pdfFiles.length === 0 && imageFiles.length === 0 && dnaFiles.length === 0 && textFiles.length === 0) {
         showNotification("Unsupported file type. Use PDF, text, image, JSON, or DNA raw data (.txt/.csv).", "error");
         e.target.value = '';
@@ -276,11 +290,11 @@ document.addEventListener("DOMContentLoaded", async () => {
           else await window.handleDNAFile(f);
         }
       }
-      else if (textFiles.length > 0) { for (const f of textFiles) await window.handleTextFile(f); }
-      else if (imageFiles.length > 0) { for (const f of imageFiles) await window.handleImageFile(f); }
+      else if (textFiles.length > 0) { for (const f of textFiles) await importMod.handleTextFile(f); }
+      else if (imageFiles.length > 0) { for (const f of imageFiles) await importMod.handleImageFile(f); }
       else {
-        if (pdfFiles.length === 1) await window.handlePDFFile(pdfFiles[0]);
-        else if (pdfFiles.length > 1) await window.handleBatchPDFs(pdfFiles);
+        if (pdfFiles.length === 1) await importMod.handlePDFFile(pdfFiles[0]);
+        else if (pdfFiles.length > 1) await importMod.handleBatchPDFs(pdfFiles);
       }
       e.target.value = '';
     }
@@ -298,7 +312,7 @@ document.addEventListener("wheel", e => {
   const overlay = e.target.closest(".modal-overlay.show, .chat-backdrop.open");
   if (!overlay) return;
   // Allow scroll inside scrollable children (modal content, chat messages)
-  const scrollable = e.target.closest(".modal, .chat-messages, .chat-thread-list, .cl-list, .cl-form, .pii-diff-left, .pii-diff-right, .dna-preview-body");
+  const scrollable = e.target.closest(".light-setup-focus-body, .modal, .chat-messages, .chat-thread-list, .cl-list, .cl-form-body, .cl-form, .pii-diff-left, .pii-diff-right, .dna-preview-body");
   if (scrollable) {
     const atTop = scrollable.scrollTop <= 0 && e.deltaY < 0;
     const atBottom = scrollable.scrollTop + scrollable.clientHeight >= scrollable.scrollHeight && e.deltaY > 0;
@@ -404,6 +418,8 @@ document.addEventListener("keydown", e => {
     if (feedbackOverlay && feedbackOverlay.classList.contains("show")) { window.closeFeedbackModal(); return; }
     const settingsOverlay = document.getElementById("settings-modal-overlay");
     if (settingsOverlay && settingsOverlay.classList.contains("show")) { window.closeSettingsModal(); return; }
+    const tweaksOverlay = document.getElementById("tweaks-panel-overlay");
+    if (tweaksOverlay && tweaksOverlay.classList.contains("show")) { window.closeTweaksPanel(); return; }
     const modalOverlay = document.getElementById("modal-overlay");
     if (modalOverlay && modalOverlay.classList.contains("show")) { window.closeModal(); return; }
     // Generic fallback: any dynamically-injected `.modal-overlay.show` (sun
@@ -421,7 +437,7 @@ document.addEventListener("keydown", e => {
   // `.modal-overlay` — include them so Tab doesn't escape back to the page
   // while the modal is visible.
   if (e.key === "Tab") {
-    const overlayIds = ["client-list-overlay","changelog-modal-overlay","settings-modal-overlay","import-modal-overlay","feedback-modal-overlay","sync-restore-overlay","sync-setup-overlay","modal-overlay","kb-modal-overlay","ai-personalize-picker-overlay","data-protection-picker-overlay"];
+    const overlayIds = ["client-list-overlay","changelog-modal-overlay","settings-modal-overlay","tweaks-panel-overlay","import-modal-overlay","feedback-modal-overlay","sync-restore-overlay","sync-setup-overlay","modal-overlay","kb-modal-overlay","ai-personalize-picker-overlay","data-protection-picker-overlay"];
     for (const oid of overlayIds) {
       const ov = document.getElementById(oid);
       if (ov && ov.classList.contains("show")) {

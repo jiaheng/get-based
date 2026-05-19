@@ -1,23 +1,31 @@
-// tour.js — Generic spotlight tour engine + app tour + cycle tour
+// tour.js — Generic spotlight tour engine + app tours + cycle tour
 
 import { state } from './state.js';
 import { profileStorageKey } from './profile.js';
 
+const EMPTY_TOUR_STEPS = [
+  { target: null, title: 'Welcome to getbased', text: 'This quick tour is for a fresh profile. After the tour, guided chat will help you decide what to add first.', position: 'center' },
+  { target: '.welcome-primary-panel', title: 'Start Guided Chat', text: 'Chat is the main path for new profiles. It asks for context only when useful and routes you to import or setup when needed.', position: 'bottom' },
+  { target: '.demo-cards', title: 'Try a Populated Profile', text: 'Demo profiles show the full dashboard without adding your own data.', position: 'top' },
+  { target: '.profile-compact-btn', title: 'Profiles Stay Separate', text: 'Switch or manage profiles here. Each profile keeps its own data, settings, and tour progress.', position: 'bottom' },
+  { target: '.settings-btn', title: 'Settings & Connections', text: 'Configure privacy, AI providers, wearables, sync, and data controls here.', position: 'bottom' },
+];
+
 const TOUR_STEPS = [
-  { target: null, title: 'Welcome to getbased', text: 'Health intelligence that\'s actually yours — five lenses on your biology, all in one place. Let\'s take a quick look around.', position: 'center' },
-  { target: '#import-fab', title: 'Import More Labs', text: 'Click here to import another PDF lab report or JSON file. You can also drag and drop files anywhere on the page.', position: 'left' },
-  { target: '.profile-compact-btn', title: 'Your Profile', text: 'Switch between profiles, manage clients, or load demo data. Click your name to open the client list.', position: 'bottom' },
-  { target: '#sidebar-nav', title: 'Category Navigation', text: 'Browse marker categories \u2014 biochemistry, hormones, lipids, and more. On mobile use the hamburger menu.', position: 'right' },
-  { target: '.chart-card .ctx-tips-badge', title: 'Tips', text: 'Markers with known interventions show actionable suggestions \u2014 free lifestyle changes, food sources, and supplements. Nature first, supplements last.', position: 'top' },
-  { target: '.profile-context-cards', title: 'Lifestyle Context', text: 'Tell the AI about your diet, sleep, exercise, and more. The more you fill in, the better your insights.', position: 'bottom' },
-  { target: '.settings-btn', title: 'Settings', text: 'Configure your profile, display preferences, and connect an AI provider.', position: 'bottom' },
-  { target: '.feedback-btn', title: 'Send Feedback', text: 'Found a bug or have a feature idea? Report it here.', position: 'bottom' },
-  { target: '#chat-fab', title: 'Ask AI', text: 'Chat with an AI analyst about your lab results. Requires an AI provider in Settings.', position: 'left' },
+  { target: null, title: 'Welcome to getbased', text: 'Health intelligence that\'s actually yours \u2014 five lenses on your biology, one private dashboard. Let\'s take a quick look around.', position: 'center' },
+  { target: '.header-import-btn, #import-fab, #drop-zone', title: 'Import Health Data', text: 'Import lab PDFs, report photos, DNA raw data, or getbased JSON. You can also drop files directly onto the page.', position: 'bottom' },
+  { target: '.profile-compact-btn', title: 'Profiles & Demo Data', text: 'Switch profiles, manage clients, or load demo data from here. Each profile keeps its own data, settings, and tour progress.', position: 'bottom' },
+  { target: '.nav-item[data-category="labs"], #sidebar-toggle, .m-tabbar', title: 'Five Lenses', text: 'Move between Dashboard, Labs, Genome, Body, Light, Insight, and Recommendations. Desktop uses the sidebar; smaller screens use tabs and the menu.', position: 'right' },
+  { target: '.dashboard-greeting', title: 'Dashboard Overview', text: 'The dashboard summarizes the current profile. After import, widgets surface focus areas, priorities, recommendations, body data, and light context.', position: 'bottom' },
+  { target: '.dashboard-sticky-actions', title: 'Customize Widgets', text: 'Use Customize and Add widget to choose the sections that matter for this profile.', position: 'bottom' },
+  { target: '.tweaks-btn', title: 'Display Tweaks', text: 'Adjust theme, accent color, density, and motion effects without leaving the current screen.', position: 'bottom' },
+  { target: '.settings-btn', title: 'Settings & Connections', text: 'Configure demographics, privacy, AI providers, wearables, sync, and data controls here.', position: 'bottom' },
+  { target: '#chat-fab, .m-chat-fab, #chat-panel.open', title: 'Ask AI', text: 'Use chat for guided interpretation, import setup, and follow-up questions. It uses the current profile context when an AI provider is connected.', position: 'left' },
 ];
 
 const CYCLE_TOUR_STEPS = [
   { target: null, title: 'Cycle-Aware Lab Interpretation', text: 'getbased tracks your menstrual cycle so AI can interpret hormones, iron, and inflammation in the right context. Here\u2019s what\u2019s available.', position: 'center' },
-  { target: '.cycle-summary', title: 'Your Cycle at a Glance', text: 'Cycle length, regularity, flow, and contraceptive info \u2014 auto-calculated from your period log when possible.', position: 'bottom' },
+  { target: '.cycle-summary-card', title: 'Your Cycle at a Glance', text: 'Cycle length, regularity, flow, and contraceptive info \u2014 auto-calculated from your period log when possible.', position: 'bottom' },
   { target: '.cycle-draw-date', title: 'Optimal Blood Draw Timing', text: 'Get recommendations for when to schedule blood work \u2014 early follicular phase (days 3\u20135) gives the most stable baseline.', position: 'bottom' },
   { target: '.cycle-draw-phases', title: 'Phase Labels on Lab Dates', text: 'Each lab date is tagged with its cycle phase so you can see how timing may have affected your results.', position: 'bottom' },
   { target: '.cycle-period-log', title: 'Period Log & Symptoms', text: 'Log each period with flow, symptoms, and notes. More entries = better auto-calculated stats and smarter alerts.', position: 'bottom' },
@@ -46,16 +54,38 @@ function _isActiveProfileDemo() {
   } catch (_) { return false; }
 }
 
+function isTourTargetVisible(el) {
+  if (!el) return false;
+  const rect = el.getBoundingClientRect();
+  const style = window.getComputedStyle(el);
+  return rect.width > 0 &&
+    rect.height > 0 &&
+    rect.right > 0 &&
+    rect.left < window.innerWidth &&
+    style.display !== 'none' &&
+    style.visibility !== 'hidden' &&
+    style.opacity !== '0';
+}
+
+function getTourTargetElement(target) {
+  if (!target) return null;
+  try {
+    return Array.from(document.querySelectorAll(target)).find(isTourTargetVisible) || null;
+  } catch (_) {
+    return null;
+  }
+}
+
 function runTour(steps, storageKey, auto) {
-  if (auto && isTourCompleted(storageKey)) return;
+  if (auto && isTourCompleted(storageKey)) return false;
   // Demo profiles are exploration sandboxes — re-firing the welcome
   // tour every time the user picks a different demo is noise. Manual
   // tour invocation (auto=false) still works on demo profiles.
-  if (auto && _isActiveProfileDemo()) return;
+  if (auto && _isActiveProfileDemo()) return false;
 
-  // Filter out steps whose target element is missing (except null/center steps)
-  const filteredSteps = steps.filter(s => s.target === null || document.querySelector(s.target));
-  if (filteredSteps.length === 0) return;
+  // Filter out steps whose target element is missing or hidden (except null/center steps).
+  const filteredSteps = steps.filter(s => s.target === null || getTourTargetElement(s.target));
+  if (filteredSteps.length === 0) return false;
 
   activeTour = { steps: filteredSteps, storageKey, currentStep: 0 };
 
@@ -85,6 +115,7 @@ function runTour(steps, storageKey, auto) {
   document.getElementById('tour-tooltip').style.display = 'block';
 
   goToStep(0);
+  return true;
 }
 
 function goToStep(index) {
@@ -126,7 +157,7 @@ function goToStep(index) {
   }
 
   // Find target element
-  const el = document.querySelector(step.target);
+  const el = getTourTargetElement(step.target);
   if (!el) {
     // Target not found — skip to next or end
     if (!isLast) goToStep(index + 1);
@@ -202,15 +233,28 @@ function positionTooltip(rect, position) {
   tooltip.style.top = top + 'px';
 }
 
+export function startEmptyTour(auto) {
+  return runTour(EMPTY_TOUR_STEPS, profileKey('emptyTour'), auto);
+}
+
 export function startTour(auto) {
-  runTour(TOUR_STEPS, profileKey('tour'), auto);
+  return runTour(TOUR_STEPS, profileKey('tour'), auto);
+}
+
+export function startGuidedTour(auto) {
+  return getTourTargetElement('.welcome-primary-panel')
+    ? startEmptyTour(auto)
+    : startTour(auto);
 }
 
 export function startCycleTour(auto) {
-  runTour(CYCLE_TOUR_STEPS, profileKey('cycleTour'), auto);
+  return runTour(CYCLE_TOUR_STEPS, profileKey('cycleTour'), auto);
 }
 
 export function endTour() {
+  const shouldOpenEmptyChat = activeTour?.storageKey === profileKey('emptyTour') &&
+    !state.importedData?.entries?.length &&
+    state.chatHistory.length === 0;
   if (activeTour) {
     localStorage.setItem(activeTour.storageKey, 'completed');
   }
@@ -221,9 +265,15 @@ export function endTour() {
   if (overlay) overlay.remove();
   if (spotlight) spotlight.remove();
   if (tooltip) tooltip.remove();
+  if (shouldOpenEmptyChat) {
+    setTimeout(() => {
+      const panel = document.getElementById('chat-panel');
+      if (!panel?.classList.contains('open')) window.openChatPanel?.();
+    }, 250);
+  }
 }
 
 // Internal navigation helper exposed for onclick
 window._tourGoToStep = goToStep;
 
-Object.assign(window, { startTour, startCycleTour, endTour });
+Object.assign(window, { startEmptyTour, startTour, startGuidedTour, startCycleTour, endTour });

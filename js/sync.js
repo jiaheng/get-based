@@ -3,12 +3,43 @@
 // Last-write-wins at the profile level — fine for single-user cross-device sync.
 
 import { state } from './state.js';
-import { showNotification, isDebugMode, escapeHTML } from './utils.js';
+import { showNotification, isDebugMode, escapeHTML, loadScriptOnce } from './utils.js';
 import { profileStorageKey, getProfiles, saveProfiles, migrateProfileData, loadProfile } from './profile.js';
 import { getEncryptionEnabled, encryptedSetItem, encryptedGetItem, encryptedRemoveItem } from './crypto.js';
 import { mergeImportedData, localHasRowsRemoteLacks, COMPOSITE_KEYED_ARRAYS, pickTimestamp, getAt, setAt } from './data-merge.js';
 
 function dbg(...args) { if (isDebugMode()) console.log('[sync]', ...args); }
+
+let _bip39Load = null;
+let _qrCodeLoad = null;
+
+async function ensureBip39() {
+  if (window.bip39) return window.bip39;
+  if (!_bip39Load) {
+    _bip39Load = loadScriptOnce('/vendor/bip39-minimal.js').then(() => {
+      if (!window.bip39) throw new Error('BIP-39 library did not initialize');
+      return window.bip39;
+    }).catch(err => {
+      _bip39Load = null;
+      throw err;
+    });
+  }
+  return _bip39Load;
+}
+
+async function ensureQRCode() {
+  if (typeof qrcode === 'function') return qrcode;
+  if (!_qrCodeLoad) {
+    _qrCodeLoad = loadScriptOnce('/vendor/qrcode-generator.js').then(() => {
+      if (typeof qrcode !== 'function') throw new Error('QR code library did not initialize');
+      return qrcode;
+    }).catch(err => {
+      _qrCodeLoad = null;
+      throw err;
+    });
+  }
+  return _qrCodeLoad;
+}
 
 // Ring buffer of recent sync events — surfaced in the sync popover so phone
 // users can see push/pull payload counts without USB-debugging the console.
@@ -191,6 +222,7 @@ let profileQuery = null;
 let tombstoneQuery = null;
 let itemRowQuery = null;
 let _syncEnabled = false;
+let _syncStatePrimed = false;
 let _syncing = false;
 // Tracks when _syncing was last set so a hung push (Evolu onComplete never
 // fires) can be detected and the flag cleared on the next push attempt
@@ -255,7 +287,15 @@ const SYNC_RELAY_KEY = 'labcharts-sync-relay';
 const DEFAULT_RELAY = 'wss://sync.getbased.health';
 const ONION_RELAY = 'ws://udou6gehyfpfccdjpibmuttaoauawmh5cgzszffnskbvczppvr2sfjad.onion';
 
-export function isSyncEnabled() { return _syncEnabled; }
+export function primeSyncState() {
+  if (!_syncStatePrimed) {
+    _syncEnabled = localStorage.getItem(SYNC_STORAGE_KEY) === 'true';
+    _syncStatePrimed = true;
+  }
+  return _syncEnabled;
+}
+
+export function isSyncEnabled() { return _syncStatePrimed ? _syncEnabled : primeSyncState(); }
 
 export function getSyncRelay() {
   const custom = localStorage.getItem(SYNC_RELAY_KEY);
@@ -304,7 +344,7 @@ export function getSyncBlocker() {
 }
 
 export async function initSync() {
-  _syncEnabled = localStorage.getItem(SYNC_STORAGE_KEY) === 'true';
+  primeSyncState();
   if (!_syncEnabled) return;
 
   // Fail fast if the webview doesn't have what Evolu needs. Otherwise the
@@ -3098,6 +3138,7 @@ async function applyRemoteTombstones() {
     localStorage.removeItem(`labcharts-${tombId}-focusCard`);
     localStorage.removeItem(`labcharts-${tombId}-contextHealth`);
     localStorage.removeItem(`labcharts-${tombId}-onboarded`);
+    localStorage.removeItem(`labcharts-${tombId}-emptyTour`);
     localStorage.removeItem(`labcharts-${tombId}-tour`);
     localStorage.removeItem(`labcharts-${tombId}-cycleTour`);
     localStorage.removeItem(`labcharts-${tombId}-phaseOverlay`);
@@ -3153,7 +3194,7 @@ export async function applyPendingTombstone(profileId) {
   for (const k of ['units','suppOverlay','noteOverlay','rangeMode','suppImpact']) {
     localStorage.removeItem(profileStorageKey(profileId, k));
   }
-  for (const k of ['chat','chat-threads','chatRailOpen','chatPersonality','chatPersonalityCustom','focusCard','contextHealth','onboarded','tour','cycleTour','phaseOverlay','sync-ts']) {
+  for (const k of ['chat','chat-threads','chatRailOpen','chatPersonality','chatPersonalityCustom','focusCard','contextHealth','onboarded','emptyTour','tour','cycleTour','phaseOverlay','sync-ts']) {
     localStorage.removeItem(`labcharts-${profileId}-${k}`);
   }
   try {
@@ -4162,13 +4203,14 @@ async function confirmRotateIdentity(btn) {
   if (!proceed) return;
 
   // Stage 2: generate the new mnemonic. BIP-39 256 bits = 24 words.
-  if (!window.bip39 || typeof window.bip39.generateMnemonic !== 'function') {
+  const bip39 = await ensureBip39().catch(() => null);
+  if (!bip39 || typeof bip39.generateMnemonic !== 'function') {
     showNotification('BIP-39 library not loaded — cannot rotate identity', 'error');
     return;
   }
   let mnemonic;
   try {
-    mnemonic = await window.bip39.generateMnemonic(256);
+    mnemonic = await bip39.generateMnemonic(256);
   } catch (e) {
     showNotification(`Mnemonic generation failed: ${e?.message || e}`, 'error');
     return;
@@ -4190,12 +4232,11 @@ async function confirmRotateIdentity(btn) {
 
   let qrSvg = '';
   try {
-    if (typeof qrcode === 'function') {
-      const qr = qrcode(0, 'L');
-      qr.addData(mnemonic);
-      qr.make();
-      qrSvg = qr.createSvgTag({ cellSize: 4, margin: 4, scalable: true });
-    }
+    const makeQr = await ensureQRCode();
+    const qr = makeQr(0, 'L');
+    qr.addData(mnemonic);
+    qr.make();
+    qrSvg = qr.createSvgTag({ cellSize: 4, margin: 4, scalable: true });
   } catch (e) {
     // Non-fatal; the user can still copy-paste.
     qrSvg = '';

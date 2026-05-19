@@ -162,6 +162,16 @@ assert('chat.js has regenerateLastMessage', chatSrc.includes('function regenerat
 assert('chat.js does NOT have readAloud', !chatSrc.includes('function readAloud'), 'removed');
 assert('chat.js has copyMessage', chatSrc.includes('function copyMessage'), 'found');
 assert('sendChatMessage snapshots context', chatSrc.includes('contextSnapshot'), 'found');
+assert('chat raises response token headroom', chatSrc.includes('CHAT_RESPONSE_MAX_TOKENS = 16384'), 'found');
+assert('chat auto-continues token-limit stops', chatSrc.includes('CHAT_AUTO_CONTINUE_LIMIT') && chatSrc.includes('_callChatAPIWithContinuation'), 'found');
+assert('chat auto-continues likely mid-sentence stops', chatSrc.includes('_isLikelyIncompleteResponse') && chatSrc.includes('_shouldAutoContinueResponse'), 'found');
+assert('chat incomplete heuristic does not continue solely because final line is long',
+  !chatSrc.includes('return lastLine.length > 60'), 'length-only fallback removed');
+assert('chat incomplete heuristic does not continue on terminal high/low adjectives',
+  !chatSrc.includes('low|high') && !chatSrc.includes('high|low'), 'medical adjectives removed from trailing-word fallback');
+assert('chat renders output-limit note', chatSrc.includes('output limit reached'), 'found');
+assert('chat persists truncated assistant state', chatSrc.includes('assistantMsg.truncated = true'), 'found');
+assert('renderChatMessages restores truncated note', chatSrc.includes('msg.truncated') && chatSrc.includes('_responseLimitNote()'), 'found');
 assert('regenerateLastMessage checks _chatAbortController', chatSrc.includes('_chatAbortController') && chatSrc.includes('regenerateLastMessage'), 'found');
 assert('renderChatMessages calls buildActionBar', chatSrc.includes('buildActionBar(i)'), 'found');
 assert('API messages tag other personas', chatSrc.includes('Response from') && chatSrc.includes('personalityName'), 'tags messages from different personas');

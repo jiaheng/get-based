@@ -13,6 +13,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import crypto from 'node:crypto';
+import zlib from 'node:zlib';
+
+export const DEFAULT_UVDATA_UPSTREAM = 'https://uvdata.getbased.health';
 
 // Self-host OAuth client_id overrides — extracted as an exported helper so
 // tests can exercise the env→override mapping without spinning up the HTTP
@@ -369,12 +372,16 @@ const MIME = {
   '.webmanifest': 'application/manifest+json',
 };
 
-function serveFile(res, filePath) {
+const COMPRESSIBLE_EXTENSIONS = new Set([
+  '.html', '.css', '.js', '.mjs', '.json', '.svg', '.txt', '.xml', '.webmanifest',
+]);
+
+function serveFile(req, res, filePath) {
   const resolved = path.resolve(filePath);
   fs.readFile(resolved, (err, data) => {
     if (err) { res.writeHead(404); res.end('Not found'); return; }
     const ext = path.extname(resolved).toLowerCase();
-    res.writeHead(200, {
+    const headers = {
       'Content-Type': MIME[ext] || 'application/octet-stream',
       'Cross-Origin-Opener-Policy': 'same-origin',
       'Cross-Origin-Embedder-Policy': 'credentialless',
@@ -383,8 +390,36 @@ function serveFile(res, filePath) {
       // its own schedule. Forcing no-store makes every reload pick up
       // the freshest JS/CSS/HTML.
       'Cache-Control': 'no-store, must-revalidate',
-    });
-    res.end(data);
+    };
+    const acceptEncoding = String(req.headers['accept-encoding'] || '');
+    const shouldCompress = data.length > 1024 && COMPRESSIBLE_EXTENSIONS.has(ext);
+    const sendRaw = () => {
+      res.writeHead(200, headers);
+      res.end(data);
+    };
+    if (!shouldCompress) {
+      sendRaw();
+      return;
+    }
+    const finish = (body, encoding) => {
+      res.writeHead(200, {
+        ...headers,
+        'Content-Encoding': encoding,
+        'Vary': 'Accept-Encoding',
+      });
+      res.end(body);
+    };
+    if (acceptEncoding.includes('br')) {
+      zlib.brotliCompress(data, {
+        params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 5 },
+      }, (e, body) => e ? sendRaw() : finish(body, 'br'));
+      return;
+    }
+    if (acceptEncoding.includes('gzip')) {
+      zlib.gzip(data, { level: 6 }, (e, body) => e ? sendRaw() : finish(body, 'gzip'));
+      return;
+    }
+    sendRaw();
   });
 }
 
@@ -919,15 +954,25 @@ const server = http.createServer((req, res) => {
 
         // CAMS atmosphere relay → getbased-uvdata. Mirrors the
         // handleCamsRelay block in api/proxy.js so localhost dev can
-        // exercise the same flow against a real upstream. Reads
-        // UVDATA_UPSTREAM + UVDATA_BEARER from process.env (typically
-        // .env.local sourced before `node dev-server.js`).
+        // exercise the same flow against a real upstream. Uses the
+        // maintainer-hosted relay by default; UVDATA_UPSTREAM can override
+        // it for self-host/dev testing, and UVDATA_BEARER is injected when
+        // present.
         if (payload.meteo === 'cams') {
-          const upstream = (process.env.UVDATA_UPSTREAM || '').replace(/\/+$/, '');
+          const configuredUpstream = process.env.UVDATA_UPSTREAM ? process.env.UVDATA_UPSTREAM.replace(/\/+$/, '') : '';
+          const upstream = configuredUpstream || DEFAULT_UVDATA_UPSTREAM;
+          const bearer = process.env.UVDATA_BEARER || '';
           if (!upstream) {
             res.writeHead(503, { 'Content-Type': 'application/json', ...corsHeaders(req) });
             res.end(JSON.stringify({
-              error: 'CAMS relay not configured locally. Set UVDATA_UPSTREAM (and UVDATA_BEARER) in your shell env before `node dev-server.js`.',
+              error: 'CAMS relay upstream is empty. Set UVDATA_UPSTREAM or switch Sun Data Source to Open-Meteo/manual.',
+            }));
+            return;
+          }
+          if (!configuredUpstream && !bearer) {
+            res.writeHead(503, { 'Content-Type': 'application/json', ...corsHeaders(req) });
+            res.end(JSON.stringify({
+              error: 'CAMS hosted relay requires UVDATA_BEARER. Set UVDATA_BEARER for the hosted default, set UVDATA_UPSTREAM for your own relay, or switch Sun Data Source to Open-Meteo/manual.',
             }));
             return;
           }
@@ -943,7 +988,7 @@ const server = http.createServer((req, res) => {
           if (time) qs.set('time', time);
           const upstreamUrl = `${upstream}/uv?${qs.toString()}`;
           const upstreamHeaders = { 'Accept': 'application/json' };
-          if (process.env.UVDATA_BEARER) upstreamHeaders['Authorization'] = `Bearer ${process.env.UVDATA_BEARER}`;
+          if (bearer) upstreamHeaders['Authorization'] = `Bearer ${bearer}`;
           // Mirror the 256 KB streaming cap from api/proxy.js (Greptile P2
           // closeout `5869341`). A misbehaving upstream that streams an
           // unbounded body would otherwise OOM the dev server.
@@ -1020,8 +1065,8 @@ const server = http.createServer((req, res) => {
 
   // Route: / → landing page (if site repo found) or app
   if (pathname === '/') {
-    if (hasSite) return serveFile(res, SITE_INDEX);
-    return serveFile(res, path.join(ROOT, 'index.html'));
+    if (hasSite) return serveFile(req, res, SITE_INDEX);
+    return serveFile(req, res, path.join(ROOT, 'index.html'));
   }
 
   // Route: /app → index.html (redirect trailing slash to avoid broken relative paths)
@@ -1029,7 +1074,7 @@ const server = http.createServer((req, res) => {
     res.writeHead(301, { 'Location': '/app' }); res.end(); return;
   }
   if (pathname === '/app') {
-    return serveFile(res, path.join(ROOT, 'index.html'));
+    return serveFile(req, res, path.join(ROOT, 'index.html'));
   }
 
   // Route: /docs/* → 301 to docs.getbased.health (docs moved to Mintlify;
@@ -1044,12 +1089,12 @@ const server = http.createServer((req, res) => {
 
   // Route: /blog → blog.html, /blog/{slug} → blog/{slug}/index.html (mirrors Vercel rewrites)
   if (hasSite && pathname === '/blog') {
-    return serveFile(res, path.join(SITE_DIR, 'blog.html'));
+    return serveFile(req, res, path.join(SITE_DIR, 'blog.html'));
   }
   if (hasSite && /^\/blog\/[^/]+$/.test(pathname)) {
     let slugIndex = path.join(SITE_DIR, pathname, 'index.html');
-    if (fs.existsSync(slugIndex)) return serveFile(res, slugIndex);
-    return serveFile(res, path.join(SITE_DIR, 'blog.html'));
+    if (fs.existsSync(slugIndex)) return serveFile(req, res, slugIndex);
+    return serveFile(req, res, path.join(SITE_DIR, 'blog.html'));
   }
 
   // Static files from site repo (e.g. /thank-you.html, /icon.svg)
@@ -1059,11 +1104,11 @@ const server = http.createServer((req, res) => {
     let appFile = path.join(ROOT, pathname);
     // Only serve from site if the file doesn't also exist in the app root
     if (fs.existsSync(siteFile) && fs.statSync(siteFile).isFile() && !(fs.existsSync(appFile) && fs.statSync(appFile).isFile())) {
-      return serveFile(res, siteFile);
+      return serveFile(req, res, siteFile);
     }
     // Clean URL: try .html append (only for site-specific pages like /thank-you)
     if (fs.existsSync(siteFile + '.html') && !(fs.existsSync(appFile + '.html'))) {
-      return serveFile(res, siteFile + '.html');
+      return serveFile(req, res, siteFile + '.html');
     }
   }
 
@@ -1094,7 +1139,7 @@ const server = http.createServer((req, res) => {
   // Static files from root
   let filePath = path.join(ROOT, pathname);
   if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-    return serveFile(res, filePath);
+    return serveFile(req, res, filePath);
   }
 
   res.writeHead(404); res.end('Not found');

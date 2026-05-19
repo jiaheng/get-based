@@ -56,10 +56,73 @@ assert('cacheGet re-inserts on hit',
 // ─── 4. Service worker precaches dynamic modules ───
 console.log('\n4. SW precache');
 const swSrc = read('service-worker.js');
-for (const mod of ['chat-images.js', 'chat-threads.js', 'lens.js', 'lens-local.js', 'lens-local-worker.js', 'lens-local-utils.js', 'lens-local-parsers.js']) {
-  assert(`SW precaches /js/${mod}`, swSrc.includes(`'/js/${mod}'`),
-    'first-launch-offline (PWA install + go-offline) cannot dynamic-import this module');
+const mainSrc = read('js/main.js');
+const viewsSrc = read('js/views.js');
+const importLoaderSrc = read('js/import-loader.js');
+const pwaAppShellAssets = [
+  '/app',
+  '/vendor/qrcode-generator.js',
+  '/vendor/jszip.min.js',
+  '/vendor/mammoth.browser.min.js',
+  '/vendor/venice-e2ee.js',
+  '/vendor/evolu/evolu-bundle.js',
+  '/vendor/evolu/Db.worker.js',
+  '/vendor/evolu/sqlite3-bundler-friendly.mjs',
+  '/vendor/evolu/sqlite3-opfs-async-proxy.js',
+  '/vendor/evolu/sqlite3-worker1-bundler-friendly.mjs',
+  '/vendor/evolu/sqlite3.wasm',
+  '/js/ai-verdict-engine.js',
+  '/js/import-loader.js',
+  '/js/blob-storage.js',
+  '/js/data-merge.js',
+  '/js/light-devices.js',
+  '/js/light-env.js',
+  '/js/light-tools.js',
+  '/js/sun.js',
+  '/js/sun-spectrum.js',
+  '/js/sun-uvdata.js',
+  '/js/chat-images.js',
+  '/js/chat-threads.js',
+  '/js/lens.js',
+  '/js/lens-local.js',
+  '/js/lens-local-worker.js',
+  '/js/lens-local-utils.js',
+  '/js/lens-local-parsers.js',
+  '/data/light-device-presets.json',
+  '/data/mito-compounds.json',
+  '/data/snp-health.json',
+  '/data/haplogroups.json',
+  '/data/sun-action-spectra.json',
+  '/data/demo-male.json',
+  '/data/demo-female.json',
+  '/data/emf-assessment-template.html',
+];
+for (const asset of pwaAppShellAssets) {
+  assert(`SW precaches ${asset}`, swSrc.includes(`'${asset}'`),
+    'first-launch-offline (PWA install + go-offline) needs the full app shell cached');
 }
+assert('SW has offline navigation fallback for /app',
+  swSrc.includes("event.request.mode === 'navigate'") &&
+  swSrc.includes("caches.match('/app')") &&
+  swSrc.includes("caches.match('/index.html')"),
+  'installed PWA start_url=/app needs a cached document while offline');
+assert('SW does not cache HTTP error responses',
+  /if \(!response \|\| response\.status === 206 \|\| !response\.ok\) return Promise\.resolve\(\);/.test(swSrc),
+  'transient 4xx/5xx responses must not overwrite a valid cached app shell');
+assert('PDF import lazy loader is shared by main.js and views.js',
+  mainSrc.includes("from './import-loader.js'") &&
+  viewsSrc.includes("from './import-loader.js'") &&
+  importLoaderSrc.includes("import('./pdf-import.js')"),
+  'separate per-module promise caches can issue duplicate first-use imports');
+assert('PDF lazy import failure notifies from file input and clears selection',
+  /try\s*{\s*importMod\s*=\s*await loadPdfImport\(\);[\s\S]{0,220}catch\s*\(err\)\s*{[\s\S]{0,220}Could not load import module - check your connection and try again\.[\s\S]{0,120}e\.target\.value\s*=\s*''/.test(mainSrc),
+  'file-picker import path should fail loudly and clear stale selection');
+assert('PDF lazy import failure notifies from drop zone',
+  /try\s*{\s*importMod\s*=\s*await loadPdfImport\(\);[\s\S]{0,220}catch\s*\(err\)\s*{[\s\S]{0,220}Could not load import module - check your connection and try again\./.test(viewsSrc),
+  'drop-zone import path should fail loudly');
+assert('analytics consent remains deferred after first paint',
+  /setTimeout\(\(\)\s*=>\s*window\.maybeShowAnalyticsConsent\?\.\(\),\s*800\)/.test(mainSrc),
+  'first-run banner should not stack into the same tick as tour/startup work');
 
 // ─── 5. Polar OAuth callback returns true + clears connection ───
 console.log('\n5. Polar OAuth callback');

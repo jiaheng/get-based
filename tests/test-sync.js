@@ -348,7 +348,7 @@ await import('../js/settings.js');
   console.log('7. Main Integration');
 
   assert('main.js imports initSync', mainSrc.includes("initSync") && mainSrc.includes("from './sync.js'"));
-  assert('main.js calls initSync()', mainSrc.includes('await initSync()'));
+  assert('main.js defers initSync after first paint', /requestAnimationFrame\([\s\S]{0,300}initSync\(\)/.test(mainSrc));
 
   // getSyncBlocker must NOT check SharedWorker — Evolu uses dedicated
   // Workers + BroadcastChannel + navigator.locks, not the SharedWorker
@@ -362,6 +362,12 @@ await import('../js/settings.js');
   assert('getSyncBlocker still gates on crypto.subtle', /getSyncBlocker[\s\S]*?crypto\?\.subtle/.test(syncSrc));
   assert('Settings banner copy updated to "in this browser"',
     settingsSrc.includes('Sync unavailable in this browser') && !settingsSrc.includes('Sync unavailable in this build'));
+  assert('BIP-39 lazy loader resets cached promise after failure',
+    /_bip39Load\s*=\s*null/.test(syncSrc),
+    'transient script failure should not poison identity rotation for the full session');
+  assert('QR lazy loader resets cached promise after failure',
+    /_qrCodeLoad\s*=\s*null/.test(syncSrc),
+    'transient script failure should not poison QR rendering for the full session');
 
   // ═══════════════════════════════════════
   // 8. PUSH/PULL LOGIC
