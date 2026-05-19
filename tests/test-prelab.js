@@ -155,12 +155,29 @@ const labCtxSrc = read('js/lab-context.js');
       themeSrc.includes('rgba(24, 18, 48, 0.98)');
   })(), 'Glass theme should not leave context widget/editor chrome translucent');
   assert('Insight Profile Context widget is full-width', (() => {
-    const insightSrc = read('js/views.js');
-    const lensStart = insightSrc.indexOf('export function showInsightLens');
+    const insightSrc = read('js/lens-pages.js');
+    const lensStart = insightSrc.indexOf('function showInsightLens');
     const cardStart = insightSrc.indexOf("id: 'profile-context'", lensStart);
     const cardEnd = insightSrc.indexOf('\n', cardStart);
     return cardStart !== -1 && insightSrc.substring(cardStart, cardEnd).includes("size: 'full'");
   })(), 'Insight page should not cram Profile Context into a half-width column');
+  assert('Settings modal content owns vertical scroll', (() => {
+    const block = (cssSrc.match(/\.settings-modal \.settings-content\s*{([\s\S]*?)}/) || [null, ''])[1];
+    return block.includes('min-height: 0') && block.includes('overflow-y: auto');
+  })(), 'Long settings sections should scroll inside the modal instead of being clipped');
+  assert('Settings modal layout shrinks to viewport height', (() => {
+    const block = (cssSrc.match(/\.settings-modal \.settings-layout\s*{([\s\S]*?)}/) || [null, ''])[1];
+    return block.includes('height: min(560px, calc(90vh - 78px))') &&
+      block.includes('height: min(560px, calc(90dvh - 78px))') &&
+      block.includes('min-height: 0');
+  })(), 'Short desktop viewports should not clip long settings panels');
+  assert('Settings modal wheel scrolling is not blocked by global wheel guard', (() => {
+    const mainSrc = read('js/main.js');
+    const wheelStart = mainSrc.indexOf('document.addEventListener("wheel"');
+    const wheelEnd = mainSrc.indexOf('}, { passive: false });', wheelStart);
+    const block = wheelStart >= 0 && wheelEnd >= 0 ? mainSrc.slice(wheelStart, wheelEnd) : '';
+    return block.includes('.settings-content') && block.includes('e.preventDefault()');
+  })(), 'Settings content must be whitelisted before the modal overflow guard prevents wheel events');
 
   // ═══════════════════════════════════════
   // 5. Health dots sentinel fix
