@@ -40,11 +40,13 @@ globalThis.fetch = async (url, opts) => {
   const mainSrc = await fetchWithRetry('js/main.js');
   const chatSrc = await fetchWithRetry('js/chat.js');
   const viewsSrc = await fetchWithRetry('js/views.js');
+  const recommendationActionsSrc = await fetchWithRetry('js/recommendation-actions.js');
   const categoryPageViewSrc = await fetchWithRetry('js/category-page-view.js');
   const categoryViewRenderersSrc = await fetchWithRetry('js/category-view-renderers.js');
   const chartCardRecsSrc = await fetchWithRetry('js/chart-card-recs.js');
   const markerDetailSrc = await fetchWithRetry('js/marker-detail-modal.js');
   const dashboardWidgetsSrc = await fetchWithRetry('js/dashboard-widgets.js');
+  const dashboardWidgetRenderersSrc = await fetchWithRetry('js/dashboard-widget-renderers.js');
   const contextSrc = await fetchWithRetry('js/context-cards.js');
   const navSrc = await fetchWithRetry('js/nav.js');
   const lensPagesSrc = await fetchWithRetry('js/lens-pages.js');
@@ -127,6 +129,25 @@ globalThis.fetch = async (url, opts) => {
   // Catalog file may not exist — should gracefully return ''
   const noFileResult = await window.renderRecommendationSection('nonexistent.marker', { label: 'Test' });
   assert('renderRecommendationSection returns empty for unknown slot', noFileResult === '' || typeof noFileResult === 'string');
+  const originalRenderRecommendationSection = window.renderRecommendationSection;
+  window.renderRecommendationSection = undefined;
+  const { createRecommendationActions } = await import('../js/recommendation-actions.js');
+  const originalGetElementById = document.getElementById;
+  const modalStub = { className: 'modal', innerHTML: '' };
+  const overlayStub = { classList: { add: () => {} } };
+  document.getElementById = (id) => id === 'detail-modal' ? modalStub : id === 'modal-overlay' ? overlayStub : null;
+  createRecommendationActions({
+    getActiveData: () => ({}),
+    buildDashboardWidgetContext: () => ({}),
+    getCachedRecommendationsCatalog: () => ({}),
+    getGlobalRecommendationCandidates: () => [],
+    setRecommendationState: () => {},
+  }).openRecommendationDetail('missing.slot', 'Missing section');
+  await Promise.resolve();
+  assert('openRecommendationDetail handles missing renderRecommendationSection without stuck loading',
+    modalStub.innerHTML.includes('No recommendation details available for this slot.'));
+  document.getElementById = originalGetElementById;
+  window.renderRecommendationSection = originalRenderRecommendationSection;
   // Restore
   if (origRec === null) localStorage.removeItem('labcharts-show-product-recs');
   else localStorage.setItem('labcharts-show-product-recs', origRec);
@@ -211,7 +232,15 @@ globalThis.fetch = async (url, opts) => {
   assert('Recommendations sidebar routes to dedicated page', recNavMarkup.includes("window.navigate('recommendations')"));
   assert('Recommendations sidebar item does not open Settings', !recNavMarkup.includes('openSettingsModal'));
   assert('views.js exposes dedicated Recommendations page', viewsSrc.includes('export function showRecommendations') && viewsSrc.includes('openRecommendationDetail'));
+  assert('views.js delegates recommendation actions to recommendation-actions.js',
+    viewsSrc.includes("from './recommendation-actions.js'") &&
+    recommendationActionsSrc.includes('export function createRecommendationActions'));
   assert('dashboard has Recommendations widget surface', dashboardWidgetsSrc.includes("id: 'recommendations'") && dashboardWidgetsSrc.includes('renderDashboardRecommendationsWidget'));
+  assert('dismissed recommendations render a Restore action',
+    dashboardWidgetRenderersSrc.includes("candidate.dismissed ? 'Restore' : 'Dismiss'") &&
+    dashboardWidgetRenderersSrc.includes("window.dismissRecommendation(${inlineJsString(candidate.id)}, ${candidate.dismissed ? 'false' : 'true'})"));
+  assert('dismissRecommendation can restore a dismissed recommendation',
+    /function dismissRecommendation\(id, on = true\)[\s\S]{0,120}setRecommendationState\('dismissed', id, !!on\)/.test(recommendationActionsSrc));
   assert('Recommendations page header directly toggles its dashboard widget',
     lensPagesSrc.includes("inlineHandlerCall(dashboardAction, 'recommendations')") &&
     !viewsSrc.includes("openDashboardWidgetPicker && window.openDashboardWidgetPicker()\">Add to Dashboard"));
@@ -241,6 +270,7 @@ globalThis.fetch = async (url, opts) => {
   console.log('%c 12. Infrastructure ', 'font-weight:bold;color:#f59e0b');
 
   assert('SW includes recommendations.js', swSrc.includes('/js/recommendations.js'));
+  assert('SW includes recommendation-actions.js', swSrc.includes('/js/recommendation-actions.js'));
 
   // Node port: read styles.css directly. Browser styleSheets walk is
   // brittle (cross-origin, parsing race); source inspection is more reliable.
