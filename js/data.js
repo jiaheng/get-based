@@ -64,7 +64,6 @@ function _activeDataCacheMatches(meta) {
     && prev.wearableWeightLatest === meta.wearableWeightLatest
     && prev.legacyWeightStamp === meta.legacyWeightStamp
     && prev.unitSystem === meta.unitSystem
-    && prev.rangeMode === meta.rangeMode
     && prev.profileSex === meta.profileSex
     && prev.profileDob === meta.profileDob);
 }
@@ -95,7 +94,6 @@ function _makeActiveDataCacheMeta() {
     wearableWeightLatest,
     legacyWeightStamp,
     unitSystem: state.unitSystem,
-    rangeMode: state.rangeMode,
     profileSex: state.profileSex,
     profileDob: state.profileDob,
   };
@@ -984,6 +982,19 @@ export function getPhaseRefEnvelope(marker) {
 
 let _rangeModeRefreshToken = 0;
 
+function _captureCategoryCardOrderForRangeRefresh(route) {
+  if (typeof document === 'undefined' || !route) return null;
+  const grid = document.querySelector('#view-content .charts-grid');
+  if (!grid) return null;
+  const prefix = `${route}_`;
+  const markerKeys = Array.from(grid.querySelectorAll('canvas[id^="chart-"]'))
+    .map(canvas => String(canvas.id || '').slice('chart-'.length))
+    .filter(id => id.startsWith(prefix))
+    .map(id => id.slice(prefix.length))
+    .filter(Boolean);
+  return markerKeys.length ? { categoryKey: route, markerKeys } : null;
+}
+
 function _afterNextPaint(fn) {
   if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
     setTimeout(fn, 0);
@@ -995,14 +1006,15 @@ function _afterNextPaint(fn) {
 export function switchRangeMode(mode) {
   const nextMode = mode === 'reference' ? 'reference' : mode === 'both' ? 'both' : 'optimal';
   if (state.rangeMode === nextMode) return;
-  invalidateActiveDataCache();
   state.rangeMode = nextMode;
   localStorage.setItem(profileStorageKey(state.currentProfile, 'rangeMode'), nextMode);
   updateHeaderRangeToggle();
-  // Same capture-before-rebuild as switchUnitSystem — a detail modal open
-  // when the user flips ref/optimal/both would otherwise show stale band
-  // overlays behind the unchanged modal.
+  // Capture before the view refresh: an open detail modal would otherwise
+  // keep stale range bands behind the unchanged overlay.
   const openId = state._activeDetailMarkerId;
+  const preservedOrder = _captureCategoryCardOrderForRangeRefresh(state.currentView);
+  if (preservedOrder) state._preserveCategoryCardOrder = preservedOrder;
+  else delete state._preserveCategoryCardOrder;
   const token = ++_rangeModeRefreshToken;
   _afterNextPaint(() => {
     if (token !== _rangeModeRefreshToken || state.rangeMode !== nextMode) return;

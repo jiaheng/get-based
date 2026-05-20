@@ -519,16 +519,17 @@ const _origProfileSex = window._labState ? window._labState.profileSex : null;
   console.log('%c 19. category marker card redesign ', 'font-weight:bold;color:#0891b2');
   {
     const viewsSrc = fetchSrc('js/views.js');
+    const categoryViewRenderersSrc = fetchSrc('js/category-view-renderers.js');
     const chartCardRecsSrc = fetchSrc('js/chart-card-recs.js');
     const categoryGlyphsSrc = fetchSrc('js/category-glyphs.js');
     const compareCorrelationsSrc = fetchSrc('js/compare-correlations.js');
     const markerDetailSrc = fetchSrc('js/marker-detail-modal.js');
     const dataSrc = fetchSrc('js/data.js');
     const cssSrc = fetchSrc('styles.css');
-    assert('views.js: marker cards render latest-value summary before chart',
-      /chart-card-snapshot/.test(viewsSrc)
-      && /chart-card-latest-value/.test(viewsSrc)
-      && /visibleValueIndexes\.length > 4 \? visibleValueIndexes\.slice\(-4\)/.test(viewsSrc));
+    assert('category-view-renderers.js: marker cards render latest-value summary before chart',
+      /chart-card-snapshot/.test(categoryViewRenderersSrc)
+      && /chart-card-latest-value/.test(categoryViewRenderersSrc)
+      && /visibleValueIndexes\.length > 4 \? visibleValueIndexes\.slice\(-4\)/.test(categoryViewRenderersSrc));
     assert('styles.css: category chart content uses full available width',
       /#view-content\s*\{[\s\S]{0,80}width:\s*100%/.test(cssSrc)
       && /\.charts-grid\s*\{[\s\S]{0,180}width:\s*100%/.test(cssSrc));
@@ -543,11 +544,17 @@ const _origProfileSex = window._labState ? window._labState.profileSex : null;
     assert('chart-card-recs.js: tips nudge does not cover open marker modal',
       /const modalOpen\s*=\s*!!document\.querySelector\('\.modal-overlay\.show'\)/.test(chartCardRecsSrc)
       && /recLinks\.length > 0 && !modalOpen/.test(chartCardRecsSrc));
-    assert('data.js: range mode switch paints the active pill before heavy rebuild',
+    assert('data.js: range mode switch paints the active pill before view refresh',
       /function _afterNextPaint\(fn\)/.test(dataSrc)
       && /window\.requestAnimationFrame\(\(\) => setTimeout\(fn,\s*0\)\)/.test(dataSrc)
       && /const token\s*=\s*\+\+_rangeModeRefreshToken/.test(dataSrc)
       && /_afterNextPaint\(\(\) => \{[\s\S]{0,500}window\.navigate\(state\.currentView \|\| 'dashboard',\s*data\)/.test(dataSrc));
+    assert('range mode refresh preserves current category card order',
+      /function _captureCategoryCardOrderForRangeRefresh\(route\)/.test(dataSrc)
+      && /state\._preserveCategoryCardOrder\s*=\s*preservedOrder/.test(dataSrc)
+      && /function sortCategoryChartEntries\(entries,\s*categoryKey\)/.test(viewsSrc)
+      && /preserved\?\.categoryKey === categoryKey/.test(viewsSrc)
+      && /delete state\._preserveCategoryCardOrder/.test(viewsSrc));
     assert('data.js: header range toggle patches existing buttons',
       /const canPatch\s*=/.test(dataSrc)
       && /btn\.classList\.toggle\('active',\s*active\)/.test(dataSrc)
@@ -560,7 +567,8 @@ const _origProfileSex = window._labState ? window._labState.profileSex : null;
       && /wearableWeightLatest/.test(dataSrc)
       && /legacyWeightStamp/.test(dataSrc)
       && /saveImportedData\(\)[\s\S]{0,120}invalidateActiveDataCache\(\)/.test(dataSrc)
-      && /switchRangeMode\(mode\)[\s\S]{0,220}invalidateActiveDataCache\(\)/.test(dataSrc));
+      && !/_makeActiveDataCacheMeta\(\)[\s\S]{0,900}rangeMode:\s*state\.rangeMode/.test(dataSrc)
+      && !/switchRangeMode\(mode\)[\s\S]{0,220}invalidateActiveDataCache\(\)/.test(dataSrc));
     assert('category-glyphs.js: marker category surfaces use coded glyphs instead of emoji icons',
       /export function renderCategoryGlyph\(categoryKey,\s*label/.test(categoryGlyphsSrc)
       && /getCategoryGlyphCode\(categoryKey,\s*label\)/.test(categoryGlyphsSrc)
