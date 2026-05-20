@@ -64,6 +64,7 @@ console.log('3. XSS Prevention');
 const viewsSrc = read('js/views.js');
 const lensPageShellSrc = read('js/lens-page-shell.js');
 const categoryViewRenderersSrc = read('js/category-view-renderers.js');
+const categoryCustomizationSrc = read('js/category-customization.js');
 const focusCardSrc = read('js/focus-card.js');
 const compareCorrelationsSrc = read('js/compare-correlations.js');
 const markerDetailSrc = read('js/marker-detail-modal.js');
@@ -114,6 +115,19 @@ assert('renderFattyAcidsView returns "" on unsafe categoryKey',
   /export function renderFattyAcidsView[^{]*\{[\s\S]{0,400}if\s*\(\s*!safeMarkerId\(categoryKey\)\s*\)\s*return\s*''/.test(categoryViewRenderersSrc));
 assert('showCategory chart-cards loop skips legacy customMarkers with unsafe keys',
   /for\s*\(\s*const\s*\[\s*key\s*,\s*marker\s*\]\s+of\s+withData\s*\)\s*\{\s*[\s\S]{0,200}if\s*\(\s*!safeMarkerId\(key\)\s*\)\s*continue/.test(viewsSrc));
+assert('category-customization.js owns rename/icon helpers',
+  /export async function renameCategory/.test(categoryCustomizationSrc) &&
+  /export async function renameMarker/.test(categoryCustomizationSrc) &&
+  /export function changeCategoryIcon/.test(categoryCustomizationSrc) &&
+  /export function showEmojiPicker/.test(categoryCustomizationSrc));
+assert('category rename rejects whitespace-only labels after trim',
+  /export async function renameCategory[^{]*\{[\s\S]{0,700}const trimmed = newLabel\.trim\(\);\s*if\s*\(\s*!trimmed\s*\)\s*return/.test(categoryCustomizationSrc));
+assert('marker rename rejects whitespace-only labels after trim',
+  /export async function renameMarker[^{]*\{[\s\S]{0,700}const trimmed = newName\.trim\(\);\s*if\s*\(\s*!trimmed\s*\)\s*return/.test(categoryCustomizationSrc));
+assert('category customization refreshes the active view with fresh data',
+  /function _refreshActiveView[^{]*\{[\s\S]{0,300}const data = getActiveData\(\);[\s\S]{0,200}window\.buildSidebar\?\.\(data\);[\s\S]{0,200}_navigate\(opts\.forceRoute \|\| state\.currentView \|\| fallbackRoute, data\)/.test(categoryCustomizationSrc));
+assert('marker rename refreshes the backing view before reopening modal',
+  /export async function renameMarker[^{]*\{[\s\S]{0,900}await saveImportedData\(\);\s*_refreshActiveView\(catKey\);\s*showDetailModal\(id\)/.test(categoryCustomizationSrc));
 
 // ═══════════════════════════════════════
 // 3c. Sweep guard — every innerHTML site in production JS is sanitized
@@ -135,7 +149,7 @@ const _SAFE_HELPERS = new Set([
   // is the markdown.js sanitized full renderer)
   'escapeHTML', 'renderMarkdown',
 ]);
-const _SWEEP_FILES = ['views.js', 'category-view-renderers.js', 'focus-card.js', 'marker-detail-modal.js', 'dashboard-widget-renderers.js', 'light-conditions-now.js', 'light-sessions-view.js', 'compare-correlations.js', 'mobile-dashboard.js', 'chat.js', 'charts.js'];
+const _SWEEP_FILES = ['views.js', 'category-view-renderers.js', 'category-customization.js', 'focus-card.js', 'marker-detail-modal.js', 'dashboard-widget-renderers.js', 'light-conditions-now.js', 'light-sessions-view.js', 'compare-correlations.js', 'mobile-dashboard.js', 'chat.js', 'charts.js'];
 
 function _sweepInnerHTML(filename, src) {
   const lines = src.split('\n');
