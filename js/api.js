@@ -45,17 +45,34 @@ export function deduplicateModels(models, familyFn) {
     return true;
   });
 }
+function notifyAISelectionChanged() {
+  window.updateChatHeaderModel?.();
+  window.refreshWebSearchToggle?.();
+}
+
 export function getAIProvider() { return localStorage.getItem('labcharts-ai-provider') || 'openrouter'; }
-export function setAIProvider(provider) { localStorage.setItem('labcharts-ai-provider', provider); }
+export function setAIProvider(provider) {
+  localStorage.setItem('labcharts-ai-provider', provider);
+  markAISettingsLocal();
+  notifyAISelectionChanged();
+}
 export function isAIPaused() { return localStorage.getItem('labcharts-ai-paused') === 'true'; }
 export function setAIPaused(v) { localStorage.setItem('labcharts-ai-paused', v ? 'true' : 'false'); }
 
 const OPENROUTER_OAUTH_PREVIOUS_PROVIDER_KEY = 'or_previous_ai_provider';
 const OPENROUTER_OAUTH_LOCAL_SETTINGS_LOCK_UNTIL_KEY = 'or_oauth_local_settings_lock_until';
+const AI_SETTINGS_LOCAL_LOCK_UNTIL_KEY = 'labcharts-ai-settings-local-lock-until';
 const OPENROUTER_OAUTH_PROVIDERS = new Set(['openrouter', 'venice', 'routstr', 'ppq', 'custom', 'ollama']);
 
 function _isValidAIProvider(provider) {
   return typeof provider === 'string' && OPENROUTER_OAUTH_PROVIDERS.has(provider);
+}
+
+export function markAISettingsLocal() {
+  try {
+    sessionStorage.setItem(AI_SETTINGS_LOCAL_LOCK_UNTIL_KEY, String(Date.now() + 5 * 60 * 1000));
+  } catch {}
+  try { window.dispatchEvent(new CustomEvent('labcharts-ai-settings-local-changed')); } catch {}
 }
 
 export function hasAIProvider() {
@@ -70,14 +87,24 @@ export function hasAIProvider() {
 }
 
 export function getOllamaMainModel() { return localStorage.getItem('labcharts-ollama-model') || window.getOllamaConfig().model || 'llama3.2'; }
-export function setOllamaMainModel(model) { localStorage.setItem('labcharts-ollama-model', model); }
+export function setOllamaMainModel(model) {
+  localStorage.setItem('labcharts-ollama-model', model);
+  markAISettingsLocal();
+  notifyAISelectionChanged();
+}
 export function getOllamaPIIUrl() { return localStorage.getItem('labcharts-ollama-pii-url') || window.getOllamaConfig().url; }
-export function setOllamaPIIUrl(url) { localStorage.setItem('labcharts-ollama-pii-url', url); }
+export function setOllamaPIIUrl(url) {
+  localStorage.setItem('labcharts-ollama-pii-url', url);
+  markAISettingsLocal();
+}
 export function getOllamaPIIModel() { return localStorage.getItem('labcharts-ollama-pii-model') || getOllamaMainModel(); }
-export function setOllamaPIIModel(model) { localStorage.setItem('labcharts-ollama-pii-model', model); }
+export function setOllamaPIIModel(model) {
+  localStorage.setItem('labcharts-ollama-pii-model', model);
+  markAISettingsLocal();
+}
 
 export function getVeniceKey() { return getCachedKey('labcharts-venice-key') || ''; }
-export async function saveVeniceKey(key) { await encryptedSetItem('labcharts-venice-key', key); updateKeyCache('labcharts-venice-key', key); }
+export async function saveVeniceKey(key) { await encryptedSetItem('labcharts-venice-key', key); updateKeyCache('labcharts-venice-key', key); markAISettingsLocal(); }
 export function hasVeniceKey() { return !!getVeniceKey(); }
 export async function getVeniceBalance() {
   const key = getVeniceKey();
@@ -98,19 +125,91 @@ export async function getVeniceBalance() {
   } catch { return null; }
 }
 export function getVeniceModel() { return localStorage.getItem('labcharts-venice-model') || 'llama-3.3-70b'; }
-export function setVeniceModel(model) { localStorage.setItem('labcharts-venice-model', model); }
+export function setVeniceModel(model) {
+  localStorage.setItem('labcharts-venice-model', model);
+  markAISettingsLocal();
+  notifyAISelectionChanged();
+}
+
+function readStoredArray(key) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function modelListHasId(models, id) {
+  return models.some(function(m) { return m && m.id === id; });
+}
+
+function veniceE2EEModelsCacheKnown() {
+  return localStorage.getItem('labcharts-venice-e2ee-models') !== null;
+}
+
+function modelSupportsVeniceE2EE(model) {
+  const supports = model?.model_spec?.capabilities?.supportsE2EE;
+  if (supports === true) return true;
+  if (supports === false) return false;
+  return typeof model?.id === 'string' && model.id.startsWith('e2ee-');
+}
+
+function preferredVeniceModelId(models, savedId, preferLlama = false) {
+  if (!models.length) return '';
+  if (savedId && modelListHasId(models, savedId)) return savedId;
+  if (preferLlama) {
+    const llama = models.find(function(m) { return m.id && m.id.includes('llama-3.3-70b'); });
+    if (llama) return llama.id;
+  }
+  return models[0].id;
+}
+
+function syncVeniceModelSelection(regularModels, e2eeModels) {
+  const current = getVeniceModel();
+  const e2eeOn = getVeniceE2EE();
+  if (e2eeOn) {
+    if (e2eeModels.length) {
+      if (!modelListHasId(e2eeModels, current)) {
+        const next = preferredVeniceModelId(e2eeModels, localStorage.getItem('labcharts-venice-model-e2ee'));
+        if (next) {
+          setVeniceModel(next);
+          localStorage.setItem('labcharts-venice-model-e2ee', next);
+        }
+      }
+      return;
+    }
+    return;
+  }
+  if (regularModels.length && !modelListHasId(regularModels, getVeniceModel())) {
+    const next = preferredVeniceModelId(regularModels, localStorage.getItem('labcharts-venice-model-regular'), true);
+    if (next) setVeniceModel(next);
+  }
+}
+
+function veniceModelsCacheStale() {
+  const fetchedAt = Number(localStorage.getItem('labcharts-venice-models-fetched-at') || 0);
+  return !fetchedAt || Date.now() - fetchedAt > 60 * 60 * 1000;
+}
+
 export function getVeniceModelDisplay() {
   const id = getVeniceModel();
-  let cached = []; try { cached = JSON.parse(localStorage.getItem('labcharts-venice-models') || '[]'); } catch(e) {}
+  const cached = [
+    ...readStoredArray('labcharts-venice-models'),
+    ...readStoredArray('labcharts-venice-e2ee-models')
+  ];
   const m = cached.find(function(x) { return x.id === id; });
   return m ? (m.name || m.id) : id;
 }
 
 export function getVeniceE2EE() { return localStorage.getItem('labcharts-venice-e2ee') === 'on'; }
-export function setVeniceE2EE(on) { localStorage.setItem('labcharts-venice-e2ee', on ? 'on' : 'off'); }
+export function setVeniceE2EE(on) {
+  localStorage.setItem('labcharts-venice-e2ee', on ? 'on' : 'off');
+  markAISettingsLocal();
+}
 
 export function getOpenRouterKey() { return getCachedKey('labcharts-openrouter-key') || ''; }
-export async function saveOpenRouterKey(key) { await encryptedSetItem('labcharts-openrouter-key', key); updateKeyCache('labcharts-openrouter-key', key); }
+export async function saveOpenRouterKey(key) { await encryptedSetItem('labcharts-openrouter-key', key); updateKeyCache('labcharts-openrouter-key', key); markAISettingsLocal(); }
 export function hasOpenRouterKey() { return !!getOpenRouterKey(); }
 export async function getOpenRouterBalance() {
   const key = getOpenRouterKey();
@@ -129,10 +228,14 @@ export async function getOpenRouterBalance() {
 
 // ─── Routstr ───
 export function getRoutstrKey() { return getCachedKey('labcharts-routstr-key') || ''; }
-export async function saveRoutstrKey(key) { await encryptedSetItem('labcharts-routstr-key', key); updateKeyCache('labcharts-routstr-key', key); }
+export async function saveRoutstrKey(key) { await encryptedSetItem('labcharts-routstr-key', key); updateKeyCache('labcharts-routstr-key', key); markAISettingsLocal(); }
 export function hasRoutstrKey() { return !!getRoutstrKey(); }
 export function getRoutstrModel() { return localStorage.getItem('labcharts-routstr-model') || 'claude-sonnet-4.6'; }
-export function setRoutstrModel(model) { localStorage.setItem('labcharts-routstr-model', model); }
+export function setRoutstrModel(model) {
+  localStorage.setItem('labcharts-routstr-model', model);
+  markAISettingsLocal();
+  notifyAISelectionChanged();
+}
 export function getRoutstrModelDisplay() {
   const id = getRoutstrModel();
   let cached = []; try { cached = JSON.parse(localStorage.getItem('labcharts-routstr-models') || '[]'); } catch(e) {}
@@ -142,10 +245,14 @@ export function getRoutstrModelDisplay() {
 
 // ─── PPQ (PayPerQ — pay-per-prompt, crypto + fiat) ───
 export function getPpqKey() { return getCachedKey('labcharts-ppq-key') || ''; }
-export async function savePpqKey(key) { await encryptedSetItem('labcharts-ppq-key', key); updateKeyCache('labcharts-ppq-key', key); }
+export async function savePpqKey(key) { await encryptedSetItem('labcharts-ppq-key', key); updateKeyCache('labcharts-ppq-key', key); markAISettingsLocal(); }
 export function hasPpqKey() { return !!getPpqKey(); }
 export function getPpqModel() { return localStorage.getItem('labcharts-ppq-model') || 'claude-sonnet-4.6'; }
-export function setPpqModel(model) { localStorage.setItem('labcharts-ppq-model', model); }
+export function setPpqModel(model) {
+  localStorage.setItem('labcharts-ppq-model', model);
+  markAISettingsLocal();
+  notifyAISelectionChanged();
+}
 export function getPpqModelDisplay() {
   const id = getPpqModel();
   let cached = []; try { cached = JSON.parse(localStorage.getItem('labcharts-ppq-models') || '[]'); } catch(e) {}
@@ -153,16 +260,26 @@ export function getPpqModelDisplay() {
   return m ? (m.name || m.id) : id;
 }
 export function getPpqCreditId() { return localStorage.getItem('labcharts-ppq-credit-id') || ''; }
-export function savePpqCreditId(id) { localStorage.setItem('labcharts-ppq-credit-id', id); }
+export function savePpqCreditId(id) {
+  localStorage.setItem('labcharts-ppq-credit-id', id);
+  markAISettingsLocal();
+}
 
 // ─── Custom API (any OpenAI-compatible endpoint) ───
 export function getCustomApiUrl() { return localStorage.getItem('labcharts-custom-url') || ''; }
-export function setCustomApiUrl(url) { localStorage.setItem('labcharts-custom-url', url); }
+export function setCustomApiUrl(url) {
+  localStorage.setItem('labcharts-custom-url', url);
+  markAISettingsLocal();
+}
 export function getCustomApiKey() { return getCachedKey('labcharts-custom-key') || ''; }
-export async function saveCustomApiKey(key) { await encryptedSetItem('labcharts-custom-key', key); updateKeyCache('labcharts-custom-key', key); }
+export async function saveCustomApiKey(key) { await encryptedSetItem('labcharts-custom-key', key); updateKeyCache('labcharts-custom-key', key); markAISettingsLocal(); }
 export function hasCustomApiKey() { return !!getCustomApiKey(); }
 export function getCustomApiModel() { return localStorage.getItem('labcharts-custom-model') || ''; }
-export function setCustomApiModel(model) { localStorage.setItem('labcharts-custom-model', model); }
+export function setCustomApiModel(model) {
+  localStorage.setItem('labcharts-custom-model', model);
+  markAISettingsLocal();
+  notifyAISelectionChanged();
+}
 export function getCustomApiModelDisplay() {
   const id = getCustomApiModel();
   if (!id) return '(no model selected)';
@@ -176,7 +293,11 @@ export function getOpenRouterModel() {
   if (m === 'anthropic/claude-sonnet-4-6') { m = 'anthropic/claude-sonnet-4.6'; localStorage.setItem('labcharts-openrouter-model', m); }
   return m || 'anthropic/claude-sonnet-4.6';
 }
-export function setOpenRouterModel(model) { localStorage.setItem('labcharts-openrouter-model', model); }
+export function setOpenRouterModel(model) {
+  localStorage.setItem('labcharts-openrouter-model', model);
+  markAISettingsLocal();
+  notifyAISelectionChanged();
+}
 export function getOpenRouterModelDisplay() {
   const id = getOpenRouterModel();
   let cached = []; try { cached = JSON.parse(localStorage.getItem('labcharts-openrouter-models') || '[]'); } catch(e) {}
@@ -238,6 +359,7 @@ export function hasPendingOpenRouterOAuthSession() {
 }
 
 export function markOpenRouterOAuthSettingsLocal() {
+  markAISettingsLocal();
   sessionStorage.setItem(OPENROUTER_OAUTH_LOCAL_SETTINGS_LOCK_UNTIL_KEY, String(Date.now() + 5 * 60 * 1000));
 }
 
@@ -317,8 +439,7 @@ export function isRecommendedModel(provider, modelId) {
   if (provider === 'ppq') return PPQ_RECOMMENDED.some(function(r) { return modelId === r || modelId.startsWith(r); });
   return false; // Ollama — local models, can't tier
 }
-export function getActiveModelId() {
-  const provider = getAIProvider();
+export function getActiveModelId(provider = getAIProvider()) {
   if (provider === 'venice') return getVeniceModel();
   if (provider === 'openrouter') return getOpenRouterModel();
   if (provider === 'routstr') return getRoutstrModel();
@@ -326,8 +447,7 @@ export function getActiveModelId() {
   if (provider === 'custom') return getCustomApiModel();
   return getOllamaMainModel();
 }
-export function getActiveModelDisplay() {
-  const provider = getAIProvider();
+export function getActiveModelDisplay(provider = getAIProvider()) {
   if (provider === 'venice') return getVeniceModelDisplay();
   if (provider === 'openrouter') return getOpenRouterModelDisplay();
   if (provider === 'routstr') return getRoutstrModelDisplay();
@@ -454,10 +574,12 @@ export async function fetchVeniceModels(key) {
     const json = await res.json();
     // Sort descending so latest version comes first per family
     const allText = (json.data || []).filter(function(m) { return m.id && m.type === 'text'; }).sort(function(a, b) { return b.id.localeCompare(a.id); });
-    // Cache E2EE models separately
-    const e2eeList = allText.filter(function(m) { return m.id.startsWith('e2ee-'); });
+    // Cache E2EE models separately. The capability flag is authoritative;
+    // keep a prefix fallback for older Venice responses that did not include it.
+    const e2eeList = allText.filter(modelSupportsVeniceE2EE);
     localStorage.setItem('labcharts-venice-e2ee-models', JSON.stringify(e2eeList));
-    const all = allText.filter(function(m) { return !m.id.startsWith('e2ee-'); });
+    const e2eeIds = new Set(e2eeList.map(function(m) { return m.id; }));
+    const all = allText.filter(function(m) { return !e2eeIds.has(m.id) && !m.id.startsWith('e2ee-'); });
     // Deduplicate: Venice curates Claude models (no date-stamped variants), so keep all.
     // For others, strip size/date suffixes to collapse duplicates.
     const models = deduplicateModels(all, function(id) {
@@ -478,10 +600,8 @@ export async function fetchVeniceModels(key) {
     const visionIds = allText.filter(m => m.model_spec?.capabilities?.supportsVision).map(m => m.id);
     localStorage.setItem('labcharts-venice-vision-models', JSON.stringify(visionIds));
     localStorage.setItem('labcharts-venice-models', JSON.stringify(models));
-    if (!localStorage.getItem('labcharts-venice-model') && models.length) {
-      const llama = models.find(function(m) { return m.id.includes('llama-3.3-70b'); });
-      if (llama) setVeniceModel(llama.id);
-    }
+    localStorage.setItem('labcharts-venice-models-fetched-at', String(Date.now()));
+    syncVeniceModelSelection(models, e2eeList);
     return models;
   } catch (e) { return []; }
 }
@@ -586,8 +706,7 @@ async function _fetchWithRetry(url, options, retries = 2, useProxy = true) {
 // ═══════════════════════════════════════════════
 // WEB SEARCH SUPPORT
 // ═══════════════════════════════════════════════
-export function supportsWebSearch() {
-  const provider = getAIProvider();
+export function supportsWebSearch(provider = getAIProvider()) {
   if (provider === 'venice') return !isVeniceE2EEActive();
   if (provider === 'routstr') return false;
   if (provider === 'ppq') return true;
@@ -596,7 +715,10 @@ export function supportsWebSearch() {
 }
 
 export function isE2EEModel(modelId) {
-  return typeof modelId === 'string' && modelId.startsWith('e2ee-');
+  if (typeof modelId !== 'string') return false;
+  const e2eeModels = readStoredArray('labcharts-venice-e2ee-models');
+  if (veniceE2EEModelsCacheKnown()) return modelListHasId(e2eeModels, modelId);
+  return modelId.startsWith('e2ee-');
 }
 
 // Is Venice E2EE currently active?
@@ -908,7 +1030,19 @@ export async function callOpenAICompatibleLocalAPI(opts) {
 export async function callVeniceAPI(opts) {
   const key = getVeniceKey();
   if (!key) throw new Error('No Venice API key configured. Add your key in Settings.');
-  const modelId = getVeniceModel();
+  const regularModels = readStoredArray('labcharts-venice-models');
+  const e2eeModels = readStoredArray('labcharts-venice-e2ee-models');
+  if (regularModels.length || e2eeModels.length) syncVeniceModelSelection(regularModels, e2eeModels);
+  let modelId = getVeniceModel();
+  let e2eeRequested = getVeniceE2EE() || isE2EEModel(modelId);
+  if (e2eeRequested && veniceModelsCacheStale()) {
+    await fetchVeniceModels(key);
+    modelId = getVeniceModel();
+    e2eeRequested = getVeniceE2EE() || isE2EEModel(modelId);
+  }
+  if (e2eeRequested && !isE2EEModel(modelId)) {
+    throw new Error('Venice E2EE is enabled, but no current Venice E2EE model is available. Refresh Venice models in Settings and choose an E2EE model.');
+  }
 
   if (!isE2EEModel(modelId)) {
     const extraBody = opts.webSearch ? { venice_parameters: { enable_web_search: 'on' } } : {};
@@ -1322,8 +1456,7 @@ export async function callCustomAPI(opts) {
   );
 }
 
-export async function callClaudeAPI(opts) {
-  const provider = getAIProvider();
+export async function callClaudeAPI(opts, provider = getAIProvider()) {
   if (provider === 'ollama') return callOpenAICompatibleLocalAPI(opts);
   if (provider === 'venice') return callVeniceAPI(opts);
   if (provider === 'openrouter') return callOpenRouterAPI(opts);
@@ -1357,7 +1490,7 @@ Object.assign(window, {
   isRecommendedModel,
   getActiveModelId, getActiveModelDisplay,
   renderModelPricingHint,
-  getAIProvider, setAIProvider, hasAIProvider,
+  getAIProvider, setAIProvider, hasAIProvider, markAISettingsLocal,
   supportsVision, supportsWebSearch, isE2EEModel, isVeniceE2EEActive, getVeniceE2EE, setVeniceE2EE,
   validateVeniceKey, validateOpenRouterKey, validateRoutstrKey, validatePpqKey, validateCustomApiKey,
   getCustomApiUrl, setCustomApiUrl, getCustomApiKey, saveCustomApiKey, hasCustomApiKey,

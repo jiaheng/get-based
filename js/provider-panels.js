@@ -190,7 +190,7 @@ export function renderAIProviderPanel(provider) {
       const opts = buildModelOptions('venice', displayModels, veniceModel, function(m) { return m.name || m.id; });
       veniceModelHtml = `<div style="margin-top:12px" id="venice-model-area">
         <label style="font-size:12px;color:var(--text-muted)">Model</label>
-        <select class="api-key-input" id="venice-model-select" style="margin-top:4px" onchange="setVeniceModel(this.value);updateVeniceModelPricing(this.value)">${opts}</select>
+        <select class="api-key-input" id="venice-model-select" style="margin-top:4px" onchange="onVeniceModelDropdownChange(this.value)">${opts}</select>
         <div id="venice-model-pricing" style="margin-top:4px">${renderModelPricingHint('venice', veniceModel)}</div>
       </div>
       ${hasE2EEModels ? `<div style="margin-top:12px;display:flex;align-items:center;gap:8px">
@@ -854,6 +854,7 @@ export function handleRemoveVeniceKey() {
   localStorage.removeItem('labcharts-venice-key');
   updateKeyCache('labcharts-venice-key', null);
   localStorage.removeItem('labcharts-venice-models');
+  localStorage.removeItem('labcharts-venice-models-fetched-at');
   localStorage.removeItem('labcharts-venice-model');
   localStorage.removeItem('labcharts-venice-e2ee');
   localStorage.removeItem('labcharts-venice-e2ee-models');
@@ -870,8 +871,16 @@ export function renderVeniceModelDropdown(models) {
   const currentModel = getVeniceModel();
   const opts = buildModelOptions('venice', models, currentModel, function(m) { return m.name || m.id; });
   area.innerHTML = '<label style="font-size:12px;color:var(--text-muted)">Model</label>' +
-    '<select class="api-key-input" id="venice-model-select" style="margin-top:4px" onchange="setVeniceModel(this.value);updateVeniceModelPricing(this.value)">' + opts + '</select>' +
+    '<select class="api-key-input" id="venice-model-select" style="margin-top:4px" onchange="onVeniceModelDropdownChange(this.value)">' + opts + '</select>' +
     '<div id="venice-model-pricing" style="margin-top:4px">' + renderModelPricingHint('venice', currentModel) + '</div>';
+}
+
+export function onVeniceModelDropdownChange(value) {
+  const previous = getVeniceModel();
+  setVeniceModel(value);
+  localStorage.setItem(getVeniceE2EE() ? 'labcharts-venice-model-e2ee' : 'labcharts-venice-model-regular', value);
+  if (previous !== value) window.clearE2EESession?.();
+  updateVeniceModelPricing(value);
 }
 
 export function toggleVeniceE2EE(on) {
@@ -2318,6 +2327,7 @@ Object.assign(window, {
   testPIIOllamaConnection,
   refreshVeniceBalance,
   updateVeniceModelPricing,
+  onVeniceModelDropdownChange,
   toggleVeniceE2EE,
   updateOpenRouterModelPricing,
   updateRoutstrModelPricing,

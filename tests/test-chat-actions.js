@@ -159,6 +159,7 @@ assert('CSS .chat-action-btn.active removed', !cssSrc.includes('.chat-action-btn
 // ─── Section 17: Source inspection — chat.js ───
 console.log('Section 17: Source inspection');
 const chatSrc = read('js/chat.js');
+const chatAttestationSrc = read('js/chat-attestation.js');
 const chatIconsSrc = read('js/chat-icons.js');
 const chatSummariesSrc = read('js/chat-summaries.js');
 const chatContinuationSrc = read('js/chat-continuation.js');
@@ -170,8 +171,10 @@ assert('chat.js has regenerateLastMessage', chatSrc.includes('function regenerat
 assert('chat.js does NOT have readAloud', !chatSrc.includes('function readAloud'), 'removed');
 assert('chat.js has copyMessage', chatSrc.includes('function copyMessage'), 'found');
 assert('sendChatMessage snapshots context', chatSrc.includes('contextSnapshot'), 'found');
+assert('sendChatMessage snapshots provider for API call', chatSrc.includes('const _msgProvider = getAIProvider()') && chatSrc.includes('provider: _msgProvider'), 'found');
 assert('chat raises response token headroom', chatContinuationSrc.includes('CHAT_RESPONSE_MAX_TOKENS = 16384'), 'found');
 assert('chat auto-continues token-limit stops', chatContinuationSrc.includes('CHAT_AUTO_CONTINUE_LIMIT') && chatContinuationSrc.includes('callChatAPIWithContinuation'), 'found');
+assert('chat continuation uses provider snapshot', chatContinuationSrc.includes('provider })') && chatContinuationSrc.includes('}, provider)'), 'found');
 assert('chat auto-continues likely mid-sentence stops', chatContinuationSrc.includes('isLikelyIncompleteResponse') && chatContinuationSrc.includes('shouldAutoContinueResponse'), 'found');
 assert('chat incomplete heuristic does not continue solely because final line is long',
   !chatSrc.includes('return lastLine.length > 60') && !chatContinuationSrc.includes('return lastLine.length > 60'), 'length-only fallback removed');
@@ -190,6 +193,8 @@ assert('chat.js imports continuation helpers', chatSrc.includes("from './chat-co
 assert('chat-continuation.js exports continuation helper', chatContinuationSrc.includes('export async function callChatAPIWithContinuation'), 'found');
 assert('chat.js imports prompt context helpers', chatSrc.includes("from './chat-prompt-context.js'"), 'found');
 assert('chat-prompt-context.js exports tagged messages helper', chatPromptContextSrc.includes('export function buildTaggedChatMessages'), 'found');
+assert('chat.js imports attestation helpers', chatSrc.includes("from './chat-attestation.js'"), 'found');
+assert('chat-attestation.js exports E2EE lock footnote helper', chatAttestationSrc.includes('export function e2eeLockFootnote'), 'found');
 assert('renderChatMessages calls buildActionBar', chatSrc.includes('buildActionBar(i)'), 'found');
 assert('API messages tag other personas', chatPromptContextSrc.includes('Response from') && chatPromptContextSrc.includes('personalityName'), 'tags messages from different personas');
 
