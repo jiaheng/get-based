@@ -2,7 +2,7 @@
 // test-chat-actions.js — Chat action buttons + context summary. Window-export
 // checks, getContextSummary() shape, buildActionBar() HTML output (Regenerate
 // only on last AI msg, Copy always, context toggle, area counts), backward
-// compat, plus source-inspection of chat.js / lab-context.js / settings.js /
+// compat, plus source-inspection of chat.js / chat-actions.js / lab-context.js / settings.js /
 // service-worker.js / state.js / styles.css.
 //
 // Run: node tests/test-chat-actions.js  (or via npm test)
@@ -33,6 +33,7 @@ console.log('=== Chat Actions Tests ===\n');
 await import('../js/state.js');
 await import('../js/lab-context.js');
 await import('../js/chat.js');
+const { buildActionBar } = await import('../js/chat-actions.js');
 const { buildSummaryTranscript } = await import('../js/chat-summaries.js');
 const {
   attachLensSources, buildMultiPersonaInstruction, buildTaggedChatMessages, buildWebSearchHint,
@@ -45,7 +46,7 @@ assert('window._labState exists', hasState, hasState ? 'found' : 'not found');
 // ─── Section 1: Window exports ───
 console.log('Section 1: Window Exports');
 const requiredExports = [
-  'getContextSummary', 'buildActionBar', 'regenerateLastMessage',
+  'getContextSummary', 'regenerateLastMessage',
   'copyMessage', 'toggleContextDetails'
 ];
 for (const fn of requiredExports) {
@@ -79,16 +80,16 @@ if (hasState) {
     { role: 'assistant', content: 'Sure, here is more.', context: [{ label: 'Diet', detail: 'filled' }, { label: 'Sleep & Rest', detail: 'filled' }] }
   ];
 
-  const userBar = window.buildActionBar(0);
+  const userBar = buildActionBar(0);
   assert('buildActionBar returns empty for user msg', userBar === '', `got: "${userBar.substring(0, 50)}"`);
 
-  const bar1 = window.buildActionBar(1);
+  const bar1 = buildActionBar(1);
   assert('buildActionBar for AI msg has action bar', bar1.includes('chat-action-bar'), 'contains .chat-action-bar');
   assert('Non-last AI msg has NO Regenerate', !bar1.includes('Regenerate'), 'no Regenerate for non-last');
   assert('AI msg has NO Read button (removed)', !bar1.includes('Read'), 'no Read button');
   assert('AI msg has Copy button', bar1.includes('Copy'), 'contains Copy');
 
-  const bar3 = window.buildActionBar(3);
+  const bar3 = buildActionBar(3);
   assert('Last AI msg has Regenerate', bar3.includes('Regenerate'), 'contains Regenerate');
   assert('Last AI msg has Copy', bar3.includes('Copy'), 'contains Copy');
   assert('Last AI msg has NO Read', !bar3.includes('Read'), 'no Read');
@@ -114,7 +115,7 @@ if (hasState) {
     { role: 'assistant', content: 'Hi there!' }  // No .context, no .sources
   ];
 
-  const barNoCtx = window.buildActionBar(1);
+  const barNoCtx = buildActionBar(1);
   assert('Msg without .context has no context toggle', !barNoCtx.includes('chat-context-toggle'), 'no toggle');
   assert('Msg without .sources has no sources toggle', !barNoCtx.includes('chat-sources-toggle'), 'no sources toggle');
   assert('Msg without .context still has action bar', barNoCtx.includes('chat-action-bar'), 'has action bar');
@@ -159,6 +160,7 @@ assert('CSS .chat-action-btn.active removed', !cssSrc.includes('.chat-action-btn
 // ─── Section 17: Source inspection — chat.js ───
 console.log('Section 17: Source inspection');
 const chatSrc = read('js/chat.js');
+const chatActionsSrc = read('js/chat-actions.js');
 const chatAttestationSrc = read('js/chat-attestation.js');
 const chatIconsSrc = read('js/chat-icons.js');
 const chatSummariesSrc = read('js/chat-summaries.js');
@@ -168,10 +170,12 @@ const chatPersonalitiesSrc = read('js/chat-personalities.js');
 const chatHistorySrc = read('js/chat-history.js');
 const labCtxSrc = read('js/lab-context.js');
 assert('lab-context.js has getContextSummary', labCtxSrc.includes('function getContextSummary'), 'found');
-assert('chat.js has buildActionBar', chatSrc.includes('function buildActionBar'), 'found');
-assert('chat.js has regenerateLastMessage', chatSrc.includes('function regenerateLastMessage'), 'found');
+assert('chat.js imports action helpers', chatSrc.includes("from './chat-actions.js'"), 'found');
+assert('chat-actions.js exports buildActionBar', chatActionsSrc.includes('export function buildActionBar'), 'found');
+assert('chat-actions.js keeps buildActionBar off window', !chatActionsSrc.includes('  buildActionBar,'), 'not a window handler');
+assert('chat-actions.js exports regenerateLastMessage', chatActionsSrc.includes('export function regenerateLastMessage'), 'found');
 assert('chat.js does NOT have readAloud', !chatSrc.includes('function readAloud'), 'removed');
-assert('chat.js has copyMessage', chatSrc.includes('function copyMessage'), 'found');
+assert('chat-actions.js exports copyMessage', chatActionsSrc.includes('export function copyMessage'), 'found');
 assert('sendChatMessage snapshots context', chatSrc.includes('contextSnapshot'), 'found');
 assert('sendChatMessage snapshots provider for API call', chatSrc.includes('const _msgProvider = getAIProvider()') && chatSrc.includes('provider: _msgProvider'), 'found');
 assert('sendChatMessage awaits chat saves before repaint-sensitive work',
@@ -187,7 +191,11 @@ assert('chat incomplete heuristic does not continue on terminal high/low adjecti
 assert('chat renders output-limit note', chatContinuationSrc.includes('output limit reached'), 'found');
 assert('chat persists truncated assistant state', chatSrc.includes('assistantMsg.truncated = true'), 'found');
 assert('renderChatMessages restores truncated note', chatSrc.includes('msg.truncated') && chatSrc.includes('responseLimitNote()'), 'found');
-assert('regenerateLastMessage checks _chatAbortController', chatSrc.includes('_chatAbortController') && chatSrc.includes('regenerateLastMessage'), 'found');
+assert('regenerateLastMessage checks streaming state via chat.js callback',
+  chatActionsSrc.includes('window.isChatStreaming?.()') && chatSrc.includes('export function isChatStreaming'), 'found');
+assert('regenerateLastMessage checks render/send callbacks before mutating',
+  chatActionsSrc.indexOf("typeof renderChatMessages !== 'function'") < chatActionsSrc.indexOf('state.chatHistory.pop()')
+    && chatActionsSrc.indexOf("typeof sendChatMessage !== 'function'") < chatActionsSrc.indexOf('state.chatHistory.pop()'), 'found');
 assert('chat.js imports chat icon helpers', chatSrc.includes("from './chat-icons.js'"), 'found');
 assert('chat-icons.js exports button content helper', chatIconsSrc.includes('export function setIconButtonContent'), 'found');
 assert('chat.js imports chat summary helpers', chatSrc.includes("from './chat-summaries.js'"), 'found');
@@ -203,6 +211,7 @@ assert('chat.js imports personality helpers', chatSrc.includes("from './chat-per
 assert('chat-personalities.js exports header model helper', chatPersonalitiesSrc.includes('export function updateChatHeaderModel'), 'found');
 assert('chat.js imports history helpers', chatSrc.includes("from './chat-history.js'"), 'found');
 assert('chat-history.js exports save/load helpers', chatHistorySrc.includes('export async function saveChatHistory') && chatHistorySrc.includes('export async function loadChatHistory'), 'found');
+assert('chat-actions.js saves regenerated history through chat-history helper', chatActionsSrc.includes('saveChatHistory'), 'found');
 assert('renderChatMessages calls buildActionBar', chatSrc.includes('buildActionBar(i)'), 'found');
 assert('API messages tag other personas', chatPromptContextSrc.includes('Response from') && chatPromptContextSrc.includes('personalityName'), 'tags messages from different personas');
 
@@ -249,8 +258,8 @@ if (hasState) {
     { role: 'assistant', content: 'A2' }
   ];
 
-  const bar0 = window.buildActionBar(1); // first AI msg
-  const barLast = window.buildActionBar(3); // last AI msg
+  const bar0 = buildActionBar(1); // first AI msg
+  const barLast = buildActionBar(3); // last AI msg
   assert('First AI msg (non-last) has no Regenerate', !bar0.includes('regenerateLastMessage'), 'no regenerate');
   assert('Last AI msg has Regenerate', barLast.includes('regenerateLastMessage'), 'has regenerate');
 } else {
