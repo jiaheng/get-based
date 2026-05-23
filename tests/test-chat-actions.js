@@ -173,6 +173,7 @@ const chatHistorySrc = read('js/chat-history.js');
 const chatPanelSrc = read('js/chat-panel.js');
 const chatNudgeSrc = read('js/chat-nudge.js');
 const chatDiscussionSrc = read('js/chat-discussion.js');
+const chatDiscussionRoundStateSrc = read('js/chat-discussion-round-state.js');
 const chatDiscussionStateSrc = read('js/chat-discussion-state.js');
 const chatDiscussionUiSrc = read('js/chat-discussion-ui.js');
 const chatOnboardingSrc = read('js/chat-onboarding.js');
@@ -266,11 +267,23 @@ assert('chat-discussion-ui.js owns discussion DOM controls',
     chatDiscussionUiSrc.includes('export function showDiscussContinuePrompt') &&
     chatDiscussionUiSrc.includes('export function showDiscussPersonaPicker'),
   'found');
+assert('chat-discussion-round-state.js owns thread-bound round persistence',
+  chatDiscussionSrc.includes("from './chat-discussion-round-state.js'") &&
+    chatDiscussionRoundStateSrc.includes('export function isRoundThreadActive') &&
+    chatDiscussionRoundStateSrc.includes('export function persistDiscussionThreadState') &&
+    chatDiscussionRoundStateSrc.includes('export function renderRoundMessages') &&
+    chatDiscussionRoundStateSrc.includes('export async function saveRoundChatHistory'),
+  'found');
 assert('chat discussion rounds stay bound to origin thread during streaming',
   chatDiscussionSrc.includes('const roundThreadId = opts.threadId || state.currentThreadId') &&
     chatDiscussionSrc.includes('saveRoundChatHistory(roundThreadId, roundHistory)') &&
     chatDiscussionSrc.includes('persistDiscussionThreadState(threadId, allPersonas, originalPersonality)'),
   'prevents thread switches mid-stream from dropping the continue prompt');
+assert('chat discussion live stream restores persona label after thread switch',
+  chatDiscussionSrc.includes('function appendRoundPersonaLabel') &&
+    chatDiscussionSrc.includes('appendRoundPersonaLabel(roundThreadId, container, labelEl);') &&
+    /onStream\(text\)[\s\S]{0,180}appendRoundPersonaLabel\(roundThreadId, container, labelEl\);[\s\S]{0,80}typewriter\.update\(text\)/.test(chatDiscussionSrc),
+  're-entering the origin thread mid-stream should show whose response is streaming');
 assert('chat-discussion.js typewriter callback degrades safely',
   !chatDiscussionSrc.includes('Chat discussion typewriter callback not configured') &&
     /function createTypewriter[\s\S]{0,180}update\(\) \{\}[\s\S]{0,80}stop\(\) \{\}/.test(chatDiscussionSrc),
