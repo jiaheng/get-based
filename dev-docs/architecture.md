@@ -64,6 +64,9 @@ js/
   chat.js           — Chat public barrel and entry point
   chat-window-bindings.js — Chat callback wiring and legacy window exports
   chat-marker-prompts.js — Per-marker and selected-correlation AI prompt builders
+  chat-continuation.js — Response limit detection and automatic continuation
+  chat-discussion.js — Multi-persona discussion/debate orchestration
+  chat-discussion-state.js — Multi-persona discussion persona/thread state helpers
   chat-empty-state.js — Empty chat and onboarding message renderer
   chat-nudge.js      — Chat FAB nudge badge and dismissal state
   chat-threads.js    — Chat thread index CRUD and rail rendering
