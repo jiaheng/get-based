@@ -10,8 +10,7 @@ import {
   isAIResponseTruncated,
 } from './chat-continuation.js';
 import {
-  collectDiscussionPersonas, getCurrentDiscussionState, getCurrentThread,
-  getThreadPersonaCount,
+  getCurrentDiscussionState, getCurrentThread,
 } from './chat-discussion-state.js';
 import {
   createDiscussionTypewriter, getChatAbortController, renderChatMessages,
@@ -20,7 +19,7 @@ import {
 import {
   removeDiscussContinuePrompt, removeDiscussPersonaPicker,
   showDiscussContinuePrompt as showDiscussContinuePromptUI,
-  showDiscussPersonaPicker,
+  showDiscussPersonaPicker, updateDiscussButton,
 } from './chat-discussion-ui.js';
 import {
   isRoundThreadActive, persistDiscussionThreadState, renderRoundMessages,
@@ -41,20 +40,7 @@ import {
 
 export { getCurrentDiscussionState, getThreadPersonaCount } from './chat-discussion-state.js';
 export { configureChatDiscussion } from './chat-discussion-callbacks.js';
-export { removeDiscussContinuePrompt } from './chat-discussion-ui.js';
-
-export function updateDiscussButton() {
-  const btn = document.getElementById('chat-discuss-btn');
-  if (!btn) return;
-  const hasAssistant = state.chatHistory && state.chatHistory.some(m => m.role === 'assistant');
-  if (!hasAssistant) { btn.style.display = 'none'; return; }
-  btn.style.display = 'flex';
-  const count = getThreadPersonaCount();
-  btn.style.opacity = count >= 2 ? '1' : '0.5';
-  btn.title = count >= 2
-    ? 'Continue the debate'
-    : 'Add another persona for a second opinion';
-}
+export { removeDiscussContinuePrompt, updateDiscussButton } from './chat-discussion-ui.js';
 
 export function restoreDiscussionContinuePrompt() {
   const discussionState = getCurrentDiscussionState();
@@ -248,16 +234,10 @@ export function endDiscussion() {
 export async function startDiscussion() {
   if (getChatAbortController()) return; // already streaming
 
-  if (getThreadPersonaCount() >= 2) {
-    // Already have 2+ personas — run another round
-    const personas = collectDiscussionPersonas();
-    if (personas.length < 2) return;
-    const thread = getCurrentThread();
-    if (thread?.discussionEnded) {
-      delete thread.discussionEnded;
-      saveChatThreadIndex();
-    }
-    return _runDiscussion(personas);
+  const thread = getCurrentThread();
+  if (thread?.discussionEnded) {
+    delete thread.discussionEnded;
+    saveChatThreadIndex();
   }
 
   showDiscussPersonaPicker();
@@ -270,7 +250,11 @@ export async function startDiscussionFromPicker() {
   const lockedInputs = picker.querySelectorAll('input[data-locked="1"]');
   const checkedInputs = picker.querySelectorAll('input:checked:not([data-locked="1"])');
   const allSelected = [...lockedInputs, ...checkedInputs];
-  if (allSelected.length !== 2) return;
+  if (lockedInputs.length > 0) {
+    if (checkedInputs.length !== 1) return;
+  } else if (allSelected.length !== 2) {
+    return;
+  }
 
   const lockedIds = new Set(Array.from(lockedInputs).map(cb => cb.value));
   const allPersonas = allSelected.map(cb => ({
