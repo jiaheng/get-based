@@ -29,6 +29,7 @@ console.log('=== Cross-Device Sync Tests ===\n');
 // populate window.enableSync, window.toggleSync, etc.
 const { state } = await import('../js/state.js');
 const syncApply = await import('../js/sync-apply.js');
+const syncDelta = await import('../js/sync-delta.js');
 await import('../js/sync.js');
 await import('../js/settings.js');
 
@@ -611,7 +612,10 @@ await import('../js/settings.js');
   // the rate at which the relay's per-owner quota fills.
   assert('onDataSaved has 10s debounce', syncActionsSrc.includes('}, 10_000)'));
   assert('onDataSaved captures profileId at schedule time', syncActionsSrc.includes('const profileId = state.currentProfile') && syncActionsSrc.includes('_pushProfile(profileId'));
-  assert('onDataSaved retries if syncing', syncActionsSrc.includes('if (_isSyncing())') && syncActionsSrc.includes('_pushProfile(profileId, data)'));
+  assert('onDataSaved retries while sync is not ready or a push is in-flight',
+    syncActionsSrc.includes('function scheduleProfilePush(profileId, data, attempt = 0)')
+      && syncActionsSrc.includes('!_isEvoluReady() || _isSyncing()')
+      && /export function onDataSaved[\s\S]{0,700}scheduleProfilePush\(profileId,\s*data\)/.test(syncActionsSrc));
   // v1.6.3: skip-decision REMOVED on the pull path. Both timestamp-skip
   // and hash-skip caused users to miss cross-device data (clock-skew
   // and stale hash keys from prior code versions). The mergeImportedData
@@ -651,7 +655,7 @@ await import('../js/settings.js');
   assert('disableSync clears sync timestamps',
     /disableSync[\s\S]{0,3000}key\.endsWith\('-sync-ts'\)[\s\S]{0,200}localStorage\.removeItem\(key\)/.test(syncSrc));
   assert('applyChatData uses plain localStorage for thread index (matches saveChatThreadIndex)',
-    syncApplySrc.includes("localStorage.setItem(threadsKey, JSON.stringify(chatData.threads)"));
+    syncApplySrc.includes("localStorage.setItem(threadsKey, JSON.stringify(mergedThreads))"));
 
   // ═══════════════════════════════════════
   // 9. SETTINGS UI
@@ -704,9 +708,18 @@ await import('../js/settings.js');
   assert('collectChatData includes custom personalities', syncPayloadSrc.includes('chatPersonalityCustom'));
   assert('collectChatData emits empty messages for cleared zero-message threads',
     syncPayloadSrc.includes('messageCount') && syncPayloadSrc.includes('messages[t.id] = []'));
+  assert('collectChatData includes explicit chat thread tombstones',
+    syncPayloadSrc.includes('chatDeletedThreadsKey')
+      && syncPayloadSrc.includes('deletedThreads'));
+  assert('chat thread tombstones reject proto-pollution keys',
+    syncApplySrc.includes('CHAT_DELETED_PROTO_KEYS')
+      && syncPayloadSrc.includes('CHAT_DELETED_PROTO_KEYS')
+      && await fetchWithRetry('js/chat-threads.js').then(s => s.includes('CHAT_DELETED_PROTO_KEYS.has(threadId)')));
   assert('applyChatData writes threads', syncApplySrc.includes('applyChatData'));
-  assert('applyChatData removes message keys for remotely deleted threads',
-    syncApplySrc.includes('incomingThreadIds') && syncApplySrc.includes('encryptedRemoveItem(`labcharts-${profileId}-chat-t_${t.id}`)'));
+  assert('applyChatData preserves local-only threads unless an explicit tombstone wins',
+    syncApplySrc.includes('mergedById.set(thread.id, thread)')
+      && syncApplySrc.includes('normalizeDeletedThreads(chatData.deletedThreads)')
+      && syncApplySrc.includes('encryptedRemoveItem(`labcharts-${profileId}-chat-t_${thread.id}`)'));
   assert('applyChatData skips stale remote chat while local save is fresh',
     syncApplySrc.includes('CHAT_LOCAL_LOCK_UNTIL_KEY') && syncApplySrc.includes('shouldKeepLocalChatData(profileId)'));
   assert('chat freshness lock is shorter than two minutes',
@@ -724,29 +737,43 @@ await import('../js/settings.js');
     const threadsKey = `labcharts-${profileId}-chat-threads`;
     const keepKey = `labcharts-${profileId}-chat-t_keep`;
     const goneKey = `labcharts-${profileId}-chat-t_gone`;
+    const deletedKey = `labcharts-${profileId}-chat-deleted-threads`;
     const oldLock = sessionStorage.getItem('labcharts-chat-local-lock-until');
+    const oldDeleted = localStorage.getItem(deletedKey);
     try {
       state.currentProfile = profileId;
       sessionStorage.removeItem('labcharts-chat-local-lock-until');
       localStorage.setItem(threadsKey, JSON.stringify([
-        { id: 'keep', messageCount: 1 },
-        { id: 'gone', messageCount: 1 },
+        { id: 'keep', messageCount: 1, updatedAt: '2026-05-24T10:00:00.000Z' },
+        { id: 'gone', messageCount: 1, updatedAt: '2026-05-24T10:00:00.000Z' },
       ]));
       localStorage.setItem(keepKey, JSON.stringify([{ role: 'user', content: 'old' }]));
       localStorage.setItem(goneKey, JSON.stringify([{ role: 'user', content: 'delete me' }]));
       const applied = await syncApply.applyChatData(profileId, {
-        threads: [{ id: 'keep', messageCount: 1 }],
+        threads: [{ id: 'keep', messageCount: 1, updatedAt: '2026-05-24T10:05:00.000Z' }],
         messages: { keep: [{ role: 'assistant', content: 'new' }] },
       });
       assert('applyChatData functional: remote thread index applied', applied === true);
-      assert('applyChatData functional: deleted thread message key removed', localStorage.getItem(goneKey) === null);
+      assert('applyChatData functional: stale remote absence does not delete local-only thread',
+        JSON.parse(localStorage.getItem(threadsKey) || '[]').some(t => t.id === 'gone')
+          && localStorage.getItem(goneKey) !== null);
       assert('applyChatData functional: kept thread messages overwritten',
         JSON.parse(localStorage.getItem(keepKey) || '[]')?.[0]?.content === 'new');
+      await syncApply.applyChatData(profileId, {
+        threads: [{ id: 'keep', messageCount: 1, updatedAt: '2026-05-24T10:05:00.000Z' }],
+        messages: { keep: [{ role: 'assistant', content: 'newer' }] },
+        deletedThreads: { gone: Date.parse('2026-05-24T10:06:00.000Z') },
+      });
+      assert('applyChatData functional: explicit remote tombstone removes deleted thread message key',
+        localStorage.getItem(goneKey) === null
+          && !JSON.parse(localStorage.getItem(threadsKey) || '[]').some(t => t.id === 'gone'));
     } finally {
       state.currentProfile = prevProfileId;
       localStorage.removeItem(threadsKey);
       localStorage.removeItem(keepKey);
       localStorage.removeItem(goneKey);
+      if (oldDeleted === null) localStorage.removeItem(deletedKey);
+      else localStorage.setItem(deletedKey, oldDeleted);
       if (oldLock === null) sessionStorage.removeItem('labcharts-chat-local-lock-until');
       else sessionStorage.setItem('labcharts-chat-local-lock-until', oldLock);
     }
@@ -758,6 +785,11 @@ await import('../js/settings.js');
   assert('Display prefs synced', syncPayloadSrc.includes('DISPLAY_PREF_SUFFIXES') && syncPayloadSrc.includes('collectDisplayPrefs'));
   assert('onChatSaved exported', exportBlockIncludes(syncSrc, ['onChatSaved']));
   assert('onChatSaved has debounce', syncActionsSrc.includes('_chatSyncTimers') && syncActionsSrc.includes('10000'));
+  assert('onChatSaved uses the profile push retry helper instead of one-shot push while syncing',
+    /export function onChatSaved[\s\S]{0,700}scheduleProfilePush\(profileId,\s*data\)/.test(syncActionsSrc));
+  assert('chat thread deletes record tombstones before syncing index',
+    await fetchWithRetry('js/chat-threads.js').then(s => s.includes('recordDeletedChatThread(threadId)')
+      && s.indexOf('recordDeletedChatThread(threadId)') < s.indexOf('state.chatThreads = state.chatThreads.filter')));
   assert('chat-threads.js imports onChatSaved', await fetchWithRetry('js/chat-threads.js').then(s => s.includes("import { onChatSaved } from './sync.js'")));
 
   // ═══════════════════════════════════════
@@ -1016,7 +1048,7 @@ await import('../js/settings.js');
   assert('DELTA_MAP_CONFIG defines manualValues keyIdFn (doubling-escape)',
     /DELTA_MAP_CONFIG\s*=\s*\{[\s\S]{0,1500}manualValues:[\s\S]{0,500}rawKey\.replace\(\/_\/g,\s*'__'\)\.replace\(\/:\/g,\s*'_'\)/.test(deltaSearchSrc));
   assert('_planKeyedMapDelta uses cfg.keyIdFn when present',
-    /_planKeyedMapDelta[\s\S]{0,2000}DELTA_MAP_CONFIG\[mapName\][\s\S]{0,1500}keyIdFn\(rawKey\)/.test(deltaSearchSrc));
+    /_planKeyedMapDelta[\s\S]{0,3500}DELTA_MAP_CONFIG\[mapName\][\s\S]{0,3500}keyIdFn\(rawKey\)/.test(deltaSearchSrc));
   assert('_planKeyedMapDelta payload preserves the ORIGINAL raw key (not the synth)',
     /payloadObj\s*=\s*\{\s*k:\s*rawKey,\s*v:\s*value\s*\}/.test(deltaSearchSrc));
   assert('Map-shape pull verifies via keyIdFn(parsed.k) === row.itemId',
@@ -1051,9 +1083,9 @@ await import('../js/settings.js');
   assert('_planKeyedMapDelta defined',
     /async function _planKeyedMapDelta\(profileId,\s*mapName,\s*mapObj\)/.test(deltaSearchSrc));
   assert('_planKeyedMapDelta validates key allowlist (no weird itemIds)',
-    /_planKeyedMapDelta[\s\S]{0,1500}!_isAllowlistSafeId\(itemId\)/.test(deltaSearchSrc));
+    /_planKeyedMapDelta[\s\S]{0,3500}!_isAllowlistSafeId\(itemId\)/.test(deltaSearchSrc));
   assert('_planKeyedMapDelta wraps payload as {k, v} for itemId verification on pull',
-    /_planKeyedMapDelta[\s\S]{0,2200}payloadObj\s*=\s*\{\s*k:\s*rawKey,\s*v:\s*value\s*\}/.test(deltaSearchSrc));
+    /_planKeyedMapDelta[\s\S]{0,4200}payloadObj\s*=\s*\{\s*k:\s*rawKey,\s*v:\s*value\s*\}/.test(deltaSearchSrc));
   assert('_planKeyedMapDelta emits tombstones when keys are removed',
     /_planKeyedMapDelta[\s\S]{0,3500}kind:\s*'tombstone'/.test(deltaSearchSrc));
   assert('pushProfile loops DELTA_MAPS after DELTA_ARRAYS',
@@ -1383,7 +1415,7 @@ await import('../js/settings.js');
   assert('_planArrayDelta uses _isAllowlistSafeId (not bare regex)',
     /_planArrayDelta[\s\S]{0,1500}_isAllowlistSafeId\(id\)/.test(deltaSearchSrc));
   assert('_planKeyedMapDelta uses _isAllowlistSafeId on derived itemId',
-    /_planKeyedMapDelta[\s\S]{0,1500}!_isAllowlistSafeId\(itemId\)/.test(deltaSearchSrc));
+    /_planKeyedMapDelta[\s\S]{0,3500}!_isAllowlistSafeId\(itemId\)/.test(deltaSearchSrc));
   assert('Map-shape pull wraps keyIdFn with _isAllowlistSafeId guard',
     /rawKeyIdFn[\s\S]{0,200}keyIdFn\s*=\s*\(k\)\s*=>[\s\S]{0,200}_isAllowlistSafeId\(id\)/.test(deltaSearchSrc));
   assert('Array-shape pull wraps itemIdFn with _isAllowlistSafeId guard',
@@ -1395,7 +1427,7 @@ await import('../js/settings.js');
   assert('_planArrayDelta resurrects tombstoned row by clearing isDeleted',
     /_planArrayDelta[\s\S]{0,2500}existing\?\.isDeleted\s*\?\s*\{\s*isDeleted:\s*null\s*\}\s*:\s*\{\}/.test(deltaSearchSrc));
   assert('_planKeyedMapDelta resurrects tombstoned row by clearing isDeleted',
-    /_planKeyedMapDelta[\s\S]{0,2700}existing\?\.isDeleted\s*\?\s*\{\s*isDeleted:\s*null\s*\}\s*:\s*\{\}/.test(deltaSearchSrc));
+    /_planKeyedMapDelta[\s\S]{0,4700}existing\?\.isDeleted\s*\?\s*\{\s*isDeleted:\s*null\s*\}\s*:\s*\{\}/.test(deltaSearchSrc));
   assert('_planScalarDelta resurrects tombstoned row by clearing isDeleted',
     /_planScalarDelta[\s\S]{0,2000}canonical\?\.isDeleted\s*\?\s*\{\s*isDeleted:\s*null\s*\}\s*:\s*\{\}/.test(deltaSearchSrc));
 
@@ -1446,8 +1478,8 @@ await import('../js/settings.js');
     /_PER_ROW_DECOMPRESSED_CAP_BYTES\s*=\s*1024\s*\*\s*1024[\s\S]{0,500}async function _gunzipToStringCapped/.test(syncPayloadSrc));
   assert('_gunzipToStringCapped throws on cap exceeded',
     /total\s*>\s*maxBytes[\s\S]{0,300}refusing to trust/.test(syncPayloadSrc));
-  assert('All 3 per-row gunzip sites use the capped variant',
-    (syncDeltaSrc.match(/_gunzipToStringCapped\(_base64ToBytes\(json\.slice\(6\)\)\)/g) || []).length === 3);
+  assert('All per-row gunzip sites use the capped variant',
+    (syncDeltaSrc.match(/_gunzipToStringCapped\(_base64ToBytes\(json\.slice\(6\)\)\)/g) || []).length >= 4);
   // Blob path also routes through _gunzipToStringCapped, with the
   // 5 MB MAX_SYNC_PAYLOAD_BYTES cap — a single capped helper is the
   // only gunzip entry point post-2026-05-10 audit (the bare
@@ -1932,6 +1964,8 @@ await import('../js/settings.js');
   // despite live rows in the per-row layer.
   assert('Pull-side genetics scalar TOMBSTONE branch preserves .snps when present',
     /tombstoned\s*&&\s*tombstonedAt\s*>=\s*chosenAt[\s\S]{0,1500}arrayName\s*===\s*'genetics'[\s\S]{0,500}imported\.genetics\s*=\s*\{\s*snps:\s*imported\.genetics\.snps\s*\}/.test(deltaSearchSrc));
+  assert('Genetics SNP planner rebuilds missing map input from itemRows',
+    /mapName\s*===\s*'genetics\.snps'[\s\S]{0,1600}fromRows\[parsed\.k\]\s*=\s*parsed\.v/.test(deltaSearchSrc));
 
   // Sidebar rebuild after every pull — conditional nav items (Genetics,
   // Wearables, etc.) gate on data presence, and per-row CRDT deltas can
@@ -1972,6 +2006,68 @@ await import('../js/settings.js');
     assert('strip simulator does not mutate input',
       'snps' in before.genetics
       && Object.keys(before.genetics.snps).length === 2);
+
+    {
+      const profileId = 'sync-test-genetics-row-fallback';
+      const snapshotKey = `labcharts-${profileId}-delta-genetics.snps`;
+      const metaKey = `${snapshotKey}-meta`;
+      const rows = Array.from({ length: 43 }, (_, i) => {
+        const rsid = `rs${100000 + i}`;
+        return {
+          profileId,
+          arrayName: 'genetics.snps',
+          itemId: rsid,
+          payload: JSON.stringify({ k: rsid, v: { genotype: 'AA', gene: `G${i}` } }),
+          syncedAt: '2026-05-24T12:00:00.000Z',
+          isDeleted: null,
+        };
+      });
+      const prevSnapshot = Object.fromEntries(rows.map(r => [r.itemId, 'old']));
+      const oldSnapshot = localStorage.getItem(snapshotKey);
+      const oldMeta = localStorage.getItem(metaKey);
+      const oldWarn = console.warn;
+      let tombstoneStormWarned = false;
+      try {
+        localStorage.setItem(snapshotKey, JSON.stringify(prevSnapshot));
+        localStorage.removeItem(metaKey);
+        syncDelta.configureSyncDelta({
+          getEvolu: () => ({ getQueryRows: () => rows }),
+          getItemRowQuery: () => ({}),
+        });
+        console.warn = (...args) => {
+          if (String(args[0] || '').includes('refused tombstone storm for genetics.snps')) tombstoneStormWarned = true;
+          oldWarn.apply(console, args);
+        };
+        const plan = await syncDelta._planKeyedMapDelta(profileId, 'genetics.snps', undefined);
+        assert('genetics.snps missing blob map falls back to live itemRows',
+          Object.keys(plan.next || {}).length === rows.length);
+        assert('genetics.snps row fallback avoids false tombstone-storm warning',
+          tombstoneStormWarned === false);
+        tombstoneStormWarned = false;
+        const emptyMapPlan = await syncDelta._planKeyedMapDelta(profileId, 'genetics.snps', {});
+        assert('genetics.snps empty blob map falls back to live itemRows',
+          Object.keys(emptyMapPlan.next || {}).length === rows.length);
+        assert('genetics.snps empty-map fallback avoids false tombstone-storm warning',
+          tombstoneStormWarned === false);
+        syncDelta.configureSyncDelta({
+          getEvolu: () => ({ getQueryRows: () => [] }),
+          getItemRowQuery: () => ({}),
+        });
+        tombstoneStormWarned = false;
+        const noRowsPlan = await syncDelta._planKeyedMapDelta(profileId, 'genetics.snps', {});
+        assert('genetics.snps empty map with unavailable itemRows preserves previous snapshot',
+          Object.keys(noRowsPlan.next || {}).length === rows.length && noRowsPlan.ops.length === 0);
+        assert('genetics.snps empty map with unavailable itemRows avoids false warning',
+          tombstoneStormWarned === false);
+      } finally {
+        console.warn = oldWarn;
+        syncDelta.configureSyncDelta({ getEvolu: () => null, getItemRowQuery: () => null });
+        if (oldSnapshot === null) localStorage.removeItem(snapshotKey);
+        else localStorage.setItem(snapshotKey, oldSnapshot);
+        if (oldMeta === null) localStorage.removeItem(metaKey);
+        else localStorage.setItem(metaKey, oldMeta);
+      }
+    }
   }
 
   // ═══════════════════════════════════════
