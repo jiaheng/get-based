@@ -232,6 +232,7 @@ Profile lifecycle and settings persistence.
 
 **Key exports:**
 - `profileStorageKey(profileId, suffix)` — builds `labcharts-{profileId}-{suffix}`
+- `createDefaultProfileData()` — returns the empty importedData shape used for new/metadata-only profile sync
 - `loadProfiles()` / `saveProfiles()` — profile index CRUD
 - `switchProfile(profileId)` — loads importedData from localStorage for the given profile
 - `deleteProfile(profileId)` — removes all keys for the profile
@@ -1375,8 +1376,9 @@ Not separately documented because their exports are best read from source — ke
 - `pdfjs-loader.js` — cached dynamic import of vendored pdf.js ESM. Pins `isEvalSupported: false` defense-in-depth on every `getDocument` call.
 - `supplement-warnings.js` / `food-contaminants.js` — keyword scanners that build "harm flag" lists for the AI context.
 - `emf.js` — Baubiologie SBM-2015 EMF assessment as a sub-module of the Environment context card.
-- `sync.js` — Evolu CRDT sync orchestration; lifecycle setup, enable/disable flow, profile/table queries, and inbound pull merge flow.
+- `sync.js` — Evolu CRDT sync orchestration; lifecycle setup, enable/disable flow, and profile/table query wiring.
 - `sync-push.js` — outbound profile push path, in-flight push watchdog, Phase 2 drift auto-revert, per-row delta planning/application, and relay byte telemetry.
+- `sync-pull.js` — inbound pull path; profile-row dedupe, blob/per-row merge, profile/chat/display apply, active-view refresh, and rebroadcast gating.
 - `sync-cutover.js` — readiness-gated Phase 2 lean-sync cutover enable/disable bridge over payload flags and delta readiness.
 - `sync-delta.js` — per-row CRDT delta boundary; DELTA_ARRAYS/MAPS/SCALARS registration, array/map/scalar planners, itemRow merge overlay, delta telemetry, snapshot advancement gates, and Phase 2 cutover readiness.
 - `sync-apply.js` — inbound sync apply helpers for AI provider settings, chat thread/message data, display prefs, and local freshness locks that protect just-edited local chat/settings from stale remote rows.
@@ -1386,7 +1388,7 @@ Not separately documented because their exports are best read from source — ke
 - `sync-identity.js` — BIP-39/QR lazy loaders plus mnemonic read/restore helpers for Evolu owner identity.
 - `sync-diagnostics.js` — Evolu row diagnostics snapshot and copy-text formatting for the Sync Diagnose modal.
 - `sync-diagnose-ui.js` — Sync Diagnose modal rendering, relay-storage actions, identity rotation UI, telemetry reset, and lean-sync cutover/backfill handlers.
-- `sync-actions.js` — user-triggered sync actions, local storage cleanup, all-profile initial push, save debouncing, chat debouncing, and AI-setting push scheduling.
+- `sync-actions.js` — user-triggered sync actions, local storage cleanup, all-profile initial push, save debouncing, chat debouncing, profile-metadata push scheduling, and AI-setting push scheduling.
 - `sync-ui.js` — header sync badge, popover rendering, status subscription, and activity-log copy helpers.
 - `sync-payload.js` — Evolu wire-payload helpers; outbound profile/config/chat/display envelope assembly, Phase 2 cutover payload shape, gzip envelope handling, inbound payload parsing, and local-only data stripping for wearable credentials and SNP map rows.
 - `sync-relay-health.js` — Evolu relay helper boundary; client-side quota estimate, signed `/self/owner-storage` and `/self/compact-owner` calls, and push-landed health verdict for the silent-reject detector.
