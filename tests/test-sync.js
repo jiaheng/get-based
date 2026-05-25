@@ -30,6 +30,7 @@ console.log('=== Cross-Device Sync Tests ===\n');
 const { state } = await import('../js/state.js');
 const syncApply = await import('../js/sync-apply.js');
 const syncDelta = await import('../js/sync-delta.js');
+const syncSubscriptions = await import('../js/sync-subscriptions.js');
 await import('../js/sync.js');
 await import('../js/settings.js');
 
@@ -65,6 +66,9 @@ await import('../js/settings.js');
   const syncRecoverySrc = await fetchWithRetry('js/sync-recovery.js');
   const syncReconcileSrc = await fetchWithRetry('js/sync-reconcile.js');
   const syncPullMergeSrc = await fetchWithRetry('js/sync-pull-merge.js');
+  const syncPullMaintenanceSrc = await fetchWithRetry('js/sync-pull-maintenance.js');
+  const syncPullActiveRefreshSrc = await fetchWithRetry('js/sync-pull-active-refresh.js');
+  const syncPullRebroadcastSrc = await fetchWithRetry('js/sync-pull-rebroadcast.js');
   const syncPullSrc = await fetchWithRetry('js/sync-pull.js');
   const syncSubscriptionsSrc = await fetchWithRetry('js/sync-subscriptions.js');
   const syncWindowBindingsSrc = await fetchWithRetry('js/sync-window-bindings.js');
@@ -80,7 +84,7 @@ await import('../js/settings.js');
   const stylesSrc = await fetchWithRetry('styles.css');
   const themeExtraSrc = await fetchWithRetry('themes-extra.css');
   const serviceWorkerSrc = await fetchWithRetry('service-worker.js');
-  const deltaSearchSrc = `${syncSrc}\n${syncPushSrc}\n${syncPushDeltasSrc}\n${syncReconcileSrc}\n${syncPullSrc}\n${syncPullMergeSrc}\n${syncCutoverSrc}\n${syncDeltaSrc}\n${syncDeltaPlannersSrc}\n${syncDeltaSnapshotSrc}\n${syncDeltaMergeSrc}\n${syncDeltaMergeShapesSrc}\n${syncDeltaRegistrySrc}\n${syncDeltaObservabilitySrc}\n${syncDiagnosticsSrc}\n${syncDiagnoseActionsSrc}\n${syncDiagnoseActionsContextSrc}\n${syncDiagnoseRelayActionsSrc}\n${syncDiagnoseIdentityActionsSrc}\n${syncDiagnoseCutoverActionsSrc}\n${syncDiagnoseUiSrc}\n${syncWindowBindingsSrc}`;
+  const deltaSearchSrc = `${syncSrc}\n${syncPushSrc}\n${syncPushDeltasSrc}\n${syncReconcileSrc}\n${syncPullSrc}\n${syncPullMergeSrc}\n${syncPullMaintenanceSrc}\n${syncPullActiveRefreshSrc}\n${syncPullRebroadcastSrc}\n${syncCutoverSrc}\n${syncDeltaSrc}\n${syncDeltaPlannersSrc}\n${syncDeltaSnapshotSrc}\n${syncDeltaMergeSrc}\n${syncDeltaMergeShapesSrc}\n${syncDeltaRegistrySrc}\n${syncDeltaObservabilitySrc}\n${syncDiagnosticsSrc}\n${syncDiagnoseActionsSrc}\n${syncDiagnoseActionsContextSrc}\n${syncDiagnoseRelayActionsSrc}\n${syncDiagnoseIdentityActionsSrc}\n${syncDiagnoseCutoverActionsSrc}\n${syncDiagnoseUiSrc}\n${syncWindowBindingsSrc}`;
   const exportBlockIncludes = (src, names) => [...src.matchAll(/export\s+\{([^}]*)\};/g)]
     .some(([, block]) => names.every(name => new RegExp(`\\b${name}\\b`).test(block)));
 
@@ -423,6 +427,9 @@ await import('../js/settings.js');
       && syncPullSrc.includes('export function forcePull')
       && syncPullSrc.includes('export function isSyncPulling')
       && syncPullSrc.includes('export function clearSyncPullTimers')
+      && syncPullSrc.includes("from './sync-pull-maintenance.js'")
+      && syncPullSrc.includes("from './sync-pull-active-refresh.js'")
+      && syncPullSrc.includes("from './sync-pull-rebroadcast.js'")
       && syncSrc.includes('configureSyncPull({'));
   assert('service worker precaches sync-pull.js',
     serviceWorkerSrc.includes("'/js/sync-pull.js'"));
@@ -435,6 +442,26 @@ await import('../js/settings.js');
       && syncPullMergeSrc.includes('export async function mergePulledProfile'));
   assert('service worker precaches sync-pull-merge.js',
     serviceWorkerSrc.includes("'/js/sync-pull-merge.js'"));
+  assert('sync-pull-maintenance.js owns pull-path one-time cleanup',
+    syncPullMaintenanceSrc.includes('export function clearStaleSyncHashKeysOnce')
+      && syncPullMaintenanceSrc.includes('labcharts-sync-hash-v2-migrated')
+      && syncPullMaintenanceSrc.includes("endsWith('-sync-hash')"));
+  assert('service worker precaches sync-pull-maintenance.js',
+    serviceWorkerSrc.includes("'/js/sync-pull-maintenance.js'"));
+  assert('sync-pull-active-refresh.js owns active-profile pull refresh',
+    syncPullActiveRefreshSrc.includes('export function refreshActiveProfileAfterPull')
+      && syncPullActiveRefreshSrc.includes('migrateProfileData(state.importedData)')
+      && syncPullActiveRefreshSrc.includes('window.navigate?.(cat)')
+      && syncPullActiveRefreshSrc.includes("new CustomEvent('labcharts-sync-applied')"));
+  assert('service worker precaches sync-pull-active-refresh.js',
+    serviceWorkerSrc.includes("'/js/sync-pull-active-refresh.js'"));
+  assert('sync-pull-rebroadcast.js owns pull-side rebroadcast scheduling',
+    syncPullRebroadcastSrc.includes('export function maybeScheduleRebroadcast')
+      && syncPullRebroadcastSrc.includes('consumeRebroadcastBudget(profileId)')
+      && syncPullRebroadcastSrc.includes("getSyncStatus().push === 'pending'")
+      && syncPullRebroadcastSrc.includes('setTimeout(() => {'));
+  assert('service worker precaches sync-pull-rebroadcast.js',
+    serviceWorkerSrc.includes("'/js/sync-pull-rebroadcast.js'"));
   assert('sync-subscriptions.js owns Evolu subscription and polling helpers',
     syncSrc.includes("from './sync-subscriptions.js'")
       && syncSubscriptionsSrc.includes('export function configureSyncSubscriptions')
@@ -520,10 +547,51 @@ await import('../js/settings.js');
   assert('sync-schema.js declares a tombstoneQuery selecting isDeleted = 1 rows',
     /tombstoneQuery\s*=\s*evolu\.createQuery[\s\S]{0,300}isDeleted[",\s]+=[",\s]+1/.test(syncSchemaSrc));
   assert('tombstoneQuery subscription retriggers onSyncReceived',
-    /evolu\.subscribeQuery\(tombstoneQuery\)\([\s\S]{0,250}_onSyncReceived\(\)/.test(syncSubscriptionsSrc));
-  assert('poll safety tracks tombstone count as well as live rows',
-    syncSubscriptionsSrc.includes('_lastPollTombstoneCount')
-      && /getQueryRows\(tombstoneQuery\)[\s\S]{0,300}tombstoneCount/.test(syncSubscriptionsSrc));
+    /evolu\.subscribeQuery\(tombstoneQuery\)\([\s\S]{0,250}requestSyncReceive/.test(syncSubscriptionsSrc));
+  assert('sync subscriptions defer receive while a push/pull is in-flight',
+    syncSubscriptionsSrc.includes('function requestSyncReceive')
+      && syncSubscriptionsSrc.includes('_pendingReceiveTimer')
+      && /setTimeout\([\s\S]{0,250}requestSyncReceive\('deferred receive'\)/.test(syncSubscriptionsSrc));
+  assert('poll safety tracks row signatures, not just row counts',
+    syncSubscriptionsSrc.includes('_lastPollProfileSignature')
+      && syncSubscriptionsSrc.includes('_lastPollTombstoneSignature')
+      && syncSubscriptionsSrc.includes('function rowsSignature')
+      && syncSubscriptionsSrc.includes('row?.syncedAt'));
+  {
+    syncSubscriptions.clearSyncSubscriptionTimers();
+    let syncing = true;
+    let pulling = false;
+    let received = 0;
+    const profileQuery = { name: 'profiles' };
+    const tombstoneQuery = { name: 'tombstones' };
+    const itemRowQuery = { name: 'itemRows' };
+    const callbacks = new Map();
+    const fakeEvolu = {
+      subscribeQuery(query) {
+        return cb => callbacks.set(query, cb);
+      },
+      subscribeError() {},
+      getQueryRows() { return []; },
+    };
+    syncSubscriptions.configureSyncSubscriptions({
+      isSyncing: () => syncing,
+      isPulling: () => pulling,
+      onSyncReceived: () => { received++; },
+    });
+    syncSubscriptions.bindSyncSubscriptions({ evolu: fakeEvolu, profileQuery, tombstoneQuery, itemRowQuery });
+    callbacks.get(profileQuery)?.();
+    assert('subscription receive is not dropped while syncing', received === 0);
+    syncing = false;
+    await new Promise(r => setTimeout(r, 650));
+    assert('deferred subscription receive runs after syncing clears', received === 1);
+    pulling = true;
+    callbacks.get(itemRowQuery)?.();
+    assert('itemRow receive is deferred while pulling', received === 1);
+    pulling = false;
+    await new Promise(r => setTimeout(r, 650));
+    assert('deferred itemRow receive runs after pulling clears', received === 2);
+    syncSubscriptions.clearSyncSubscriptionTimers();
+  }
   assert('Sync diagnose includes tombstone rows and deleted-state column',
     /tombstoneRows[\s\S]{0,300}isDeleted:\s*true/.test(syncDiagnosticsSrc)
       && syncDiagnoseUiSrc.includes('<th style="padding:4px 8px;text-align:right">deleted</th>'));
@@ -635,6 +703,10 @@ await import('../js/settings.js');
     /confirmCompactRelay\(this\)/.test(syncDiagnoseUiSrc));
   assert('Sync diagnose modal wires the Refresh-from-relay button',
     /refreshRelayStorage\(this\)/.test(syncDiagnoseUiSrc));
+  assert('Sync diagnose relay health is described as local outbound health',
+    syncDiagnoseUiSrc.includes("this device's outbound")
+      && syncDiagnoseUiSrc.includes('This verdict is local/outbound')
+      && syncDiagnoseUiSrc.includes('another device can show healthy or unknown'));
   assert('compactOwnerSelfServe POSTs to /self/compact-owner with HMAC body',
     /compactOwnerSelfServe[\s\S]{0,800}\/self\/compact-owner[\s\S]{0,400}JSON\.stringify\(\{\s*ownerId,\s*timestamp,\s*signature\s*\}\)/.test(syncRelayHealthSrc));
   assert('compactOwnerSelfServe catches fetch rejection before checking response status',
@@ -678,7 +750,7 @@ await import('../js/settings.js');
   assert('itemRowQuery loaded with profileQuery + tombstoneQuery',
     /Promise\.all\(\[[\s\S]{0,400}evolu\.loadQuery\(itemRowQuery\)/.test(syncInitSrc));
   assert('itemRow subscription retriggers onSyncReceived',
-    /evolu\.subscribeQuery\(itemRowQuery\)\([\s\S]{0,200}_onSyncReceived\(\)/.test(syncSubscriptionsSrc));
+    /evolu\.subscribeQuery\(itemRowQuery\)\([\s\S]{0,200}requestSyncReceive/.test(syncSubscriptionsSrc));
 
   // DELTA_ARRAYS list (high-velocity arrays)
   assert('DELTA_ARRAYS includes sunSessions + lightDevices',
@@ -895,8 +967,8 @@ await import('../js/settings.js');
   // v1.7.4: pull re-renders whatever view the user is on, not just dashboard
   // (so a Light & Sun page picks up newly-merged sun sessions immediately
   // instead of just showing a "Data updated" toast).
-  assert('Pull re-renders the active view', syncPullSrc.includes('window.navigate?.(cat)'));
-  assert('Pull calls migrateProfileData', syncPullSrc.includes('migrateProfileData(state.importedData)'));
+  assert('Pull re-renders the active view', syncPullActiveRefreshSrc.includes('window.navigate?.(cat)'));
+  assert('Pull calls migrateProfileData', syncPullActiveRefreshSrc.includes('migrateProfileData(state.importedData)'));
   assert('pushAllProfiles pushes all profiles on first enable',
     syncLifecycleSrc.includes('await pushAllProfiles()') && syncActionsSrc.includes('export async function pushAllProfiles'));
   assert('pushAllProfiles pushes metadata-only profiles with default data',
@@ -1004,15 +1076,20 @@ await import('../js/settings.js');
     syncPullSrc.includes('scheduleChatPullRetry') && syncPullSrc.includes('getChatDataLocalLockRemainingMs(profileId)'));
   assert('active chat reload only runs after chatData is applied',
     syncPullSrc.includes('const chatApplied = chatData ? await applyChatData(profileId, chatData) : false')
-      && syncPullSrc.includes('if (chatApplied)'));
+      && syncPullActiveRefreshSrc.includes('if (chatApplied)'));
   assert('active chat thread is reselected after remote thread deletion',
-    syncPullSrc.includes('window.loadChatThreads?.();') && syncPullSrc.includes('window.ensureActiveThread?.();'));
+    syncPullActiveRefreshSrc.includes('window.loadChatThreads?.();')
+      && syncPullActiveRefreshSrc.includes('window.ensureActiveThread?.();'));
   {
     const prevProfileId = state.currentProfile;
     const profileId = 'syncapplydel';
     const threadsKey = `labcharts-${profileId}-chat-threads`;
     const keepKey = `labcharts-${profileId}-chat-t_keep`;
     const goneKey = `labcharts-${profileId}-chat-t_gone`;
+    const remoteKey = `labcharts-${profileId}-chat-t_remote`;
+    const lockedKeepKey = `labcharts-${profileId}-chat-t_lockedKeep`;
+    const lockedGoneKey = `labcharts-${profileId}-chat-t_lockedGone`;
+    const lockedRemoteKey = `labcharts-${profileId}-chat-t_lockedRemote`;
     const deletedKey = `labcharts-${profileId}-chat-deleted-threads`;
     const oldLock = sessionStorage.getItem('labcharts-chat-local-lock-until');
     const oldDeleted = localStorage.getItem(deletedKey);
@@ -1043,11 +1120,48 @@ await import('../js/settings.js');
       assert('applyChatData functional: explicit remote tombstone removes deleted thread message key',
         localStorage.getItem(goneKey) === null
           && !JSON.parse(localStorage.getItem(threadsKey) || '[]').some(t => t.id === 'gone'));
+
+      sessionStorage.setItem('labcharts-chat-local-lock-until', String(Date.now() + 90000));
+      localStorage.setItem(threadsKey, JSON.stringify([
+        { id: 'empty', name: 'New Conversation', messageCount: 0, updatedAt: '2026-05-24T10:10:00.000Z' },
+      ]));
+      const emptyShellApplied = await syncApply.applyChatData(profileId, {
+        threads: [{ id: 'remote', messageCount: 1, updatedAt: '2026-05-24T10:15:00.000Z' }],
+        messages: { remote: [{ role: 'user', content: 'from device A' }] },
+      });
+      assert('applyChatData functional: empty local thread shell does not block remote chat under lock',
+        emptyShellApplied === true
+          && JSON.parse(localStorage.getItem(remoteKey) || '[]')?.[0]?.content === 'from device A');
+
+      localStorage.setItem(threadsKey, JSON.stringify([
+        { id: 'lockedKeep', messageCount: 1, updatedAt: '2026-05-24T10:20:00.000Z' },
+        { id: 'lockedGone', messageCount: 1, updatedAt: '2026-05-24T10:20:00.000Z' },
+      ]));
+      localStorage.setItem(lockedKeepKey, JSON.stringify([{ role: 'user', content: 'local keep' }]));
+      localStorage.setItem(lockedGoneKey, JSON.stringify([{ role: 'user', content: 'local delete' }]));
+      const lockedDeleteApplied = await syncApply.applyChatData(profileId, {
+        threads: [{ id: 'lockedRemote', messageCount: 1, updatedAt: '2026-05-24T10:40:00.000Z' }],
+        messages: { lockedRemote: [{ role: 'assistant', content: 'held while local lock is active' }] },
+        deletedThreads: { lockedGone: Date.parse('2026-05-24T10:30:00.000Z') },
+      });
+      const lockedThreads = JSON.parse(localStorage.getItem(threadsKey) || '[]');
+      assert('applyChatData functional: remote tombstone applies even while local chat lock is active',
+        lockedDeleteApplied === true
+          && localStorage.getItem(lockedGoneKey) === null
+          && !lockedThreads.some(t => t.id === 'lockedGone'));
+      assert('applyChatData functional: local chat lock still blocks non-delete remote thread merge',
+        lockedThreads.some(t => t.id === 'lockedKeep')
+          && !lockedThreads.some(t => t.id === 'lockedRemote')
+          && localStorage.getItem(lockedRemoteKey) === null);
     } finally {
       state.currentProfile = prevProfileId;
       localStorage.removeItem(threadsKey);
       localStorage.removeItem(keepKey);
       localStorage.removeItem(goneKey);
+      localStorage.removeItem(remoteKey);
+      localStorage.removeItem(lockedKeepKey);
+      localStorage.removeItem(lockedGoneKey);
+      localStorage.removeItem(lockedRemoteKey);
       if (oldDeleted === null) localStorage.removeItem(deletedKey);
       else localStorage.setItem(deletedKey, oldDeleted);
       if (oldLock === null) sessionStorage.removeItem('labcharts-chat-local-lock-until');
@@ -2264,9 +2378,9 @@ await import('../js/settings.js');
   // populate scalars/maps that localHasRowsRemoteLacks() misses (it only
   // diffs id-keyed arrays in the blob). Without this the user must
   // refresh the page to see a Genetics nav entry land from a peer's DNA
-  // import. Lives in onSyncReceived's active-profile post-merge block.
+  // import. Lives in sync-pull-active-refresh.js's active-profile post-merge block.
   assert('onSyncReceived rebuilds sidebar after every pull (catches nav items gated on per-row data)',
-    /profileId\s*===\s*state\.currentProfile[\s\S]{0,2000}window\.buildSidebar[\s\S]{0,200}remoteBroughtNewRows/.test(deltaSearchSrc));
+    /profileId\s*!==\s*state\.currentProfile[\s\S]{0,2000}window\.buildSidebar[\s\S]{0,400}remoteBroughtNewRows/.test(deltaSearchSrc));
 
   // Live: simulate the strip helper inline and prove shape preservation
   if (typeof window !== 'undefined') {
