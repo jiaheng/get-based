@@ -233,14 +233,14 @@ return (async function () {
     window._aiConcurrencyCap = _origAICap;
   }
 
-  // ─── 5. sync-payload.js collectChatData — per-thread try/catch ─────────────
+  // ─── 5. sync-payload-collectors.js collectChatData — per-thread try/catch ─
   // Static check: the inner JSON.parse must be wrapped, otherwise one
   // corrupt thread silently nukes the entire chat-data collection
   // through the outer `try { … } catch { return null; }`.
   console.log('%c 5. collectChatData per-thread try/catch ', 'font-weight:bold;color:#0891b2');
   {
-    const src = await fetchSrc('js/sync-payload.js');
-    assert('sync-payload.js loaded', src.length > 1000);
+    const src = await fetchSrc('js/sync-payload-collectors.js');
+    assert('sync-payload-collectors.js loaded', src.length > 1000);
     // Find the inner loop that reads per-thread message JSON.
     const collectIdx = src.indexOf('async function collectChatData');
     const block = src.slice(collectIdx, collectIdx + 2200);
@@ -249,6 +249,9 @@ return (async function () {
       /try\s*\{\s*messages\[t\.id\]\s*=\s*JSON\.parse\(msgRaw\);?\s*\}\s*catch/.test(block));
     assert('inner loop continues on missing msgRaw',
       /if\s*\(!msgRaw\)\s*\{[\s\S]{0,160}continue;?\s*\}/.test(block));
+    assert('custom personalities parse is isolated from chat collection',
+      /function parseCustomPersonalities[\s\S]{0,180}try\s*\{\s*return JSON\.parse\(raw\);?\s*\}\s*catch/.test(src)
+        && /customPersonalities\s*=\s*parseCustomPersonalities\(customRaw\)/.test(block));
   }
 
   // ─── 6. sync.js debounce push — .catch() on rejected push ──────────
