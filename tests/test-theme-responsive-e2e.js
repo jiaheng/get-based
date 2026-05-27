@@ -385,9 +385,11 @@ async function evaluateBaseChecks(page, theme, viewport) {
       const fab = document.querySelector('.m-chat-fab');
       const desktopChatFab = document.getElementById('chat-fab');
       ok('mobile dashboard shell is active', document.body.classList.contains('mobile-dashboard-active'));
+      ok('mobile chrome root mirrors dashboard state', document.documentElement.classList.contains('mobile-dashboard-active'));
       ok('mobile shell is visible', visible(shell));
       ok('mobile tabbar is visible', visible(tabbar));
       ok('mobile tabbar is contained in viewport', tabbar && inViewport(tabbar, 2));
+      ok('mobile dashboard tabbar is outside clipped shell', tabbar && !tabbar.closest('.m-shell'));
       ok('mobile chat FAB is visible and above tabbar', visible(fab) && tabbar && rect(fab).bottom < rect(tabbar).top);
       ok('desktop chat FAB hidden inside mobile shell', !visible(desktopChatFab));
       ok('donate button hidden on mobile', !visible(document.querySelector('.donate-btn')));
@@ -702,6 +704,73 @@ async function checkMobileInteractions(page, theme, viewportName) {
   await page.evaluate(() => window.closeMobileSidebar?.());
   await delay(100);
 
+  result = await page.evaluate(() => {
+    const root = document.documentElement;
+    const tabbar = document.querySelector('.m-tabbar');
+    const before = tabbar?.getBoundingClientRect();
+    root.style.setProperty('--mobile-visual-bottom-offset', '48px');
+    const shifted = tabbar?.getBoundingClientRect();
+    root.style.removeProperty('--mobile-visual-bottom-offset');
+    return {
+      rootDashboardActive: root.classList.contains('mobile-dashboard-active'),
+      tabbarOutsideShell: !!tabbar && !tabbar.closest('.m-shell'),
+      movedUp: !!before && !!shifted && before.bottom - shifted.bottom >= 47,
+    };
+  });
+  assert(testName(theme, viewportName, 'mobile nav respects visual viewport offset'),
+    result.rootDashboardActive && result.tabbarOutsideShell && result.movedUp,
+    JSON.stringify(result));
+
+  await page.evaluate(() => window.openTweaksPanel?.());
+  await delay(150);
+  result = await page.evaluate((theme) => {
+    const panel = document.getElementById('tweaks-panel');
+    const overlay = document.getElementById('tweaks-panel-overlay');
+    const r = panel?.getBoundingClientRect();
+    const body = panel?.querySelector('.tweaks-body');
+    const bodyRect = body?.getBoundingClientRect();
+    const viewportWidth = document.documentElement.clientWidth;
+    const shadowRightReach = (boxShadow) => {
+      const lengths = String(boxShadow || '').match(/-?\d+(?:\.\d+)?px/g)?.map(v => Number(v.replace('px', ''))) || [];
+      let reach = 0;
+      for (let i = 0; i < lengths.length; i += 4) {
+        const offsetX = lengths[i] || 0;
+        const blur = lengths[i + 2] || 0;
+        const spread = lengths[i + 3] || 0;
+        reach = Math.max(reach, offsetX + Math.max(0, blur + spread));
+      }
+      return reach;
+    };
+    const panelStyle = panel ? getComputedStyle(panel) : null;
+    const rightShadowReach = shadowRightReach(panelStyle?.boxShadow);
+    const terminalTweakTheme = theme === 'cyberterm' || theme === 'neuromancer';
+    const overflowingChildren = panel
+      ? Array.from(panel.querySelectorAll('*')).filter(child => {
+        const childRect = child.getBoundingClientRect();
+        return childRect.left < -1 || childRect.right > viewportWidth + 1;
+      }).length
+      : -1;
+    return {
+      open: !!panel && overlay?.classList.contains('show'),
+      contained: !!r && r.left >= -1 && r.right <= viewportWidth + 1 && r.top >= -1 && r.bottom <= window.innerHeight + 1,
+      leftGutter: r ? r.left : -1,
+      rightGutter: r ? viewportWidth - r.right : -1,
+      bodyContained: !!r && !!bodyRect && bodyRect.left >= r.left - 1 && bodyRect.right <= r.right + 1 && bodyRect.bottom <= r.bottom + 1,
+      bodyScrollLocked: document.body.style.overflow === 'hidden',
+      horizontalOverflow: Math.max(document.body.scrollWidth, document.documentElement.scrollWidth) - viewportWidth,
+      overflowingChildren,
+      rightShadowReach,
+      terminalShadowContained: !terminalTweakTheme || (!!r && r.right + rightShadowReach <= viewportWidth + 1),
+    };
+  }, theme);
+  assert(testName(theme, viewportName, 'mobile tweaks panel fits viewport'),
+    result.open && result.contained && result.leftGutter >= 12 && result.rightGutter >= 12 &&
+      result.bodyContained && result.bodyScrollLocked && result.horizontalOverflow <= 1 &&
+      result.overflowingChildren === 0 && result.terminalShadowContained,
+    JSON.stringify(result));
+  await page.evaluate(() => window.closeTweaksPanel?.());
+  await delay(100);
+
   const quickMarker = await page.$('.m-dashboard-widgets .dashboard-widget[data-widget-id="quick-markers"] .db-quick-marker-tile');
   assert(testName(theme, viewportName, 'mobile has tappable widget marker'), !!quickMarker);
   if (quickMarker) {
@@ -714,10 +783,13 @@ async function checkMobileInteractions(page, theme, viewportName) {
       return {
         open: overlay.classList.contains('show'),
         contained: r.left >= -1 && r.right <= window.innerWidth + 1 && r.top >= -1 && r.bottom <= window.innerHeight + 1,
+        sideGutters: r.left >= 12 && window.innerWidth - r.right >= 12,
       };
     });
     assert(testName(theme, viewportName, 'mobile widget marker opens marker modal'), result.open, JSON.stringify(result));
-    assert(testName(theme, viewportName, 'mobile marker modal fits phone viewport'), result.contained, JSON.stringify(result));
+    assert(testName(theme, viewportName, 'mobile marker modal fits phone viewport'),
+      result.contained && result.sideGutters,
+      JSON.stringify(result));
     await page.evaluate(() => window.closeModal?.());
     await delay(100);
   }
@@ -734,14 +806,43 @@ async function checkMobileInteractions(page, theme, viewportName) {
         { timeout: 2500 }
       ).catch(() => {});
     }
-    result = await page.evaluate((tab) => {
+    result = await page.evaluate((tab, theme) => {
       const active = document.querySelector(`#mobile-bottom-tabs .m-tab[data-tab="${tab}"], .m-tabbar .m-tab[data-tab="${tab}"]`);
       const conditionsGrid = document.querySelector('.lens-page-widgets[data-lens-route="light"] .conditions-now-grid') || document.querySelector('.conditions-now-grid');
       const supportColumns = conditionsGrid
         ? getComputedStyle(conditionsGrid).gridTemplateColumns.split(' ').filter(Boolean).length
         : 0;
+      const shadowReach = (boxShadow) => {
+        const lengths = String(boxShadow || '').match(/-?\d+(?:\.\d+)?px/g)?.map(v => Number(v.replace('px', ''))) || [];
+        const reach = { left: 0, right: 0 };
+        for (let i = 0; i < lengths.length; i += 4) {
+          const offsetX = lengths[i] || 0;
+          const blur = lengths[i + 2] || 0;
+          const spread = lengths[i + 3] || 0;
+          const extent = Math.max(0, blur + spread);
+          reach.left = Math.max(reach.left, -offsetX + extent);
+          reach.right = Math.max(reach.right, offsetX + extent);
+        }
+        return reach;
+      };
+      const tabbar = document.querySelector('.m-tabbar');
+      const tabbarStyle = tabbar ? getComputedStyle(tabbar) : null;
+      const tabbarRect = tabbar?.getBoundingClientRect();
+      const fab = document.querySelector('.m-chat-fab');
+      const fabStyle = fab ? getComputedStyle(fab) : null;
+      const fabRect = fab?.getBoundingClientRect();
       const lightWidgetRoute = document.querySelector('.lens-page-widgets[data-lens-route="light"]');
       const viewportWidth = document.documentElement.clientWidth;
+      const tabbarPaint = shadowReach(tabbarStyle?.boxShadow);
+      const fabPaint = shadowReach(fabStyle?.boxShadow);
+      const terminalTheme = theme === 'cyberterm' || theme === 'neuromancer';
+      window.scrollTo(0, Math.min(620, document.scrollingElement.scrollHeight));
+      const header = document.querySelector('.header');
+      const headerStyle = header ? getComputedStyle(header) : null;
+      const headerRect = header?.getBoundingClientRect();
+      const tabbarAfterY = tabbar?.getBoundingClientRect();
+      window.scrollTo(80, window.scrollY);
+      const tabbarAfterX = tabbar?.getBoundingClientRect();
       const sessionWidget = document.querySelector('.dashboard-widget[data-widget-id="light-sessions"]');
       const sessionRows = Array.from(sessionWidget?.querySelectorAll('.sun-session') || []);
       const overflowingSessionRows = sessionRows.filter(row => {
@@ -757,7 +858,40 @@ async function checkMobileInteractions(page, theme, viewportName) {
         hasBottomTabs: !!document.querySelector('#mobile-bottom-tabs, .m-shell .m-tabbar'),
         currentView: window._labState?.currentView,
         visibleMain: document.getElementById('main-content')?.textContent?.trim().length > 40,
+        rootTabsActive: document.documentElement.classList.contains('mobile-tabs-active'),
+        headerSticky:
+          headerStyle?.position === 'sticky' &&
+          !!headerRect &&
+          Math.abs(headerRect.top) <= 1 &&
+          headerRect.bottom >= 56 &&
+          getComputedStyle(document.body).overflowX === 'visible',
+        tabbarOutsideShell: !!tabbar && !tabbar.closest('.m-shell'),
+        tabbarFixed: tabbarStyle?.position === 'fixed',
+        tabbarContained: !!tabbarRect && tabbarRect.left >= -1 && tabbarRect.right <= viewportWidth + 1,
+        tabbarStable:
+          !!tabbarRect &&
+          !!tabbarAfterY &&
+          !!tabbarAfterX &&
+          Math.abs(tabbarAfterY.top - tabbarRect.top) <= 1 &&
+          Math.abs(tabbarAfterX.left - tabbarRect.left) <= 1,
+        bottomChromePaintContained: !terminalTheme || (
+          !!tabbarRect &&
+          tabbarRect.left - tabbarPaint.left >= -1 &&
+          tabbarRect.right + tabbarPaint.right <= viewportWidth + 1 &&
+          (!fabRect || (
+            fabRect.left - fabPaint.left >= -1 &&
+            fabRect.right + fabPaint.right <= viewportWidth + 1
+          ))
+        ),
+        tabbarPaint,
+        fabPaint,
         lightWidgetRoute: !!lightWidgetRoute,
+        pageSurfaceGutters: (() => {
+          const surface = document.querySelector('.lens-page-widgets .dashboard-widget, .category-header, #recommendations-page');
+          if (!surface) return true;
+          const sr = surface.getBoundingClientRect();
+          return sr.left >= 12 && viewportWidth - sr.right >= 12;
+        })(),
         lightWidgetCount: lightWidgetRoute?.querySelectorAll('.dashboard-widget[data-widget-id^="light-"]').length || 0,
         lightMoveControls: lightWidgetRoute?.querySelectorAll('.dashboard-widget-tool[aria-label^="Move page section"]').length || 0,
         lightSeparatedOps: !!document.querySelector('.dashboard-widget[data-widget-id="light-conditions-now"] .light-conditions-now-wrap')
@@ -774,20 +908,74 @@ async function checkMobileInteractions(page, theme, viewportName) {
           getComputedStyle(sessionWidget.querySelector('.light-session-device .light-session-kind')).whiteSpace !== 'nowrap',
         supportColumns,
       };
-    }, tab);
+    }, tab, theme);
     assert(testName(theme, viewportName, `tab ${tab} navigates and stays active`),
       result.active && result.hasBottomTabs && result.visibleMain,
       JSON.stringify(result));
-	    if (tab === 'light') {
-		      assert(testName(theme, viewportName, 'light page uses separate mobile operation widgets'),
-		        result.lightWidgetRoute && result.lightWidgetCount >= 3 && result.lightMoveControls >= 1 &&
-		          result.lightSeparatedOps && result.lightDashboardToggles && result.supportColumns >= 3,
-		        JSON.stringify(result));
-		      assert(testName(theme, viewportName, 'light sessions fit mobile viewport'),
-		        result.lightSessionRows >= 3 && result.lightSessionOverflow === 0 &&
-		          result.horizontalOverflow <= 1 && result.longDeviceKindWraps,
-		        JSON.stringify(result));
+    assert(testName(theme, viewportName, `tab ${tab} keeps mobile nav fixed and clipped`),
+      result.rootTabsActive && result.tabbarOutsideShell &&
+        result.tabbarFixed && result.tabbarContained && result.tabbarStable &&
+        result.horizontalOverflow <= 1 && result.bottomChromePaintContained,
+      JSON.stringify(result));
+    assert(testName(theme, viewportName, `tab ${tab} keeps top header sticky`),
+      result.headerSticky,
+      JSON.stringify(result));
+    assert(testName(theme, viewportName, `tab ${tab} keeps page surfaces inset`),
+      result.pageSurfaceGutters,
+      JSON.stringify(result));
+    if (tab === 'light') {
+      assert(testName(theme, viewportName, 'light page uses separate mobile operation widgets'),
+        result.lightWidgetRoute && result.lightWidgetCount >= 3 && result.lightMoveControls >= 1 &&
+          result.lightSeparatedOps && result.lightDashboardToggles && result.supportColumns >= 3,
+        JSON.stringify(result));
+      assert(testName(theme, viewportName, 'light sessions fit mobile viewport'),
+        result.lightSessionRows >= 3 && result.lightSessionOverflow === 0 &&
+          result.horizontalOverflow <= 1 && result.longDeviceKindWraps,
+        JSON.stringify(result));
     }
+  }
+
+  await page.evaluate(() => {
+    window.scrollTo(0, 0);
+    window.showCategory?.('biochemistry');
+  });
+  await page.waitForSelector('.category-header');
+  for (const view of ['table', 'heatmap']) {
+    await page.evaluate((view) => {
+      const btns = document.querySelectorAll('.view-toggle .view-btn');
+      const btn = btns[view === 'table' ? 1 : 2];
+      window.switchView?.(view, 'biochemistry', btn);
+      window.scrollTo(0, 0);
+    }, view);
+    await page.waitForSelector(`.gb-table-shell-${view === 'table' ? 'data' : 'heatmap'} .gb-table-sticky-head`);
+    await delay(120);
+    result = await page.evaluate(() => {
+      const maxScroll = Math.max(0, document.scrollingElement.scrollHeight - window.innerHeight);
+      window.scrollTo(0, Math.min(560, maxScroll));
+      const headerRect = document.querySelector('.header')?.getBoundingClientRect();
+      const stickyHead = document.querySelector('.gb-table-sticky-head');
+      const stickyRect = stickyHead?.getBoundingClientRect();
+      const stickyCellRect = stickyHead?.querySelector('th')?.getBoundingClientRect();
+      const realHeadRect = document.querySelector('.data-table-wrapper thead, .heatmap-wrapper thead')?.getBoundingClientRect();
+      const viewportWidth = document.documentElement.clientWidth;
+      return {
+        scrolled: window.scrollY > 120,
+        topHeaderSticky: !!headerRect && Math.abs(headerRect.top) <= 1 && headerRect.bottom >= 56,
+        stickyHeadVisible:
+          !!headerRect &&
+          !!stickyRect &&
+          !!stickyCellRect &&
+          stickyRect.top >= headerRect.bottom - 1 &&
+          stickyRect.top <= headerRect.bottom + 4 &&
+          stickyCellRect.bottom > headerRect.bottom + 20,
+        realHeadScrolledAway: !!realHeadRect && realHeadRect.bottom < headerRect.bottom,
+        horizontalOverflow: Math.max(document.body.scrollWidth, document.documentElement.scrollWidth) - viewportWidth,
+      };
+    });
+    assert(testName(theme, viewportName, `category ${view} header sticks below top header`),
+      result.scrolled && result.topHeaderSticky && result.stickyHeadVisible &&
+        result.realHeadScrolledAway && result.horizontalOverflow <= 1,
+      JSON.stringify(result));
   }
 }
 
