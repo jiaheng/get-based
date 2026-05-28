@@ -300,11 +300,16 @@ const {
   window._labState.importedData.lightMeasurements.push({
     id: 'lm_x', tool: 'lux', value: 200, capturedAt: Date.now(),
     roomId: getEnvironment().rooms[0].id,
+  }, {
+    id: 'lm_unmapped', tool: 'cct', value: 5000, capturedAt: Date.now(),
+    roomId: null,
   });
 
   const audit = await saveLightAudit('Initial baseline');
   assert('saveLightAudit returns the audit object', audit && audit.id);
   assert('Audit captures label', audit.label === 'Initial baseline');
+  assert('Audit snapshots only room-mapped measurements',
+    audit.measurements.length === 1 && audit.measurements[0].id === 'lm_x');
   assert('Audit appears in getLightAudits',
     getLightAudits().some(a => a.id === audit.id));
 
@@ -341,7 +346,11 @@ const {
     envSrc.includes('Save audit snapshots before and after changes') &&
     !envSrc.includes('The Light page keeps the summary'));
   const navSrc = await (await import('node:fs/promises')).readFile(new URL('../js/nav.js', import.meta.url), 'utf8');
-  const cssSrc = await (await import('node:fs/promises')).readFile(new URL('../css/light-sun.css', import.meta.url), 'utf8');
+  const fs = await import('node:fs/promises');
+  const cssSrc = [
+    await fs.readFile(new URL('../css/light-sun.css', import.meta.url), 'utf8'),
+    await fs.readFile(new URL('../css/light-env.css', import.meta.url), 'utf8'),
+  ].join('\n');
   assert('Light assessment is linked from sidebar Analysis tools',
     navSrc.includes("label: 'Light assessment'") &&
     navSrc.includes("key: 'light-env-assessment'") &&
@@ -377,13 +386,83 @@ const {
     emptyAssessmentHtml.includes('📱 Phone') &&
     !emptyAssessmentHtml.includes('+ Bedroom') &&
     !emptyAssessmentHtml.includes('+ 📱 Phone'));
+  window._labState.importedData = {
+    lightEnvironment: { rooms: [{ id: 'mapped-room', name: 'Bedroom' }], screens: [] },
+    lightMeasurements: [
+      { id: 'unmapped-reading', tool: 'lux', roomId: null, value: 50, takenAt: Date.now() },
+      { id: 'stale-room-reading', tool: 'cct', roomId: 'deleted-room', value: 5000, takenAt: Date.now() },
+    ],
+    lightAudits: [],
+  };
+  const unmappedSummaryHtml = renderEnvironmentAssessmentSummary();
+  const unmappedAssessmentHtml = renderEnvironmentSection({ embedded: true });
+  assert('Assessment summary counts only readings mapped to existing rooms',
+    /light-env-assessment-metric-label">Readings<\/span>\s*<strong>0<\/strong>/.test(unmappedSummaryHtml));
+  assert('Assessment workspace hides unmapped portable readings',
+    !unmappedAssessmentHtml.includes('Portable readings') &&
+    !unmappedAssessmentHtml.includes('not matched to a room'));
   window._labState.importedData = beforeEmptyAssessment;
+
+  const beforeDisclosureState = window._labState.importedData;
+  const beforeDisclosureView = window._labState.currentView;
+  let savedActiveRoom = null;
+  try { savedActiveRoom = localStorage.getItem('labcharts-light-env-active-room'); localStorage.removeItem('labcharts-light-env-active-room'); } catch (_) {}
+  window._labState.currentView = 'dashboard';
+  window._labState.importedData = {
+    lightEnvironment: { rooms: [{ id: 'room_single', name: 'Bedroom', hoursOccupiedPerDay: 8 }], screens: [] },
+    lightMeasurements: [],
+  };
+  const singleRoomInitial = renderEnvironmentSection({ embedded: true });
+  assert('Single room auto-expands on first render',
+    singleRoomInitial.includes('aria-expanded="true"') &&
+    singleRoomInitial.includes('light-env-room-disclosure-body'));
+  window.toggleLightEnvRoomExpanded('room_single');
+  const singleRoomCollapsed = renderEnvironmentSection({ embedded: true });
+  assert('Single room can be explicitly collapsed',
+    singleRoomCollapsed.includes('aria-expanded="false"') &&
+    !singleRoomCollapsed.includes('light-env-room-disclosure-body'));
+  window.toggleLightEnvRoomExpanded('room_single');
+  const singleRoomExpandedAgain = renderEnvironmentSection({ embedded: true });
+  assert('Single room expands again after explicit collapse',
+    singleRoomExpandedAgain.includes('aria-expanded="true"') &&
+    singleRoomExpandedAgain.includes('light-env-room-disclosure-body'));
+  window._labState.importedData = beforeDisclosureState;
+  window._labState.currentView = beforeDisclosureView;
+  try {
+    if (savedActiveRoom === null) localStorage.removeItem('labcharts-light-env-active-room');
+    else localStorage.setItem('labcharts-light-env-active-room', savedActiveRoom);
+  } catch (_) {}
+
+  const beforeScreenToggleState = window._labState.importedData;
+  const beforeScreenToggleView = window._labState.currentView;
+  const beforeNavigate = window.navigate;
+  let screenNavCall = null;
+  let screenPrevented = false;
+  let screenStopped = false;
+  window._labState.currentView = 'light';
+  window.navigate = (route, data) => { screenNavCall = { route, data }; };
+  window._labState.importedData = {
+    lightEnvironment: { rooms: [], screens: [{ id: 'screen_single', device: 'phone', roomId: null }] },
+    lightMeasurements: [],
+  };
+  window.toggleLightEnvScreenExpanded('screen_single', {
+    preventDefault() { screenPrevented = true; },
+    stopPropagation() { screenStopped = true; },
+  });
+  assert('Screen disclosure toggles prevent bubbling/default navigation side effects',
+    screenPrevented && screenStopped);
+  assert('Screen disclosure refresh pins scroll to the screen card',
+    screenNavCall?.route === 'light' &&
+    screenNavCall?.data?.scrollAnchor === '.light-env-screen-card[data-id="screen_single"]',
+    JSON.stringify(screenNavCall));
+  window.navigate = beforeNavigate;
+  window._labState.currentView = beforeScreenToggleView;
+  window._labState.importedData = beforeScreenToggleState;
 
   // ─── deleteRoom orphan cleanup ─────────────────────────────────────
   // Earlier deleteRoom dropped the room but left measurements + screens
-  // pointing at the dead id. Now those references null out so the
-  // measurements stay accessible (per the confirm-dialog promise) and
-  // can be re-associated with a new room.
+  // pointing at the dead id. Room-bound measurements are now deleted
+  // with the room; screens are kept but become portable.
   console.log('%c deleteRoom orphan cleanup ', 'font-weight:bold;color:#f59e0b');
   window._labState.importedData = {
     lightEnvironment: {
@@ -398,8 +477,8 @@ const {
   await deleteRoom('r-orphan');
   const measurementsAfter = window._labState.importedData.lightMeasurements;
   const screensAfter = window._labState.importedData.lightEnvironment.screens;
-  assert('deleteRoom nulls roomId on linked measurements',
-    measurementsAfter.find(m => m.id === 'm-orphan-1').roomId === null);
+  assert('deleteRoom removes linked measurements',
+    !measurementsAfter.find(m => m.id === 'm-orphan-1'));
   assert('deleteRoom leaves measurements pointing at OTHER rooms untouched',
     measurementsAfter.find(m => m.id === 'm-orphan-2').roomId === 'other-room');
   assert('deleteRoom nulls roomId on linked screens',
