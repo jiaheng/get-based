@@ -22,7 +22,7 @@ function fetchSrc(rel) {
   try { return fs.readFileSync(path.join(ROOT, rel.replace(/^\//, '')), 'utf-8'); }
   catch (_) { return ''; }
 }
-const CSS_FILES = ['styles.css', 'css/app-shell.css', 'css/import.css', 'css/emf.css', 'css/modal-shared.css', 'css/dashboard-core.css', 'css/dashboard-widgets.css', 'css/dashboard-welcome.css', 'css/dashboard-data.css', 'css/category-views.css', 'css/context-profile.css', 'css/genetics.css', 'css/data-protection.css', 'css/settings.css', 'css/mobile-dashboard.css', 'css/cycle.css', 'css/marker-detail-modal.css', 'css/recommendations.css', 'css/client-list.css', 'css/wearables.css', 'css/light-sun.css', 'css/light-channels.css', 'css/light-conditions-now.css', 'css/light-setup.css', 'css/light-tools.css', 'css/light-env.css', 'css/chat-panel.css', 'css/chat-personality.css', 'css/chat-messages.css', 'css/chat-composer.css', 'css/chat-onboarding.css', 'css/chat-responsive.css', 'css/chat-actions.css', 'css/chat-mobile.css', 'css/redesign-shell.css', 'css/chat-redesign.css'];
+const CSS_FILES = ['styles.css', 'css/app-shell.css', 'css/import.css', 'css/emf.css', 'css/modal-shared.css', 'css/dashboard-core.css', 'css/dashboard-widgets.css', 'css/dashboard-welcome.css', 'css/dashboard-data.css', 'css/category-views.css', 'css/context-profile.css', 'css/genetics.css', 'css/data-protection.css', 'css/settings.css', 'css/mobile-dashboard.css', 'css/cycle.css', 'css/marker-detail-modal.css', 'css/recommendations.css', 'css/client-list.css', 'css/wearables.css', 'css/light-sun.css', 'css/light-channels.css', 'css/light-devices.css', 'css/light-conditions-now.css', 'css/light-setup.css', 'css/light-tools.css', 'css/light-env.css', 'css/chat-panel.css', 'css/chat-personality.css', 'css/chat-messages.css', 'css/chat-composer.css', 'css/chat-onboarding.css', 'css/chat-responsive.css', 'css/chat-actions.css', 'css/chat-mobile.css', 'css/redesign-shell.css', 'css/chat-redesign.css'];
 function fetchCssSrc() { return CSS_FILES.map(fetchSrc).join('\n'); }
 
 console.log('=== v1.6.7–v1.6.16 Regression Tests ===\n');
@@ -81,8 +81,8 @@ const _origProfileSex = window._labState ? window._labState.profileSex : null;
     // PREVIOUSLY cached URL so the SVG keeps showing old selections
     // until the new blob is ready. Without this, every tap briefly
     // cleared all selections (~150ms PNG encode gap).
-    assert('sun.js: _overlayPending branch returns previous URL (not null)',
-      /if \(_overlayPending\) return _overlayCache\.url \|\| null/.test(sunSrc));
+    assert('sun.js: _overlayPending branch queues latest selection and returns previous URL',
+      /if \(_overlayPending\) \{\s*_overlayQueued = \{ selected: new Set\(selected\), onReady \};\s*return _overlayCache\.url \|\| null;\s*\}/.test(sunSrc));
     assert('sun.js: post-canvas-work returns previous URL during encode',
       /return _overlayCache\.url \|\| null;\s*\}/.test(sunSrc));
   }
@@ -409,6 +409,10 @@ const _origProfileSex = window._labState ? window._labState.profileSex : null;
       (cssSrc.match(/padding-bottom:\s*calc\(120px\s*\+\s*env\(safe-area-inset-bottom\)\)/g) || []).length >= 3);
     assert('styles.css: silhouette tap stroke for coarse pointer (mobile)',
       /pointer:\s*coarse[\s\S]{0,500}\.sun-silhouette-region[\s\S]{0,300}stroke-width:\s*\d/.test(cssSrc));
+    assert('styles.css: mobile silhouette hit stroke remains visually hidden',
+      /pointer:\s*coarse[\s\S]{0,500}\.sun-silhouette-region\s*\{[\s\S]{0,180}stroke:\s*transparent[\s\S]{0,180}stroke-opacity:\s*0/.test(cssSrc));
+    assert('styles.css: stock overlay-ready hides geometric selection fallback',
+      /\.sun-silhouette-stock\[data-selection-overlay="ready"\]\s+\.sun-silhouette-region\.selected\s*\{[\s\S]{0,120}fill-opacity:\s*0[\s\S]{0,80}stroke-opacity:\s*0/.test(cssSrc));
     assert('styles.css: modal-header reserves padding-right for close button',
       /\.modal-header\s*\{[\s\S]{0,200}padding-right:\s*40px/.test(cssSrc));
   }
@@ -640,6 +644,30 @@ const _origProfileSex = window._labState ? window._labState.profileSex : null;
       && /\.marker-detail-modal \.marker-history-row\s*\{[\s\S]{0,520}content-visibility:\s*auto/.test(cssSrc)
       && /\.marker-detail-modal \.gb-detail-actions\s*\{[\s\S]{0,260}border-top:\s*1px solid var\(--border\)/.test(cssSrc)
       && /\.modal\.marker-detail-modal\s*\{\s*padding:\s*0/.test(cssSrc));
+  }
+
+  // ─── 20. sun-session start avoids warning-toast stack ───────────────
+  console.log('%c 20. sun-session start notification restraint ', 'font-weight:bold;color:#0891b2');
+  {
+    const sunSrc = fetchSrc('js/sun.js');
+    const startHandler = sunSrc.slice(
+      sunSrc.indexOf("overlay.querySelector('#start-confirm').addEventListener"),
+      sunSrc.indexOf('// Focus management for dynamically-injected modals')
+    );
+    assert('sun.js: start flow uses one consolidated start-session toast helper',
+      /function _buildStartSessionToast/.test(sunSrc) &&
+      /showNotification\(_buildStartSessionToast\(/.test(startHandler));
+    assert('sun.js: start flow no longer emits photosensitizer warning toast',
+      !/photosensitizer active/.test(startHandler));
+    assert('sun.js: start flow no longer emits eyes-uncovered warning toast',
+      !/Eyes-uncovered mode/.test(startHandler));
+    assert('sun.js: retinal toasts have a start grace period',
+      /RETINAL_ALERT_GRACE_MS\s*=\s*10\s*\*\s*60\s*\*\s*1000/.test(sunSrc)
+      && /elapsedMs\s*<\s*RETINAL_ALERT_GRACE_MS/.test(sunSrc));
+    assert('sun.js: retinal over-limit toast also marks the half-limit alert handled',
+      /ruv >= 30 && !cur\.alertedRetinalOver[\s\S]{0,180}alertedRetinalOver:\s*true,\s*alertedRetinal500:\s*true/.test(sunSrc));
+    assert('sun.js: retinal threshold toasts use calm user copy',
+      !/pterygium|cataract|6-12 hours|daily ICNIRP UV limit/.test(sunSrc));
   }
 
   // ─── Restore state ──────────────────────────────────────────────────

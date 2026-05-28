@@ -1400,6 +1400,18 @@ function _renderUVIPreflightBanner(uvi, fitzpatrick, psmTier) {
   return `<div class="${cls}"><strong>${icon} ${escapeHTML(title)}</strong> ${escapeHTML(medLine)} Sunscreen + cover up + a shorter session strongly suggested.</div>`;
 }
 
+function _buildStartSessionToast({ regionCount, uvi, psmTier, eyeMode }) {
+  const parts = [`Outdoor session started · ${regionCount} region${regionCount === 1 ? '' : 's'} exposed`];
+  const notes = [];
+  if (Number.isFinite(uvi) && uvi >= 11) notes.push(`extreme UV ${uvi.toFixed(1)}`);
+  else if (Number.isFinite(uvi) && uvi >= 8) notes.push(`high UV ${uvi.toFixed(1)}`);
+  const tier = _normalizePSMTier(psmTier);
+  if (tier !== 'none') notes.push(`${tier} photosensitizer`);
+  if (eyeMode === 'direct') notes.push('eyes uncovered');
+  if (notes.length) parts.push(`${notes.join(' + ')} · keep it short`);
+  return parts.join(' · ');
+}
+
 // Show the "What's uncovered?" dialog with the body silhouette + a Start
 // button. The picker pre-selects regions from the user's last completed
 // session so habitual users hit Start without changes; first-time users
@@ -1422,6 +1434,7 @@ export async function openStartSunSessionDialog() {
   const fitz = state.importedData?.sunDefaults?.fitzpatrick || 'III';
   const psm = state.importedData?.sunDefaults?.photosensitiveMeds || 'none';
   const uviPromise = _fetchCurrentUVI();
+  let latestPreflightUvi = null;
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay show';
@@ -1527,6 +1540,7 @@ export async function openStartSunSessionDialog() {
   // warrant it. Async — the dialog is already shown so we don't block.
   uviPromise.then((uvi) => {
     if (!Number.isFinite(uvi)) return;
+    latestPreflightUvi = uvi;
     const banner = overlay.querySelector('#sun-start-uvi-banner');
     if (!banner) return;
     const html = _renderUVIPreflightBanner(uvi, fitz, psm);
@@ -1555,15 +1569,12 @@ export async function openStartSunSessionDialog() {
     const coords = getSunCoords();
     const id = await startSession({ regions, eyeMode, lensTint, glassBetween, posture, surfaceAlbedo, rotatedSides, location: coords });
     overlay.remove();
-    showNotification(`Outdoor session started · ${regions.length} region${regions.length === 1 ? '' : 's'} exposed`);
-    const psmTierActive = _normalizePSMTier(state.importedData?.sunDefaults?.photosensitiveMeds);
-    if (psmTierActive !== 'none') {
-      const factor = { mild: '~1.4×', moderate: '~2.5×', severe: '~4×' }[psmTierActive] || '~2.5×';
-      showNotification(`⚠ ${psmTierActive.charAt(0).toUpperCase() + psmTierActive.slice(1)} photosensitizer active — your burn threshold is ${factor} lower. Plan to wrap up at the first sign of pinkness.`, 'warning', 7000);
-    }
-    if (eyeMode === 'direct') {
-      showNotification('Eyes-uncovered mode: never look directly at the sun. "Uncovered" means eyes open toward the sky, not staring at the sun disc.', 'warning', 7000);
-    }
+    showNotification(_buildStartSessionToast({
+      regionCount: regions.length,
+      uvi: latestPreflightUvi,
+      psmTier: state.importedData?.sunDefaults?.photosensitiveMeds,
+      eyeMode,
+    }), 'success', 4500);
     _refreshSurfaces();
     _ensureActiveTicker();
     return id;
@@ -2248,6 +2259,7 @@ function _renderActiveCardBody(sess) {
 // they fired.
 let _tickCount = 0;
 let _lastChannelRefreshAt = 0;
+const RETINAL_ALERT_GRACE_MS = 10 * 60 * 1000;
 function _tickActiveCards() {
   const sessions = getSessions().filter(s => !s.endedAt);
   if (sessions.length === 0) {
@@ -2305,12 +2317,21 @@ function _tickActiveCards() {
     if (liveDoses && Number.isFinite(liveDoses.retinalUV) && sess.eyeExposure?.mode === 'direct') {
       const ruv = liveDoses.retinalUV;
       const cur = _getLiveState(sess.id) || {};
-      if (ruv >= 30 && !cur.alertedRetinalOver) {
-        _setLiveState(sess.id, { alertedRetinalOver: true });
-        showNotification(_jargonPrefix('icnirp') + 'Eye UV at the ICNIRP daily exposure limit. Put on UV-blocking sunglasses now — symptoms (gritty eyes, sensitivity to light) appear 6-12 hours after exposure.', 'error', 10000);
+      const elapsedMs = Date.now() - sess.startedAt;
+      if (elapsedMs < RETINAL_ALERT_GRACE_MS) {
+        // Starting under high UVI used to stack eye-risk toasts immediately.
+        // The active card still shows the eye-UV chip; threshold toasts are
+        // reserved for later crossings after the user has had time to settle.
+        _setLiveState(sess.id, {
+          alertedRetinal500: cur.alertedRetinal500 || ruv >= 15,
+          alertedRetinalOver: cur.alertedRetinalOver || ruv >= 30,
+        });
+      } else if (ruv >= 30 && !cur.alertedRetinalOver) {
+        _setLiveState(sess.id, { alertedRetinalOver: true, alertedRetinal500: true });
+        showNotification('Eye UV is high. Put on UV-blocking sunglasses or take a shade break.', 'warning', 8000);
       } else if (ruv >= 15 && !cur.alertedRetinal500) {
         _setLiveState(sess.id, { alertedRetinal500: true });
-        showNotification(_jargonPrefix('icnirp') + 'Eyes at half the daily ICNIRP UV limit — sunglasses or look-down breaks recommended. Cumulative eye exposure causes pterygium and cataract over years.', 'warning', 8000);
+        showNotification('Eye UV is building. Sunglasses or look-down breaks are a good idea.', 'warning', 6500);
       }
     }
 
@@ -3359,14 +3380,16 @@ function _regionAtSource(src_x, src_y) {
 // Generate a selection-overlay PNG blob URL — pixels of selected regions
 // recolored as semi-transparent accent blue, everything else transparent.
 // Caches by serialized selected set so repeated renders don't regenerate.
-// Returns null when nothing selected, or while async generation is pending
-// (caller falls back to no overlay; we trigger a re-render once ready).
+// Returns null when nothing selected, or the previous cached overlay while
+// async generation is pending (caller re-renders once the fresh overlay is
+// ready).
 //
 // Uses blob: URLs rather than data: URLs because Chrome silently drops
 // large data URLs inside SVG <image> elements (they appear in the DOM
 // but render as nothing).
 let _overlayCache = { key: '', url: '' };
 let _overlayPending = false;
+let _overlayQueued = null;
 function _selectedKey(selected) {
   return Array.from(selected).sort().join('|');
 }
@@ -3374,13 +3397,15 @@ function _renderSelectionOverlay(selected, onReady) {
   if (!_regionMapData || !selected || selected.size === 0) return null;
   const key = _selectedKey(selected);
   if (key === _overlayCache.key) return _overlayCache.url;
-  // When a fresh overlay is mid-encode (or just-finished but still
-  // queued), return the PREVIOUS cached URL instead of null. The caller
-  // can paint the SVG with the stale overlay immediately — previously-
-  // selected regions stay visible during the ~100-200 ms PNG encode on
-  // the new selection set. Without this we tear down the overlay on
-  // every tap and the user perceives all selections briefly clearing.
-  if (_overlayPending) return _overlayCache.url || null;
+  // When a fresh overlay is mid-encode, keep the previous cached URL on
+  // screen and remember the latest selected set. Mobile canvas/blob
+  // encoding can lag behind rapid taps; queueing the newest set avoids
+  // dispatching a stale overlay-ready render that makes regions appear
+  // to deselect before the current overlay catches up.
+  if (_overlayPending) {
+    _overlayQueued = { selected: new Set(selected), onReady };
+    return _overlayCache.url || null;
+  }
   const selectedInts = new Set();
   for (const reg of selected) {
     const col = REGION_COLOR_RGB[reg];
@@ -3410,9 +3435,18 @@ function _renderSelectionOverlay(selected, onReady) {
   _overlayPending = true;
   c.toBlob((blob) => {
     _overlayPending = false;
-    if (!blob) return;
+    if (!blob) {
+      _overlayQueued = null;
+      return;
+    }
     if (_overlayCache.url) URL.revokeObjectURL(_overlayCache.url);
     _overlayCache = { key, url: URL.createObjectURL(blob) };
+    const queued = _overlayQueued;
+    _overlayQueued = null;
+    if (queued && _selectedKey(queued.selected) !== key) {
+      _renderSelectionOverlay(queued.selected, queued.onReady);
+      return;
+    }
     if (onReady) onReady(_overlayCache.url);
   }, 'image/png');
   // Same idea as the _overlayPending branch above: return the previous
@@ -3477,13 +3511,17 @@ export function renderBodySilhouette(selected) {
     renderStockImage._placement = placement;
   }
   // Selection overlay generated from the region map — pixel-perfect tint
-  // of selected regions. Returns null if region map hasn't loaded yet OR
-  // the blob is still being encoded; in both cases we rely on the caller
-  // to re-render when ready (renderBodySilhouette is sync; bind binds the
-  // load promise + rebakes via dispatchEvent('sun-overlay-ready')).
+  // of selected regions. Returns null if region map hasn't loaded yet, or
+  // a previous overlay while the next blob is encoding; in both cases the
+  // caller re-renders when ready (renderBodySilhouette is sync; bind binds
+  // the load promise + rebakes via dispatchEvent('sun-overlay-ready')).
   const selOverlayUrl = _renderSelectionOverlay(selected, () => {
     try { window.dispatchEvent(new CustomEvent('sun-overlay-ready')); } catch (e) {}
   });
+  const overlayMatchesSelection = !!selOverlayUrl && _overlayCache.key === _selectedKey(selected);
+  const overlayState = selected?.size
+    ? (overlayMatchesSelection ? 'ready' : 'pending')
+    : 'none';
   const renderSelectionImage = (view) => {
     if (!selOverlayUrl || !STOCK_FIGURE_PROTOTYPE) return '';
     const p = renderStockImage._placement && renderStockImage._placement(view);
@@ -3524,7 +3562,7 @@ export function renderBodySilhouette(selected) {
   // <defs> so we can paint individual selected regions with a soft sun-pool
   // effect via CSS class match — this is what gives the "sunlight on skin"
   // feel rather than a flat fill.
-  const svg = `<svg viewBox="0 0 200 220" class="sun-silhouette" data-sex="${sex}" role="group" aria-label="Body region picker — tap or press Enter on each region you want to toggle">
+  const svg = `<svg viewBox="0 0 200 220" class="sun-silhouette${STOCK_FIGURE_PROTOTYPE ? ' sun-silhouette-stock' : ''}" data-sex="${sex}" data-selection-overlay="${overlayState}" role="group" aria-label="Body region picker — tap or press Enter on each region you want to toggle">
     <defs>
       <clipPath id="${clipFrontId}"><path d="${bodyFront.d}" /></clipPath>
       <clipPath id="${clipBackId}"><path d="${bodyBack.d}" /></clipPath>
@@ -3545,7 +3583,7 @@ export function renderBodySilhouette(selected) {
       ${STOCK_FIGURE_PROTOTYPE
         ? `<rect x="0" y="0" width="100" height="210" fill="transparent" data-click-view="front" style="cursor:pointer"/>`
         : ''}
-      <g clip-path="url(#sun-silhouette-cell-clip)" ${STOCK_FIGURE_PROTOTYPE ? 'mask="url(#sun-fig-mask-front)" style="opacity:0;pointer-events:none"' : ''}>${renderRegion(front, 'front')}</g>
+      <g clip-path="url(#sun-silhouette-cell-clip)" ${STOCK_FIGURE_PROTOTYPE ? 'mask="url(#sun-fig-mask-front)"' : ''}>${renderRegion(front, 'front')}</g>
       <text x="50" y="218" text-anchor="middle" class="sun-silhouette-label" aria-hidden="true">front</text>
     </g>
     <g class="sun-silhouette-view sun-silhouette-back" transform="translate(100 0)">
@@ -3555,7 +3593,7 @@ export function renderBodySilhouette(selected) {
       ${STOCK_FIGURE_PROTOTYPE
         ? `<rect x="0" y="0" width="100" height="210" fill="transparent" data-click-view="back" style="cursor:pointer"/>`
         : ''}
-      <g clip-path="url(#sun-silhouette-cell-clip)" ${STOCK_FIGURE_PROTOTYPE ? 'mask="url(#sun-fig-mask-back)" style="opacity:0;pointer-events:none"' : ''}>${renderRegion(back, 'back')}</g>
+      <g clip-path="url(#sun-silhouette-cell-clip)" ${STOCK_FIGURE_PROTOTYPE ? 'mask="url(#sun-fig-mask-back)"' : ''}>${renderRegion(back, 'back')}</g>
       <text x="50" y="218" text-anchor="middle" class="sun-silhouette-label" aria-hidden="true">back</text>
     </g>
   </svg>`;
@@ -3636,7 +3674,9 @@ export function bindBodySilhouette(rootEl, selected, onChange) {
     // Convert clientX/Y into the SVG's local (viewBox) coordinate space.
     let pt;
     try { pt = svg.createSVGPoint(); } catch (err) { return null; }
-    pt.x = e.clientX; pt.y = e.clientY;
+    const touch = e.changedTouches?.[0] || e.touches?.[0] || null;
+    pt.x = touch ? touch.clientX : e.clientX;
+    pt.y = touch ? touch.clientY : e.clientY;
     const ctm = svg.getScreenCTM();
     if (!ctm) return null;
     const local = pt.matrixTransform(ctm.inverse());
@@ -3657,7 +3697,7 @@ export function bindBodySilhouette(rootEl, selected, onChange) {
     return _regionAtSource(src_x, src_y);
   };
 
-  rootEl.addEventListener('click', (e) => {
+  const activateFromEvent = (e) => {
     // Region-map sampling is the source of truth — try it first whenever
     // the click landed inside the figure SVG. Fall back to per-region
     // path matching for keyboard / a11y entry points.
@@ -3666,11 +3706,36 @@ export function bindBodySilhouette(rootEl, selected, onChange) {
       const view = e.target.closest('[data-click-view]')?.dataset.clickView
         || (e.target.closest('.sun-silhouette-back') ? 'back' : 'front');
       toggleRegion(fromMap, view);
-      return;
+      return true;
     }
     const t = e.target.closest('[data-region]');
-    if (!t) return;
+    if (!t) return false;
     toggleRegion(t.dataset.region, t.dataset.view);
+    return true;
+  };
+
+  let lastPointerActivation = 0;
+  rootEl.addEventListener('pointerup', (e) => {
+    if (e.pointerType === 'mouse') return;
+    if (!e.target.closest('svg.sun-silhouette')) return;
+    if (!activateFromEvent(e)) return;
+    lastPointerActivation = Date.now();
+    e.preventDefault();
+  }, { passive: false });
+  rootEl.addEventListener('touchend', (e) => {
+    if (Date.now() - lastPointerActivation < 80) return;
+    if (!e.target.closest('svg.sun-silhouette')) return;
+    if (!activateFromEvent(e)) return;
+    lastPointerActivation = Date.now();
+    e.preventDefault();
+  }, { passive: false });
+
+  rootEl.addEventListener('click', (e) => {
+    if (Date.now() - lastPointerActivation < 700) {
+      e.preventDefault();
+      return;
+    }
+    activateFromEvent(e);
   });
   rootEl.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
