@@ -160,6 +160,15 @@ export function buildSidebar(data) {
     navigate: 'fn:window.openEMFAssessmentEditor&&window.openEMFAssessmentEditor()',
     badge: emfAssessmentCount > 0 ? emfAssessmentCount : null,
   });
+  const lightRoomCount = Array.isArray(state.importedData?.lightEnvironment?.rooms) ? state.importedData.lightEnvironment.rooms.length : 0;
+  const lightAuditCount = Array.isArray(state.importedData?.lightAudits) ? state.importedData.lightAudits.length : 0;
+  html += _renderConditionalNavItem({
+    key: 'light-env-assessment',
+    icon: 'light',
+    label: 'Light assessment',
+    navigate: 'fn:window.openLightEnvironmentAssessment&&window.openLightEnvironmentAssessment()',
+    badge: lightRoomCount > 0 && lightAuditCount > 0 ? lightAuditCount : null,
+  });
 
   html += `<div class="nav-section">Manage</div>`;
   html += `<div class="nav-item" data-category="knowledge" tabindex="0" role="button" onclick="window.openKnowledgeBaseModal&&window.openKnowledgeBaseModal()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">
@@ -271,7 +280,7 @@ export function filterSidebar() {
   // When searching: show matching items, expand groups with matches, hide empty groups
   items.forEach(el => {
     const cat = el.dataset.category;
-    if (cat === 'dashboard' || cat === 'labs' || cat === 'correlations' || cat === 'compare' || cat === 'recommendations' || cat === 'knowledge' || cat === 'custom-markers' || cat === 'light' || cat === 'body' || cat === 'wearables' || cat === 'emf' || cat === 'genome' || cat === 'genetics' || cat === 'insight') { el.style.display = ''; return; }
+    if (cat === 'dashboard' || cat === 'labs' || cat === 'correlations' || cat === 'compare' || cat === 'recommendations' || cat === 'knowledge' || cat === 'custom-markers' || cat === 'light' || cat === 'body' || cat === 'wearables' || cat === 'emf' || cat === 'light-env-assessment' || cat === 'genome' || cat === 'genetics' || cat === 'insight') { el.style.display = ''; return; }
     const label = el.textContent.toLowerCase();
     const markers = (el.dataset.markers || '').toLowerCase();
     el.style.display = (label.includes(query) || markers.includes(query)) ? '' : 'none';

@@ -30,6 +30,7 @@ const {
   computeRoomSeverity, computeScreenStatus,
   computeIndoorBurden, computeDeficitAxes,
   getLightAudits, saveLightAudit, updateLightAudit, deleteLightAudit,
+  renderEnvironmentAssessmentSummary, renderEnvironmentSection,
 } = env;
 
   const orig = window._labState.importedData;
@@ -314,6 +315,69 @@ const {
   await deleteLightAudit(audit.id);
   assert('deleteLightAudit removes from list',
     !getLightAudits().some(a => a.id === audit.id));
+
+  // ─── 11. Assessment surface renderers ───────────────────────────────
+  console.log('%c 11. Assessment surface renderers ', 'font-weight:bold;color:#f59e0b');
+
+  const summaryHtml = renderEnvironmentAssessmentSummary();
+  assert('Light page uses compact assessment summary shell',
+    summaryHtml.includes('light-env-assessment-summary') &&
+    summaryHtml.includes('Open assessment') &&
+    !summaryHtml.includes('light-env-room-disclosure'));
+  const fullHtml = renderEnvironmentSection();
+  assert('Full environment section remains available for the assessment workspace',
+    fullHtml.includes('class="light-env-head"') &&
+    fullHtml.includes('light-env-room-disclosure'));
+  const embeddedHtml = renderEnvironmentSection({ embedded: true });
+  assert('Embedded assessment section suppresses duplicate page header',
+    embeddedHtml.includes('light-env-section-embedded') &&
+    !embeddedHtml.includes('class="light-env-head"'));
+  assert('Assessment modal functions are exported on window',
+    typeof window.openLightEnvironmentAssessment === 'function' &&
+    typeof window.closeLightEnvironmentAssessment === 'function');
+  const envSrc = await (await import('node:fs/promises')).readFile(new URL('../js/light-env.js', import.meta.url), 'utf8');
+  assert('Assessment modal uses user-facing indoor assessment copy',
+    envSrc.includes('Indoor Light Assessment') &&
+    envSrc.includes('Save audit snapshots before and after changes') &&
+    !envSrc.includes('The Light page keeps the summary'));
+  const navSrc = await (await import('node:fs/promises')).readFile(new URL('../js/nav.js', import.meta.url), 'utf8');
+  const cssSrc = await (await import('node:fs/promises')).readFile(new URL('../css/light-sun.css', import.meta.url), 'utf8');
+  assert('Light assessment is linked from sidebar Analysis tools',
+    navSrc.includes("label: 'Light assessment'") &&
+    navSrc.includes("key: 'light-env-assessment'") &&
+    navSrc.indexOf('Analysis tools') < navSrc.indexOf("label: 'Light assessment'"));
+  assert('Light assessment sidebar badge reflects saved audit snapshots',
+    navSrc.includes('lightAuditCount') &&
+    navSrc.includes('lightRoomCount') &&
+    !navSrc.includes('lightEnvItems'));
+  const modalCss = cssSrc.match(/\.light-env-assessment-modal\s*\{[^}]+\}/)?.[0] || '';
+  assert('Assessment modal owns vertical scrolling',
+    /max-height:\s*calc\(100dvh - 48px\)/.test(modalCss) &&
+    /overflow-y:\s*auto/.test(modalCss));
+  const beforeEmptyAssessment = window._labState.importedData;
+  window._labState.importedData = {
+    lightEnvironment: { rooms: [], screens: [] },
+    lightMeasurements: [{ id: 'orphan-reading', tool: 'lux', roomId: null, value: 50, takenAt: Date.now() }],
+    lightAudits: [{ id: 'old-audit', date: '2026-05-01', label: 'Old room' }],
+  };
+  const emptySummaryHtml = renderEnvironmentAssessmentSummary();
+  const emptyAssessmentHtml = renderEnvironmentSection({ embedded: true });
+  assert('Assessment summary hides orphan readings and audits when no rooms are mapped',
+    !emptySummaryHtml.includes('Readings') &&
+    !emptySummaryHtml.includes('Audits') &&
+    emptySummaryHtml.includes('Start assessment'));
+  assert('Assessment workspace hides orphan readings and audits until a room is mapped',
+    !emptyAssessmentHtml.includes('Portable readings') &&
+    !emptyAssessmentHtml.includes('Light audits'));
+  assert('Room and portable-screen empty states share header actions plus quick-picks',
+    emptyAssessmentHtml.includes('+ Room') &&
+    emptyAssessmentHtml.includes('+ Screen') &&
+    emptyAssessmentHtml.includes('Start with') &&
+    emptyAssessmentHtml.includes('Bedroom') &&
+    emptyAssessmentHtml.includes('📱 Phone') &&
+    !emptyAssessmentHtml.includes('+ Bedroom') &&
+    !emptyAssessmentHtml.includes('+ 📱 Phone'));
+  window._labState.importedData = beforeEmptyAssessment;
 
   // ─── deleteRoom orphan cleanup ─────────────────────────────────────
   // Earlier deleteRoom dropped the room but left measurements + screens

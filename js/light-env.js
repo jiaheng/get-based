@@ -784,17 +784,38 @@ function renderScreenExpandedBody(s, rooms) {
 // "Room 1" footgun and accelerates the common path. Hides chips for
 // names already in use; "Other…" opens a prompt for custom names.
 const ROOM_QUICK_PICKS = ['Bedroom', 'Living room', 'Kitchen', 'Office', 'Bathroom'];
+const SCREEN_QUICK_PICK_LABELS = {
+  phone: '📱 Phone',
+  laptop: '💻 Laptop',
+  monitor: '🖥 Monitor',
+  tablet: '📲 Tablet',
+  tv: '📺 TV',
+};
 
 function renderRoomQuickPicks(rooms) {
   const usedLC = new Set((rooms || []).map(r => (r.name || '').trim().toLowerCase()));
   const chips = ROOM_QUICK_PICKS
     .filter(name => !usedLC.has(name.toLowerCase()))
-    .map(name => `<button class="light-env-quickpick" onclick="window.addLightEnvRoomNamed('${escapeAttr(name)}')">+ ${escapeHTML(name)}</button>`)
+    .map(name => `<button class="light-env-quickpick" onclick="window.addLightEnvRoomNamed('${escapeAttr(name)}')">${escapeHTML(name)}</button>`)
     .join('');
   return `<div class="light-env-quickpicks-row">
-    <span class="light-env-quickpicks-label">${rooms.length === 0 ? 'Add your first room' : 'Add a room'}:</span>
+    <span class="light-env-quickpicks-label">${rooms.length === 0 ? 'Start with' : 'Add'}:</span>
     ${chips}
-    <button class="light-env-quickpick light-env-quickpick-other" onclick="window.addLightEnvRoomCustom()">+ Other…</button>
+    <button class="light-env-quickpick light-env-quickpick-other" onclick="window.addLightEnvRoomCustom()">Other…</button>
+  </div>`;
+}
+
+function renderScreenQuickPicks(screens, roomId = null, preferred = ['phone', 'laptop', 'monitor', 'tablet', 'tv']) {
+  const existing = new Set((screens || []).filter(s => (s.roomId || null) === (roomId || null)).map(s => s.device));
+  const roomArg = roomId ? `'${escapeAttr(roomId)}'` : 'null';
+  const chips = preferred
+    .filter(device => !existing.has(device))
+    .map(device => `<button class="light-env-quickpick" onclick="window.addLightEnvScreenWithDevice(${roomArg},'${escapeAttr(device)}')">${escapeHTML(SCREEN_QUICK_PICK_LABELS[device] || device)}</button>`)
+    .join('');
+  return `<div class="light-env-quickpicks-row light-env-screen-quickpicks">
+    <span class="light-env-quickpicks-label">${existing.size === 0 ? 'Start with' : 'Add'}:</span>
+    ${chips}
+    <button class="light-env-quickpick light-env-quickpick-other" onclick="window.addLightEnvScreen(${roomArg})">Other…</button>
   </div>`;
 }
 
@@ -841,6 +862,125 @@ function renderEnvironmentLoadSummary() {
     </div>
     ${interpHTML}
   </div>`;
+}
+
+function formatLatestLightAudit(audits) {
+  if (!audits.length) return 'No saved snapshots';
+  const latest = audits
+    .slice()
+    .sort((a, b) => (b.createdAt || Date.parse(b.date || '') || 0) - (a.createdAt || Date.parse(a.date || '') || 0))[0];
+  const label = latest?.label ? ` · ${latest.label}` : '';
+  const date = latest?.date ? fmtMeasureTime(new Date(latest.date + 'T00:00:00').getTime()) : 'latest';
+  return `${audits.length} audit${audits.length === 1 ? '' : 's'} · ${date}${label}`;
+}
+
+export function renderEnvironmentAssessmentSummary() {
+  const env = getEnvironment();
+  const rooms = env?.rooms || [];
+  const screens = env?.screens || [];
+  const audits = getLightAudits();
+  const measurements = state.importedData?.lightMeasurements || [];
+  const burden = computeIndoorBurden();
+  const activeRooms = rooms.filter(isActiveToday).length;
+  const activeScreens = screens.filter(isActiveToday).length;
+  const measuredRooms = new Set(measurements.filter(m => m.roomId).map(m => m.roomId)).size;
+  const hasMapped = rooms.length > 0 || screens.length > 0;
+  const hasRooms = rooms.length > 0;
+  const actionLabel = hasMapped ? 'Open assessment' : 'Start assessment';
+  const lead = hasMapped
+    ? burden.interp
+    : 'Map your bedroom, work areas, and screens once; update the assessment when bulbs, monitors, or evening routines change.';
+  const metrics = [
+    {
+      label: 'Rooms',
+      value: String(rooms.length),
+      sub: rooms.length ? `${activeRooms} active today` : 'Start with bedroom',
+    },
+    {
+      label: 'Screens',
+      value: String(screens.length),
+      sub: screens.length ? `${activeScreens} active today` : 'Portable or room-bound',
+    },
+  ];
+  if (hasRooms) {
+    metrics.push({
+      label: 'Readings',
+      value: String(measurements.length),
+      sub: measuredRooms ? `${measuredRooms} room${measuredRooms === 1 ? '' : 's'} measured` : 'Run lux/flicker/CCT',
+    }, {
+      label: 'Audits',
+      value: String(audits.length),
+      sub: formatLatestLightAudit(audits),
+    });
+  }
+  return `<div class="light-env-assessment-summary light-env-assessment-summary-${escapeAttr(burden.color)}">
+    <div class="light-env-assessment-status">
+      <span class="light-env-summary-kicker">Indoor light load</span>
+      <span class="light-env-assessment-tier">${escapeHTML(burden.label)}</span>
+      ${burden.parts.length ? `<span class="light-env-assessment-parts">${escapeHTML(burden.parts.join(' · '))}</span>` : ''}
+    </div>
+    <p class="light-env-assessment-lead">${escapeHTML(lead)}</p>
+    <div class="light-env-assessment-metrics">
+      ${metrics.map(m => `<div class="light-env-assessment-metric">
+        <span class="light-env-assessment-metric-label">${escapeHTML(m.label)}</span>
+        <strong>${escapeHTML(m.value)}</strong>
+        <span>${escapeHTML(m.sub)}</span>
+      </div>`).join('')}
+    </div>
+    <div class="light-env-assessment-actions">
+      <button class="dashboard-action-btn dashboard-action-btn-primary" onclick="window.openLightEnvironmentAssessment && window.openLightEnvironmentAssessment()">${escapeHTML(actionLabel)}</button>
+      ${rooms.length ? `<button class="dashboard-action-btn" onclick="window.openLightEnvironmentAssessment && window.openLightEnvironmentAssessment();setTimeout(() => window.saveLightAuditFromUI && window.saveLightAuditFromUI(), 0)">Save audit</button>` : ''}
+    </div>
+  </div>`;
+}
+
+const LIGHT_ENV_ASSESSMENT_OVERLAY_ID = 'light-env-assessment-overlay';
+
+function getLightEnvironmentAssessmentOverlay() {
+  return document.getElementById(LIGHT_ENV_ASSESSMENT_OVERLAY_ID);
+}
+
+function isLightEnvironmentAssessmentOpen() {
+  return !!getLightEnvironmentAssessmentOverlay();
+}
+
+function renderLightEnvironmentAssessmentModal() {
+  let overlay = getLightEnvironmentAssessmentOverlay();
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = LIGHT_ENV_ASSESSMENT_OVERLAY_ID;
+    overlay.className = 'modal-overlay show light-env-assessment-overlay';
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) window.closeLightEnvironmentAssessment?.();
+    });
+    document.body.appendChild(overlay);
+  }
+  overlay.classList.add('show');
+  overlay.innerHTML = `<div class="modal light-env-assessment-modal" role="dialog" aria-modal="true" aria-labelledby="light-env-assessment-title">
+    <button class="modal-close" onclick="window.closeLightEnvironmentAssessment && window.closeLightEnvironmentAssessment()" aria-label="Close">×</button>
+    <div class="modal-header">
+      <h3 id="light-env-assessment-title">Indoor Light Assessment</h3>
+    </div>
+    <p class="light-env-assessment-modal-copy">Map the rooms, screens, and readings that shape your indoor day. Save audit snapshots before and after changes to compare what moved.</p>
+    ${renderEnvironmentSection({ embedded: true })}
+  </div>`;
+}
+
+export function openLightEnvironmentAssessment() {
+  renderLightEnvironmentAssessmentModal();
+}
+
+export function closeLightEnvironmentAssessment() {
+  getLightEnvironmentAssessmentOverlay()?.remove();
+}
+
+export function refreshLightEnvironmentAssessment() {
+  if (isLightEnvironmentAssessmentOpen()) renderLightEnvironmentAssessmentModal();
+}
+
+function refreshLightEnvironmentUI() {
+  refreshLightEnvironmentAssessment();
+  if (window.navigate && state.currentView === 'light') window.navigate('light');
 }
 
 // Disclosure-pattern room card. Header shows: name · severity dot ·
@@ -976,11 +1116,6 @@ function renderRoomExpandedBody(r, measurements, sev) {
     emptyCopy = 'Map any phone, tablet, laptop, monitor, or TV used in this room.';
     quickPicks = ['phone', 'laptop', 'tv'];
   }
-  // Hide quick-picks for devices already mapped to this room — no need
-  // to suggest "+ phone" if there's already a phone here.
-  const existingDevices = new Set(screensHere.map(s => s.device));
-  const availablePicks = quickPicks.filter(d => !existingDevices.has(d));
-  const pickLabels = { phone: '📱 Phone', laptop: '💻 Laptop', monitor: '🖥 Monitor', tablet: '📲 Tablet', tv: '📺 TV' };
 
   html += `<div class="light-env-room-step">
     <div class="light-env-room-step-head">${escapeHTML(stepHead)}</div>
@@ -995,16 +1130,7 @@ function renderRoomExpandedBody(r, measurements, sev) {
   // Quick-pick chip row — one-click adds a screen with the right device
   // type. "Other…" falls back to the original generic "+ Add screen"
   // path which infers device by room name.
-  if (availablePicks.length > 0) {
-    html += `<div class="light-env-screen-quickpicks">`;
-    for (const device of availablePicks) {
-      html += `<button class="light-env-quickpick" onclick="window.addLightEnvScreenWithDevice('${escapeAttr(r.id)}','${device}')">+ ${escapeHTML(pickLabels[device] || device)}</button>`;
-    }
-    html += `<button class="light-env-quickpick light-env-quickpick-other" onclick="window.addLightEnvScreen('${escapeAttr(r.id)}')">+ Other…</button>`;
-    html += `</div>`;
-  } else {
-    html += `<button class="light-env-add-screen-here" onclick="window.addLightEnvScreen('${escapeAttr(r.id)}')">+ Add another screen</button>`;
-  }
+  html += renderScreenQuickPicks(screensHere, r.id, quickPicks);
   html += `    </div>
   </div>`;
 
@@ -1014,17 +1140,20 @@ function renderRoomExpandedBody(r, measurements, sev) {
   return html;
 }
 
-export function renderEnvironmentSection() {
+export function renderEnvironmentSection(options = {}) {
   const env = getEnvironment();
   const rooms = env?.rooms || [];
   const screens = env?.screens || [];
+  const embedded = !!options.embedded;
 
-  let html = `<div class="light-env-section">
-    <div class="light-env-head">
+  let html = `<div class="light-env-section${embedded ? ' light-env-section-embedded' : ''}">`;
+  if (!embedded) {
+    html += `<div class="light-env-head">
       <h3 class="light-section-title">Light environment</h3>
       <p class="light-section-hint">Indoor light is the dominant exposure most days. Map your spaces and screens — the rest of the app uses this to weight your channel pills + interpret your sleep data.</p>
-    </div>
-    ${renderEnvironmentLoadSummary()}`;
+    </div>`;
+  }
+  html += renderEnvironmentLoadSummary();
 
   // Rooms — disclosure list (mirrors EMF Assessment + Light Audits).
   // Each row is collapsed-by-default with name + severity + key
@@ -1034,6 +1163,7 @@ export function renderEnvironmentSection() {
   html += `<div class="light-env-block">
     <div class="light-env-block-head">
       <strong>Rooms you spend time in</strong>
+      <button class="import-btn import-btn-secondary" onclick="window.addLightEnvRoom()">+ Room</button>
     </div>`;
   if (rooms.length === 0) {
     html += `<div class="light-env-empty light-env-empty-cta">
@@ -1065,16 +1195,19 @@ export function renderEnvironmentSection() {
   html += `<div class="light-env-block">
     <div class="light-env-block-head">
       <strong>Portable screens</strong>
-      <button class="import-btn import-btn-secondary" onclick="window.addLightEnvScreen()">+ Portable screen</button>
+      <button class="import-btn import-btn-secondary" onclick="window.addLightEnvScreen()">+ Screen</button>
     </div>`;
   if (portableScreens.length === 0 && screens.length === 0 && rooms.length === 0) {
     // First-time: show the value-prop CTA only when the whole section is empty
     html += `<div class="light-env-empty light-env-empty-cta">
       <p><strong>Track your phone, TV, or any screen that moves between rooms.</strong> Screens you use in a specific room (laptop in the Office, TV in the Living Room) live inside that room's card — add them from there.</p>
-      <button class="import-btn import-btn-primary" onclick="window.addLightEnvScreen()">+ Add a portable screen</button>
+      ${renderScreenQuickPicks(portableScreens)}
     </div>`;
   } else if (portableScreens.length === 0) {
-    html += `<p class="light-env-empty">No portable screens yet. Devices that stay in one place are listed inside their room card above.</p>`;
+    html += `<div class="light-env-empty light-env-empty-cta">
+      <p>No portable screens yet. Devices that stay in one place are listed inside their room card above.</p>
+      ${renderScreenQuickPicks(portableScreens)}
+    </div>`;
   } else {
     html += `<div class="light-env-screen-cards">`;
     for (const s of portableScreens) html += renderScreenCard(s);
@@ -1094,7 +1227,7 @@ export function renderEnvironmentSection() {
   const portable = allMeasurements
     .filter(m => !m.roomId)
     .sort((a, b) => (b.takenAt || b.capturedAt || 0) - (a.takenAt || a.capturedAt || 0));
-  if (portable.length > 0) {
+  if (rooms.length > 0 && portable.length > 0) {
     html += `<details class="light-env-block light-env-portable-readings">
       <summary><strong>Portable readings</strong> <span class="light-env-portable-count">${portable.length} not matched to a room</span></summary>
       <div class="light-env-portable-readings-list">`;
@@ -1576,7 +1709,7 @@ if (typeof window !== 'undefined') {
       // Auto-expand the new room so the user can fill it out immediately
       const after = env?.rooms || [];
       if (after.length > before) writeActiveRoomId(after[after.length - 1].id);
-      if (window.navigate && state.currentView === 'light') window.navigate('light');
+      refreshLightEnvironmentUI();
     },
     // Quick-pick chip handler — adds a room with the exact chosen name
     // (no "Room N" fallback). Auto-expands the new room.
@@ -1586,7 +1719,7 @@ if (typeof window !== 'undefined') {
       await addRoom(name);
       const after = env?.rooms || [];
       if (after.length > before) writeActiveRoomId(after[after.length - 1].id);
-      if (window.navigate && state.currentView === 'light') window.navigate('light');
+      refreshLightEnvironmentUI();
     },
     // "Other…" quick-pick — opens the prompt dialog for a custom name.
     addLightEnvRoomCustom: async () => {
@@ -1603,7 +1736,7 @@ if (typeof window !== 'undefined') {
       await addRoom(trimmed);
       const after = env?.rooms || [];
       if (after.length > before) writeActiveRoomId(after[after.length - 1].id);
-      if (window.navigate && state.currentView === 'light') window.navigate('light');
+      refreshLightEnvironmentUI();
     },
     // Disclosure toggle — clicking the header expands/collapses. The
     // event check ignores clicks on interactive children (the today-
@@ -1632,7 +1765,7 @@ if (typeof window !== 'undefined') {
       }
       const current = readActiveRoomId();
       writeActiveRoomId(current === id ? null : id);
-      if (window.navigate && state.currentView === 'light') window.navigate('light');
+      refreshLightEnvironmentUI();
     },
     updateLightEnvRoom: async (id, patch) => { await updateRoom(id, patch); },
     // Chip-picker setters — translate archetype/bucket choices into
@@ -1642,13 +1775,13 @@ if (typeof window !== 'undefined') {
       const a = SOURCE_ARCHETYPES.find(x => x.key === archetypeKey);
       if (!a) return;
       await updateRoom(id, { primarySource: a.storeAs });
-      if (window.navigate && state.currentView === 'light') window.navigate('light');
+      refreshLightEnvironmentUI();
     },
     setLightEnvRoomHoursBucket: async (id, bucketKey) => {
       const b = HOURS_BUCKETS.find(x => x.key === bucketKey);
       if (!b) return;
       await updateRoom(id, { hoursOccupiedPerDay: b.midpoint });
-      if (window.navigate && state.currentView === 'light') window.navigate('light');
+      refreshLightEnvironmentUI();
     },
     // Auto-fill a room's primarySource from the Spectrum tool's
     // classification — only when the user hasn't picked one yet, so
@@ -1685,21 +1818,21 @@ if (typeof window !== 'undefined') {
         eveningHoursAfterSunset: b.midpoint,
         eveningUseAfterSunset: b.midpoint > 0,
       });
-      if (window.navigate && state.currentView === 'light') window.navigate('light');
+      refreshLightEnvironmentUI();
     },
     // Discrete-toggle variant — same persistence as updateLightEnvRoom
-    // but follows up with a navigate('light') so the severity chip
-    // and accent strip refresh. Use for select/checkbox handlers
+    // but refreshes the Light page / assessment modal so the severity
+    // chip and accent strip update. Use for select/checkbox handlers
     // where focus-loss isn't a concern; keep plain updateLightEnvRoom
     // for text + number inputs to preserve cursor mid-typing.
     updateLightEnvRoomAndRender: async (id, patch) => {
       await updateRoom(id, patch);
-      if (window.navigate && state.currentView === 'light') window.navigate('light');
+      refreshLightEnvironmentUI();
     },
     deleteLightEnvRoom: async (id) => {
       await deleteRoom(id);
       if (readActiveRoomId() === id) writeActiveRoomId(null);
-      if (window.navigate && state.currentView === 'light') window.navigate('light');
+      refreshLightEnvironmentUI();
     },
     // Confirm-dialog wrapped delete — reachable from the expanded
     // room's footer. The bare delete handler stays in case anything
@@ -1708,12 +1841,12 @@ if (typeof window !== 'undefined') {
       if (await showConfirmDialog('Delete this room? Measurements stay but lose their room link.')) {
         await deleteRoom(id);
         if (readActiveRoomId() === id) writeActiveRoomId(null);
-        if (window.navigate && state.currentView === 'light') window.navigate('light');
+        refreshLightEnvironmentUI();
       }
     },
     setActiveLightEnvRoom: (id) => {
       writeActiveRoomId(id);
-      if (window.navigate && state.currentView === 'light') window.navigate('light');
+      refreshLightEnvironmentUI();
     },
     // Quick-pick variant — adds a screen with an explicit device type
     // (phone / laptop / monitor / tablet / tv). Auto-expands the new
@@ -1725,7 +1858,7 @@ if (typeof window !== 'undefined') {
       const env = getEnvironment();
       const after = env?.screens || [];
       if (after.length > 0) _expandedScreenId = after[after.length - 1].id;
-      if (window.navigate && state.currentView === 'light') window.navigate('light');
+      refreshLightEnvironmentUI();
     },
     addLightEnvScreen: async (roomId = null) => {
       // Sensible default device by room name — laptop for office, TV
@@ -1741,22 +1874,22 @@ if (typeof window !== 'undefined') {
         else if (/bedroom|sleep/.test(name)) device = 'phone';
       }
       await addScreen(device, roomId);
-      if (window.navigate && state.currentView === 'light') window.navigate('light');
+      refreshLightEnvironmentUI();
     },
     updateLightEnvScreen: async (id, patch) => { await updateScreen(id, patch); },
     updateLightEnvScreenAndRender: async (id, patch) => {
       await updateScreen(id, patch);
-      if (window.navigate && state.currentView === 'light') window.navigate('light');
+      refreshLightEnvironmentUI();
     },
     deleteLightEnvScreen: async (id) => {
       await deleteScreen(id);
-      if (window.navigate && state.currentView === 'light') window.navigate('light');
+      refreshLightEnvironmentUI();
     },
     deleteLightEnvScreenConfirm: async (id) => {
       if (await showConfirmDialog('Delete this screen?')) {
         await deleteScreen(id);
         if (_expandedScreenId === id) _expandedScreenId = null;
-        if (window.navigate && state.currentView === 'light') window.navigate('light');
+        refreshLightEnvironmentUI();
       }
     },
     // Disclosure toggle for screen cards — same event-target gating as
@@ -1776,19 +1909,19 @@ if (typeof window !== 'undefined') {
         }
       }
       _expandedScreenId = (_expandedScreenId === id) ? null : id;
-      if (window.navigate && state.currentView === 'light') window.navigate('light');
+      refreshLightEnvironmentUI();
     },
     setLightEnvScreenHoursBucket: async (id, bucketKey) => {
       const b = SCREEN_HOURS_BUCKETS.find(x => x.key === bucketKey);
       if (!b) return;
       await updateScreen(id, { hoursPerDay: b.midpoint });
-      if (window.navigate && state.currentView === 'light') window.navigate('light');
+      refreshLightEnvironmentUI();
     },
     setLightEnvScreenEveningBucket: async (id, bucketKey) => {
       const map = { none: 0, lt1: 0.5, mid: 2, gt3: 4 };
       if (!(bucketKey in map)) return;
       await updateScreen(id, { eveningUseAfterSunset: map[bucketKey] });
-      if (window.navigate && state.currentView === 'light') window.navigate('light');
+      refreshLightEnvironmentUI();
     },
     computeLightDeficitAxes: computeDeficitAxes,
     computeDeficitAxes,
@@ -1804,9 +1937,13 @@ if (typeof window !== 'undefined') {
     isLightEnvActiveToday: isActiveToday,
     setLightEnvTodayActive: async (kind, id, active) => {
       await setTodayActive(kind, id, active);
-      if (window.navigate && state.currentView === 'light') window.navigate('light');
+      refreshLightEnvironmentUI();
     },
     renderEnvironmentSection,
+    renderEnvironmentAssessmentSummary,
+    openLightEnvironmentAssessment,
+    closeLightEnvironmentAssessment,
+    refreshLightEnvironmentAssessment,
     // ─── Light Audits ───
     getLightAudits,
     saveLightAuditFromUI: async () => {
@@ -1823,17 +1960,17 @@ if (typeof window !== 'undefined') {
       if (audit) {
         showNotification(`Saved audit: ${audit.label}`);
         _expandedAuditId = audit.id;
-        if (window.navigate && state.currentView === 'light') window.navigate('light');
+        refreshLightEnvironmentUI();
       }
     },
     toggleLightAudit: (id) => {
       _expandedAuditId = (_expandedAuditId === id) ? null : id;
-      if (window.navigate && state.currentView === 'light') window.navigate('light');
+      refreshLightEnvironmentUI();
     },
     toggleLightAuditCompare: () => {
       _auditCompareMode = !_auditCompareMode;
       _expandedAuditId = null;
-      if (window.navigate && state.currentView === 'light') window.navigate('light');
+      refreshLightEnvironmentUI();
     },
     updateLightAuditField: async (id, field, value) => {
       await updateLightAudit(id, { [field]: value });
@@ -1842,7 +1979,7 @@ if (typeof window !== 'undefined') {
       if (await showConfirmDialog('Delete this audit? This cannot be undone.')) {
         await deleteLightAudit(id);
         if (_expandedAuditId === id) _expandedAuditId = null;
-        if (window.navigate && state.currentView === 'light') window.navigate('light');
+        refreshLightEnvironmentUI();
       }
     },
     // "Interpret changes" — pre-fills the chat panel with a comparison
