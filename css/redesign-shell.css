@@ -426,3 +426,84 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Redesign catch-up: sidebar icon sizing and nav count typography glue. */
+.sidebar-search-icon,
+.nav-item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  line-height: 1;
+}
+.sidebar-search-icon svg,
+.nav-item-icon svg {
+  display: block;
+  width: 15px;
+  height: 15px;
+  stroke: currentColor;
+}
+.nav-item-icon {
+  color: var(--text-muted);
+}
+.nav-item:hover .nav-item-icon {
+  color: var(--text-primary);
+}
+.nav-item.active .nav-item-icon,
+.nav-item.is-active .nav-item-icon {
+  color: var(--accent);
+}
+.nav-item[data-category="dashboard"] .nav-item-dot {
+  background: var(--accent);
+}
+.nav-item-count,
+.nav-item .count,
+.nav-item .flag-count,
+.nav-item .nav-count {
+  flex: 0 0 auto;
+  max-width: 86px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nav-item-dot {
+  flex: 0 0 8px;
+}
+.sidebar-add-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  float: none;
+}
+
+@media (max-width: 768px), (pointer: coarse) {
+  .logo-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+  .profile-compact-btn {
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+    padding: 8px;
+  }
+  .dashboard-widget-tool,
+  .lens-widget-dashboard-toggle {
+    min-width: 44px;
+    min-height: 44px;
+    height: auto;
+    padding: 0 12px;
+    line-height: 1.25;
+  }
+  .lens-widget-dashboard-toggle {
+    padding-inline: 14px;
+  }
+  .analytics-consent-btn {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 8px 12px;
+  }
+}
