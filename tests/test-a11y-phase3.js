@@ -194,15 +194,37 @@ console.log('=== Phase 3 A11y Tests ===\n');
   // modals (Log device session) require explicit Cancel/Save so accidental
   // taps don't lose typed values.
   const lightDevSrc = read('/js/light-devices.js');
+  const lightDevSetupSrc = read('/js/light-device-setup-modal.js');
   const lightDevSessionSrc = read('/js/light-device-session-modal.js');
+  const lightDevCss = read('/css/light-devices.css');
   assert('light-devices.js delegates session dialog rendering to extracted module',
     lightDevSrc.includes("from './light-device-session-modal.js'"));
-  // Two browse modals each get a backdrop-close listener guarded by
-  // `e.target === overlay` so child clicks don't bubble out.
-  const backdropMatches = lightDevSrc.match(/overlay\.addEventListener\('click', \(e\) => \{\s*if \(e\.target === overlay\) overlay\.remove\(\);/g) || [];
+  assert('light-devices.js delegates add/custom-device setup rendering to extracted module',
+    lightDevSrc.includes("from './light-device-setup-modal.js'"));
+  assert('Add-device preset picker stays inside modal as button rows, not a native dropdown',
+    lightDevSetupSrc.includes('light-device-preset-groups') &&
+    lightDevSetupSrc.includes('light-device-preset-row') &&
+    !lightDevSetupSrc.includes('id="add-device-preset"'));
+  assert('Add-device preset picker uses one vertical modal scroller with no horizontal row overflow',
+    lightDevSetupSrc.includes("overlay.addEventListener('wheel'") &&
+    lightDevSetupSrc.includes('modal.scrollBy({ top: event.deltaY * unit, left: 0') &&
+    lightDevCss.includes('.light-device-add-modal') &&
+    lightDevCss.includes('touch-action: pan-y') &&
+    lightDevCss.includes('overflow-x: hidden') &&
+    lightDevCss.includes('word-break: break-word') &&
+    lightDevCss.includes('overflow: visible'));
+  assert('custom-device URL extraction checks hosted proxy response status',
+    lightDevSetupSrc.includes('if (!res.ok) throw new Error(`Proxy error ${res.status}`);'));
+  assert('custom-device async extraction suppresses stale detached-overlay notifications',
+    (lightDevSetupSrc.match(/if \(!overlay\.isConnected\) return;/g) || []).length >= 3);
+  // Browse modals get backdrop-close listeners guarded by `e.target === overlay`
+  // so child clicks don't bubble out. Add-device lives in the setup module;
+  // the quick-log device picker remains in light-devices.js.
+  const setupBackdropMatches = lightDevSetupSrc.match(/overlay\.addEventListener\('click', \(e\) => \{\s*if \(e\.target === overlay\) overlay\.remove\(\);/g) || [];
+  const deviceBackdropMatches = lightDevSrc.match(/overlay\.addEventListener\('click', \(e\) => \{\s*if \(e\.target === overlay\) overlay\.remove\(\);/g) || [];
   assert('Add-device + device-picker modals each have backdrop-click close',
-    backdropMatches.length >= 2,
-    `found ${backdropMatches.length} backdrop-close listeners`);
+    setupBackdropMatches.length >= 1 && deviceBackdropMatches.length >= 1,
+    `setup=${setupBackdropMatches.length}, device=${deviceBackdropMatches.length}`);
   // openDeviceSessionDialog is a form modal — must NOT have backdrop-close
   // (would lose typed duration/distance/notes on stray click).
   const sessionDialogStart = lightDevSessionSrc.indexOf('export async function openDeviceSessionDialog');
