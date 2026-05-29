@@ -57,6 +57,7 @@ assert('SW has explicit dev-host offline test opt-in',
 const swAuditSrc = read('service-worker.js');
 assert('SW uses importScripts for version', swAuditSrc.includes("importScripts('/version.js')"));
 assert('SW CACHE_NAME uses semver', swAuditSrc.includes('`labcharts-v${self.APP_VERSION}`'));
+assert('SW APP_SHELL includes API transport module', swAuditSrc.includes("'/js/api-transport.js'"));
 assert('index loads app shell CSS bundle', indexSrc.includes('href="css/app-shell.css"'));
 assert('SW APP_SHELL includes app shell CSS bundle', swAuditSrc.includes("'/css/app-shell.css'"));
 assert('app shell CSS loads after core CSS and before feature CSS',
@@ -535,6 +536,11 @@ assert('Mobile quick marker grid override comes after base grid',
 assert('Mobile compare tables scroll instead of clipping columns',
   /@media \(max-width:\s*768px\)\s*\{[\s\S]*\.data-table-wrapper,\s*[\s\S]*\.compare-table-wrapper,\s*[\s\S]*\.heatmap-wrapper\s*\{[\s\S]*overflow-x:\s*auto;[\s\S]*overflow-y:\s*clip;/.test(cssSrc) &&
   compareCorrelationsSrc.includes('class="compare-date-field"'));
+const importPreviewHeadBlock = cssSrc.match(/\.import-preview-head\s*\{([\s\S]*?)\}/)?.[1] || '';
+const importReviewActionsBlock = cssSrc.match(/\.import-review-actions\s*\{([\s\S]*?)\}/)?.[1] || '';
+assert('Import review modal header/footer are not sticky',
+  !/position:\s*sticky/.test(importPreviewHeadBlock) &&
+  !/position:\s*sticky/.test(importReviewActionsBlock));
 assert('Compare and correlations headings are text-only',
   compareCorrelationsSrc.includes('<h2>Compare Dates</h2>') &&
   compareCorrelationsSrc.includes('<h2>Correlations</h2>') &&
