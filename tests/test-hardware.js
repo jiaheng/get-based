@@ -177,11 +177,123 @@ console.log('=== Hardware & Model Advisor Tests ===\n');
   console.log('%c 8. Settings Integration ', 'font-weight:bold;color:#f59e0b');
 
   const ppSrc = read('js/provider-panels.js');
+  const localAiControlsSrc = read('js/provider-local-ai-controls.js');
   const panelRenderSrc = read('js/provider-panel-renderers.js');
-  assert('Provider panels imports hardware.js', ppSrc.includes("from './hardware.js'"));
+  assert('Provider local AI controls imports hardware.js', localAiControlsSrc.includes("from './hardware.js'"));
   assert('Provider renderer has advisor placeholder', panelRenderSrc.includes('local-ai-advisor'));
-  assert('Provider panels calls renderModelAdvisor', ppSrc.includes('renderModelAdvisor'));
+  assert('Provider local AI controls calls renderModelAdvisor', localAiControlsSrc.includes('renderModelAdvisor'));
   assert('Provider panels exports copyOllamaPullCmd', ppSrc.includes('copyOllamaPullCmd'));
+  assert('Provider local AI controls validates base URL before fetch', localAiControlsSrc.includes('normalizeLocalAiBaseUrl'));
+
+  // ═══════════════════════════════════════
+  // 9. Local AI URL validation
+  // ═══════════════════════════════════════
+  console.log('%c 9. Local AI URL Validation ', 'font-weight:bold;color:#f59e0b');
+
+  const localAiControls = await import('../js/provider-local-ai-controls.js');
+  const originalGetElementById = document.getElementById;
+  const originalFetch = globalThis.fetch;
+  const hadLocation = Object.prototype.hasOwnProperty.call(globalThis, 'location');
+  const originalLocation = globalThis.location;
+  let fetchCalls = 0;
+  const makeDot = () => {
+    const dot = { className: '', classes: new Set() };
+    dot.classList = {
+      add: (cls) => dot.classes.add(cls),
+      remove: (cls) => dot.classes.delete(cls),
+      contains: (cls) => dot.classes.has(cls),
+    };
+    return dot;
+  };
+
+  try {
+    globalThis.location = { protocol: 'http:' };
+    globalThis.fetch = async () => {
+      fetchCalls++;
+      throw new Error('Malformed Local AI URL should be rejected before fetch');
+    };
+
+    const mainDot = makeDot();
+    const mainText = { textContent: '' };
+    let elements = {
+      'local-ai-url-input': { value: 'htp://localhost:11434' },
+      'local-ai-dot': mainDot,
+      'local-ai-status-text': mainText,
+    };
+    document.getElementById = (id) => elements[id] || null;
+    await localAiControls.testOllamaConnection();
+    assert('Malformed main Local AI URL shows protocol guidance',
+      mainText.textContent === 'Local AI URL must start with http:// or https://',
+      mainText.textContent);
+    assert('Malformed main Local AI URL does not fetch', fetchCalls === 0, `fetch calls: ${fetchCalls}`);
+
+    const piiDot = makeDot();
+    const piiText = { textContent: '' };
+    elements = {
+      'pii-local-url-input': { value: 'htp://localhost:11434' },
+      'pii-local-dot': piiDot,
+      'pii-local-status-text': piiText,
+    };
+    await localAiControls.testPIIOllamaConnection();
+    assert('Malformed PII Local AI URL shows protocol guidance',
+      piiText.textContent === 'Local AI URL must start with http:// or https://',
+      piiText.textContent);
+    assert('Malformed PII Local AI URL does not fetch', fetchCalls === 0, `fetch calls: ${fetchCalls}`);
+
+    fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls++;
+      throw new TypeError('Failed to fetch');
+    };
+    elements = {
+      'local-ai-url-input': { value: 'http://localhost:65535' },
+      'local-ai-dot': mainDot,
+      'local-ai-status-text': mainText,
+    };
+    mainText.textContent = '';
+    await localAiControls.testOllamaConnection();
+    assert('Unreachable main Local AI URL does not show CORS guidance',
+      mainText.textContent === 'Not connected \u2014 check URL and ensure your server is running',
+      mainText.textContent);
+    assert('Unreachable main Local AI URL probes before failing', fetchCalls > 1, `fetch calls: ${fetchCalls}`);
+
+    elements = {
+      'pii-local-url-input': { value: 'http://localhost:65535' },
+      'pii-local-dot': piiDot,
+      'pii-local-status-text': piiText,
+    };
+    piiText.textContent = '';
+    await localAiControls.testPIIOllamaConnection();
+    assert('Unreachable PII Local AI URL does not show CORS guidance',
+      piiText.textContent === 'Not connected \u2014 check URL and ensure your server is running',
+      piiText.textContent);
+
+    let noCorsProbeCalls = 0;
+    globalThis.fetch = async (_url, options = {}) => {
+      fetchCalls++;
+      if (options.mode === 'no-cors') {
+        noCorsProbeCalls++;
+        return { type: 'opaque' };
+      }
+      throw new TypeError('Failed to fetch');
+    };
+    elements = {
+      'local-ai-url-input': { value: 'http://localhost:11434' },
+      'local-ai-dot': mainDot,
+      'local-ai-status-text': mainText,
+    };
+    mainText.textContent = '';
+    await localAiControls.testOllamaConnection();
+    assert('Reachable server with blocked normal fetch shows CORS guidance',
+      mainText.textContent.includes('Blocked by CORS'),
+      mainText.textContent);
+    assert('CORS classification uses no-cors reachability probe', noCorsProbeCalls === 1, `no-cors calls: ${noCorsProbeCalls}`);
+  } finally {
+    document.getElementById = originalGetElementById;
+    globalThis.fetch = originalFetch;
+    if (hadLocation) globalThis.location = originalLocation;
+    else delete globalThis.location;
+  }
 
   // ═══════════════════════════════════════
   // Results
