@@ -80,31 +80,32 @@ console.log('2. Apostrophe click fix');
 
 const ctxSrc = await fetch('js/context-cards.js').then(r => r.text());
 const ctxSummarySrc = await fetch('js/context-card-summaries.js').then(r => r.text());
-const ctxCardSrc = `${ctxSrc}\n${ctxSummarySrc}`;
+const ctxMedicalSrc = await fetch('js/context-card-medical-history-editor.js').then(r => r.text());
+const ctxCardSrc = `${ctxSrc}\n${ctxSummarySrc}\n${ctxMedicalSrc}`;
 // filterConditionSuggestions must wrap the inline call arg in JSON.stringify
 // so apostrophes survive the HTML-attribute → JS-string round-trip. The
 // live DOM round-trip probe lives in test-family-history-dom.js.
 assert("filterConditionSuggestions uses JSON.stringify(m) for inline onclick arg",
-  /selectConditionSuggestion\(\$\{escapeHTML\(JSON\.stringify\(m\)\)\}\)/.test(ctxSrc));
+  /selectConditionSuggestion\(\$\{escapeHTML\(JSON\.stringify\(m\)\)\}\)/.test(ctxMedicalSrc));
 assert("filterFamilyConditionSuggestions uses JSON.stringify(m) for inline onclick arg",
-  /selectFamilyConditionSuggestion\(\$\{escapeHTML\(JSON\.stringify\(m\)\)\}\)/.test(ctxSrc));
+  /selectFamilyConditionSuggestion\(\$\{escapeHTML\(JSON\.stringify\(m\)\)\}\)/.test(ctxMedicalSrc));
 
 // ═══════════════════════════════════════
 // 3. FAMILY_RELATIVES allowlist + addFamilyHistoryEntry guards (source)
 // ═══════════════════════════════════════
 console.log('3. FAMILY_RELATIVES + addEntry guards');
 
-// FAMILY_RELATIVES isn't exported (private to context-cards.js), so we
+// FAMILY_RELATIVES isn't exported (private to context-card-medical-history-editor.js), so we
 // assert its allowlist + the handler's guards via the source. The live
 // handler-mutation test lives in test-family-history-dom.js.
 assert('FAMILY_RELATIVES declared with 8 first-degree+grandparent keys',
-  /FAMILY_RELATIVES\s*=\s*\[[^\]]*'mother'[^\]]*'father'[^\]]*'sibling'[^\]]*'child'[^\]]*'maternal_grandmother'[^\]]*'maternal_grandfather'[^\]]*'paternal_grandmother'[^\]]*'paternal_grandfather'/s.test(ctxSrc));
+  /FAMILY_RELATIVES\s*=\s*\[[^\]]*'mother'[^\]]*'father'[^\]]*'sibling'[^\]]*'child'[^\]]*'maternal_grandmother'[^\]]*'maternal_grandfather'[^\]]*'paternal_grandmother'[^\]]*'paternal_grandfather'/s.test(ctxMedicalSrc));
 assert('addFamilyHistoryEntry validates relative against FAMILY_RELATIVES',
-  /addFamilyHistoryEntry[\s\S]{0,1000}if \(!FAMILY_RELATIVES\.some\(r => r\.key === relative\)\) return/.test(ctxSrc));
+  /addFamilyHistoryEntry[\s\S]{0,1000}if \(!FAMILY_RELATIVES\.some\(r => r\.key === relative\)\) return/.test(ctxMedicalSrc));
 assert('addFamilyHistoryEntry clamps onsetAge to 0–120',
-  /Math\.max\(0,\s*Math\.min\(120,\s*parseInt\(ageRaw, 10\)\)\)/.test(ctxSrc));
+  /Math\.max\(0,\s*Math\.min\(120,\s*parseInt\(ageRaw, 10\)\)\)/.test(ctxMedicalSrc));
 assert('addFamilyHistoryEntry early-returns when relative or condition empty',
-  /if \(!relative \|\| !condition\) return/.test(ctxSrc));
+  /if \(!relative \|\| !condition\) return/.test(ctxMedicalSrc));
 
 // ═══════════════════════════════════════
 // 4. saveDiagnoses null-guard with familyHistory-only
@@ -112,7 +113,7 @@ assert('addFamilyHistoryEntry early-returns when relative or condition empty',
 console.log('4. saveDiagnoses null-guard');
 
 assert('saveDiagnoses considers familyHistory.length before nulling diagnoses',
-  /const fhLen = Array\.isArray\(state\.importedData\.diagnoses\.familyHistory\)[\s\S]{0,300}fhLen === 0/.test(ctxSrc));
+  /const fhLen = diagnoses\.familyHistory\.length[\s\S]{0,300}fhLen === 0/.test(ctxMedicalSrc));
 
 // Profile migration backfills familyHistory on legacy diagnoses objects.
 const profSrc = await fetch('js/profile.js').then(r => r.text());
@@ -178,15 +179,15 @@ console.log('8. Medical History rename');
 assert("Card label is 'Medical History'",
   /label:\s*'Medical History'/.test(ctxCardSrc));
 assert("Modal headline reads 'Medical History'",
-  /renderContextEditorModal\(modal,\s*'Medical History'/.test(ctxSrc));
+  /renderContextEditorModal\(modal,\s*'Medical History'/.test(ctxMedicalSrc));
 assert('Modal description mentions both diagnoses and family history',
-  /diagnoses and family history/.test(ctxSrc));
+  /diagnoses and family history/.test(ctxMedicalSrc));
 assert('Card placeholder mentions family history',
   /'Add diagnoses or family history'/.test(ctxCardSrc));
-assert("saveAndRefresh toast says 'Medical history saved'",
-  ctxSrc.includes("saveAndRefresh('Medical history saved', 'diagnoses')"));
+assert("saveDiagnoses toast says 'Medical history saved'",
+  ctxMedicalSrc.includes("saveContextAndRefresh('Medical history saved', 'diagnoses')"));
 assert("clearDiagnoses toast says 'Medical history cleared'",
-  ctxSrc.includes("'Medical history cleared'"));
+  ctxMedicalSrc.includes("'Medical history cleared'"));
 assert('Tooltip mentions family history reframing risk',
   /heart attack at 52 reframes a borderline LDL/.test(ctxCardSrc));
 assert('AI context section header renamed to Medical History / Diagnoses',
@@ -200,18 +201,26 @@ assert("Field-label map uses 'Medical History'",
 console.log('9. UI subsection');
 
 assert("Modal renders <div class='ctx-family-history'> wrapper",
-  /class="ctx-family-history"/.test(ctxSrc));
+  /class="ctx-family-history"/.test(ctxMedicalSrc));
 assert('Relative dropdown uses <optgroup> grouping',
-  /<optgroup label="Parents"/.test(ctxSrc) &&
-  /<optgroup label="Siblings & Children"/.test(ctxSrc) &&
-  /<optgroup label="Maternal grandparents"/.test(ctxSrc) &&
-  /<optgroup label="Paternal grandparents"/.test(ctxSrc));
+  /<optgroup label="Parents"/.test(ctxMedicalSrc) &&
+  /<optgroup label="Siblings & Children"/.test(ctxMedicalSrc) &&
+  /<optgroup label="Maternal grandparents"/.test(ctxMedicalSrc) &&
+  /<optgroup label="Paternal grandparents"/.test(ctxMedicalSrc));
 assert('Add form is split into two rows for legibility',
-  (ctxSrc.match(/ctx-family-add-row/g) || []).length >= 2);
+  (ctxMedicalSrc.match(/ctx-family-add-row/g) || []).length >= 2);
 assert('Relative chip emoji mapping defined',
-  /RELATIVE_EMOJI\s*=\s*\{/.test(ctxSrc));
+  /RELATIVE_EMOJI\s*=\s*\{/.test(ctxMedicalSrc));
 assert("Closing-suggestions handler also clears fh-condition-suggestions",
-  /fh-condition-suggestions[\s\S]{0,200}fhContainer\.innerHTML\s*=\s*''/.test(ctxSrc));
+  /fh-condition-suggestions[\s\S]{0,200}fhContainer\.innerHTML\s*=\s*''/.test(ctxMedicalSrc));
+assert('Condition rows expose edit action',
+  ctxMedicalSrc.includes('onclick="editCondition(${i})"'));
+assert('Family rows expose edit action',
+  ctxMedicalSrc.includes('onclick="editFamilyHistoryEntry(${i})"'));
+assert('Condition edit updates existing row instead of appending',
+  /diagnoses\.conditions\[editingConditionIndex\] = cond/.test(ctxMedicalSrc));
+assert('Family history edit updates existing row instead of appending',
+  /diagnoses\.familyHistory\[editingFamilyHistoryIndex\] = entry/.test(ctxMedicalSrc));
 
 // ═══════════════════════════════════════
 // 10. CSS hooks
@@ -223,12 +232,17 @@ const stylesSrc = [
 ].join('\n');
 for (const cls of [
   '.ctx-family-history', '.ctx-family-head', '.ctx-family-count',
-  '.ctx-family-list', '.ctx-family-item', '.ctx-family-relative',
+  '.ctx-family-list', '.ctx-family-item', '.ctx-family-main', '.ctx-family-relative',
   '.ctx-family-condition', '.ctx-family-age', '.ctx-family-note',
-  '.ctx-family-add', '.ctx-family-add-row',
+  '.ctx-family-actions', '.ctx-family-add', '.ctx-family-add-row',
 ]) {
   assert(`CSS defines ${cls}`, new RegExp(cls.replace('.', '\\.') + '\\s*\\{').test(stylesSrc));
 }
+assert('Family rows do not wrap by default on desktop',
+  /\.ctx-family-item\s*\{[\s\S]{0,220}flex-wrap:\s*nowrap/.test(stylesSrc));
+assert('Long family row text gets ellipsis instead of forcing row height',
+  /\.ctx-family-condition\s*\{[\s\S]{0,180}text-overflow:\s*ellipsis/.test(stylesSrc) &&
+  /\.ctx-family-relative-label\s*\{[\s\S]{0,140}text-overflow:\s*ellipsis/.test(stylesSrc));
 
 console.log(`\nResults: ${pass} passed, ${fail} failed, ${pass + fail} total`);
 process.exit(fail > 0 ? 1 : 0);
