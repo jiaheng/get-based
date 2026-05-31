@@ -39,7 +39,7 @@ export function collectWearableOverrides(env) {
   return out;
 }
 
-const PORT = parseInt(process.argv[2], 10) || 8000;
+const PORT = parseInt(process.argv[2] || process.env.PORT, 10) || 8000;
 // Bind address. Defaults to 127.0.0.1 (loopback only) so the dev server
 // stays off the LAN unless explicitly opted in. Set HOST=0.0.0.0 to expose
 // it to the local network — useful for testing on a phone over Wi-Fi.

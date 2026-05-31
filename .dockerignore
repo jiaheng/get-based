@@ -1,9 +1,15 @@
 # Version control and repository automation
 .git
+.gitignore
 .github
 
 # Dependency directories
 node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
 
 # Build and release artifacts
 dist
@@ -13,15 +19,21 @@ dist-docs
 docs/.vitepress/cache
 
 # Test and coverage artifacts
-tests/.coverage.json
+coverage
+.nyc_output
+test-results
+playwright-report
 test-screenshots
-test-data.json
-test-*.json
+tests/.coverage.json
 labcharts-*.json
+test-*.json
+test-data.json
+*.lcov
 
 # Local environment and secret files
 .env
 .env.*
+!.env.example
 .env.local
 .env.*.local
 
@@ -30,6 +42,11 @@ labcharts-*.json
 
 # Note: .gitignore also ignores ad-hoc *.png files, but tracked app assets
 # such as icons and screenshots should remain available to Docker builds.
+
+# Local/editor files
+.DS_Store
+.idea
+.vscode
 
 # Local assistant/tool configuration
 .claude
