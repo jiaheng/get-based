@@ -5,6 +5,7 @@
   "description": "getbased — open-source health dashboard (PWA)",
   "type": "module",
   "scripts": {
+    "start": "node dev-server.js",
     "dev-server": "node dev-server.js",
     "test": "vitest run",
     "test:watch": "vitest"
