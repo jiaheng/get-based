@@ -101,6 +101,17 @@ node dev-server.js
 
 Open `http://localhost:8000`. You need an AI provider API key or local AI server for PDF import and chat. All other features work without one.
 
+## Docker
+
+Build and run the Node-based server image:
+
+```bash
+docker build -t getbased .
+docker run --rm -p 8000:8000 -e HOST=0.0.0.0 -e PORT=8000 getbased
+```
+
+The container uses `npm start`, which runs `dev-server.js` so local API and proxy routes remain available.
+
 ## Tech stack
 
 Web app only — no build tools, no bundler, no package manager. Pure ES modules under `js/`.

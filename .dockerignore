@@ -1,0 +1,36 @@
+.git
+.gitignore
+.github
+
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+.env
+.env.*
+!.env.example
+
+# Build and test artifacts
+coverage
+.nyc_output
+dist
+out
+release
+test-results
+playwright-report
+test-screenshots
+tests/.coverage.json
+labcharts-*.json
+test-*.json
+test-data.json
+*.lcov
+
+# Local/editor files
+.DS_Store
+.idea
+.vscode
+.claude
+.mcp.json
