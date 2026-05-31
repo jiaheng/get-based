@@ -1,0 +1,42 @@
+# Version control and repository automation
+.git
+.github
+
+# Dependency directories
+node_modules
+
+# Build and release artifacts
+dist
+out
+release
+dist-docs
+docs/.vitepress/cache
+
+# Test and coverage artifacts
+tests/.coverage.json
+test-screenshots
+test-data.json
+test-*.json
+labcharts-*.json
+
+# Local environment and secret files
+.env
+.env.*
+.env.local
+.env.*.local
+
+# Generated/exported documents
+*.pdf
+
+# Note: .gitignore also ignores ad-hoc *.png files, but tracked app assets
+# such as icons and screenshots should remain available to Docker builds.
+
+# Local assistant/tool configuration
+.claude
+.mcp.json
+
+# Local-only artifacts mirrored from .gitignore
+BingSiteAuth.xml
+docs/plans
+tools
+dev-chrome.sh
