@@ -47,6 +47,29 @@ const HOST = process.env.HOST || '127.0.0.1';
 const __filename = fileURLToPath(import.meta.url);
 const ROOT = path.dirname(__filename);
 
+const VERCEL_CONFIG = JSON.parse(fs.readFileSync(path.join(ROOT, 'vercel.json'), 'utf8'));
+// Keep Docker/static responses on the same production header policy as Vercel,
+// including Content-Security-Policy, Cross-Origin-Opener-Policy,
+// Cross-Origin-Embedder-Policy, X-Frame-Options, and related security headers.
+export const PRODUCTION_HEADERS = Object.freeze({
+  ...VERCEL_CONFIG.routes.find(route => route.src === '/(.*)')?.headers,
+});
+
+export function _productionHeadersForPath(pathname = '/') {
+  const routeCapture = String(pathname).replace(/^\//, '');
+  return Object.fromEntries(
+    Object.entries(PRODUCTION_HEADERS).map(([name, value]) => [
+      name,
+      String(value).replaceAll('$1', routeCapture),
+    ]),
+  );
+}
+
+function productionHeadersForRequest(req) {
+  const pathname = new URL(req.url || '/', 'http://localhost').pathname;
+  return _productionHeadersForPath(pathname);
+}
+
 // Mutex for /api/deploy-catalog so two concurrent POSTs can't race on
 // the read-hash → writeFileSync critical section. Promise-chained queue:
 // each request's _deployCatalog body waits for the prior one to finish.
@@ -382,9 +405,8 @@ function serveFile(req, res, filePath) {
     if (err) { res.writeHead(404); res.end('Not found'); return; }
     const ext = path.extname(resolved).toLowerCase();
     const headers = {
+      ...productionHeadersForRequest(req),
       'Content-Type': MIME[ext] || 'application/octet-stream',
-      'Cross-Origin-Opener-Policy': 'same-origin',
-      'Cross-Origin-Embedder-Policy': 'credentialless',
       // Dev-only — phones over Tailscale otherwise hit the PWA service
       // worker cache and never see code changes until the SW updates on
       // its own schedule. Forcing no-store makes every reload pick up

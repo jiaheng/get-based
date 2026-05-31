@@ -8,7 +8,8 @@
     "start": "node dev-server.js",
     "dev-server": "node dev-server.js",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "smoke:docker-headers": "node scripts/smoke-docker-headers.mjs"
   },
   "devDependencies": {
     "fake-indexeddb": "^6.2.5",

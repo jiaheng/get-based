@@ -16,7 +16,9 @@
 // These were extracted as exports so tests can import them without spinning
 // up the HTTP server (the server-side SSRF guard would be end-to-end work).
 
-import { parseEnvLocal, _proxyHostBlocked, _isAllowedProxyUrl, _resolveCatalogRepo, _runPostDeployHooks, collectWearableOverrides, WEARABLE_CLIENT_ID_VARS, DEFAULT_UVDATA_UPSTREAM } from '../dev-server.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { parseEnvLocal, _proxyHostBlocked, _isAllowedProxyUrl, _resolveCatalogRepo, _runPostDeployHooks, collectWearableOverrides, WEARABLE_CLIENT_ID_VARS, DEFAULT_UVDATA_UPSTREAM, PRODUCTION_HEADERS, _productionHeadersForPath } from '../dev-server.js';
 
 let passed = 0, failed = 0;
 function assert(name, cond, detail) {
@@ -457,6 +459,22 @@ function gitTable(opts = {}) {
   assert('non-Vercel URL rejected before fetch',
     out.vercel?.skipped === true && /does not look like a Vercel/.test(out.vercel?.reason || ''),
     JSON.stringify(out.vercel));
+}
+
+console.log('\n── production security headers ──');
+
+{
+  const vercel = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'vercel.json'), 'utf8'));
+  const expected = vercel.routes.find(route => route.src === '/(.*)')?.headers || {};
+  assert('dev-server production headers mirror vercel.json',
+    JSON.stringify(PRODUCTION_HEADERS) === JSON.stringify(expected));
+  assert('production headers include CSP for Docker smoke coverage',
+    typeof PRODUCTION_HEADERS['Content-Security-Policy'] === 'string' &&
+    PRODUCTION_HEADERS['Content-Security-Policy'].includes("object-src 'none'") &&
+    PRODUCTION_HEADERS['Content-Security-Policy'].includes("base-uri 'self'"));
+  const appHeaders = _productionHeadersForPath('/app');
+  assert('Onion-Location substitutes Vercel route capture',
+    appHeaders['Onion-Location']?.endsWith('.onion/app'), appHeaders['Onion-Location']);
 }
 
 console.log('\n── collectWearableOverrides (issue #145) ──');
