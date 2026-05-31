@@ -1,6 +1,6 @@
 # Deployment
 
-getbased is deployed on Vercel. The app is static — no server-side code, no API routes, no backend. Vercel serves the files directly and injects security headers.
+getbased is deployed on Vercel. Most app assets are static and served directly from the filesystem, while selected `api/*` files run as Vercel Edge Functions for CORS proxying, OAuth token exchange, runtime configuration, and deployment metadata. Vercel also injects security headers.
 
 ## Vercel configuration
 
@@ -93,6 +93,52 @@ The app and landing page are deployed as two separate Vercel projects on the sam
 DNS (Namecheap): A record `@` → `76.76.21.21` (Vercel), CNAME `app` → `cname.vercel-dns.com`, CNAME `www` → `cname.vercel-dns.com`.
 
 The landing page is self-contained (all CSS/JS inline) and depends only on three icon files. CTA links point to `https://app.getbased.health`. A small inline script rewrites these to `/app` on `localhost` for local development.
+
+## Docker deployments
+
+Docker deployments should run the Node server (`npm start`, which executes `node dev-server.js`) rather than serving the repository as static files only. The browser code relies on same-origin API/proxy routes for core self-hosted integrations, so a static-only Docker image would leave those features unavailable.
+
+### Runtime mode
+
+The committed `Dockerfile` uses `node:22-alpine`, installs production dependencies, copies the repository, exposes port `8000`, and starts `npm start`. `package.json` maps `npm start` to `node dev-server.js`, so the container serves static app assets and the Node implementations of the proxy/API routes from the same origin. This is intentionally closer to Vercel than a static file server because the Vercel deployment also has Edge Functions under `api/`.
+
+| Route | Docker behavior | Why it is required |
+|---|---|---|
+| `/api/proxy` | `POST`/`OPTIONS` handled by `dev-server.js` | Required by AI provider proxying, wearable API reads, server-side OAuth token exchange for Oura/Withings/Ultrahuman/Polar, wearable runtime client-ID overrides, CAMS UV relay access, supplement page fetches, and light-device URL checks. |
+| `/api/commit` | `GET` handled by `dev-server.js` | Used by the service worker, commit badge, and settings screen for deployed version metadata. |
+| `/api/check-url` | handled by `dev-server.js` | Used by local/admin tooling to validate reachable URLs without adding a separate backend. |
+| `/proxy?url=...` | `GET` handled by `dev-server.js` | Legacy/dev test proxy. It is guarded by the same origin and LAN restrictions as `/api/*`; do not expose it as an unauthenticated general-purpose proxy. |
+
+### Ports and startup
+
+Run the image with the same port that the Dockerfile exposes:
+
+```sh
+docker build -t getbased .
+docker run --rm -p 8000:8000 -e HOST=0.0.0.0 -e PORT=8000 getbased
+```
+
+The container defaults to `HOST=0.0.0.0` and `PORT=8000`. Outside Docker, `dev-server.js` defaults to loopback-only (`127.0.0.1`) unless `HOST=0.0.0.0` is set.
+
+### Docker environment variables
+
+| Variable | Required? | Purpose |
+|---|---:|---|
+| `HOST` | Yes for Docker networking | Bind address. Use `0.0.0.0` in containers so published ports work. |
+| `PORT` | Yes if not using the default | HTTP listen port. The Dockerfile exposes `8000`. |
+| `SITE_DIR` | Optional | Path to a sibling/attached landing-page checkout. If absent, `/` serves the app directly. |
+| `OURA_CLIENT_ID`, `WITHINGS_CLIENT_ID`, `ULTRAHUMAN_CLIENT_ID`, `POLAR_CLIENT_ID`, `WHOOP_CLIENT_ID`, `FITBIT_CLIENT_ID` | Optional | Self-host OAuth client-ID overrides returned to the browser by `/api/proxy` runtime config. |
+| `OURA_CLIENT_SECRET`, `WITHINGS_CLIENT_SECRET`, `ULTRAHUMAN_CLIENT_SECRET`, `POLAR_CLIENT_SECRET` | Required only for those server-side OAuth providers | Secret injection for OAuth token exchange through `/api/proxy`. WHOOP and Fitbit use PKCE and do not need server-side client secrets. |
+| `UVDATA_UPSTREAM` | Optional | Override the CAMS UV relay base URL. |
+| `UVDATA_BEARER` | Required when using the default hosted CAMS relay | Bearer token injected by `/api/proxy` for `https://uvdata.getbased.health`. Not required when `UVDATA_UPSTREAM` points to a relay that does not require this token. |
+| `LOCAL_TOOL_PORTS` / `EDITOR_PORTS` | Optional | Extra local tool origins allowed to call API/proxy routes during development. |
+| `CATALOG_GIT_REPO`, `CATALOG_COMMIT_MSG`, `CATALOG_PUSH`, `VERCEL_DEPLOY_HOOK_URL` | Optional | Admin catalog deploy hooks used by `dev-server.js`; not needed for normal app hosting. |
+
+### Known Docker limitations
+
+* Docker is not static-only: if the container is replaced with Nginx, `python -m http.server`, or another static server, `/api/proxy`, `/api/commit`, `/api/check-url`, and `/proxy` will not exist. In that static-only mode, server-side wearable OAuth for Oura/Withings/Ultrahuman/Polar, wearable runtime client-ID overrides, wearable vendor API fetches that require the proxy, CAMS hosted UV relay access, proxied AI/custom API requests, supplement/light-device proxy fetches, and commit metadata are unavailable or degraded.
+* Browser-direct OAuth or API flows that do not require the proxy may still work in static-only mode, but they should be treated as best-effort because several shared wearable sync paths call `/api/proxy`.
+* When `HOST=0.0.0.0`, `dev-server.js` disables most `/api/*` and `/proxy` access for non-loopback peers as a safety guard. This is appropriate for local/LAN testing; production deployments should terminate TLS in front of the container and preserve same-origin browser requests.
 
 ### Local dev server
 
