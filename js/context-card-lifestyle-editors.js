@@ -56,10 +56,13 @@ import {
   ENV_TOXINS,
   ENV_BUILDING,
 } from './constants.js';
-import { escapeHTML, showNotification } from './utils.js';
+import { escapeHTML, hasDirtyFormFields, showNotification } from './utils.js';
 import { formatTime, getTimeFormat, parseTimeInput } from './theme.js';
 import { saveImportedData } from './data.js';
-import { recordArrayItemTombstone } from './data-merge.js';
+import {
+  clearImportedArray,
+  deleteImportedArrayItem,
+} from './data-merge.js';
 import { getLatitudeFromLocation } from './profile.js';
 import { scanDietForContaminants } from './food-contaminants.js';
 import {
@@ -83,6 +86,18 @@ let saveContextAndRefresh = (msg, field) => {
   saveImportedData();
   showNotification(msg, 'success');
 };
+
+function refreshOpenHealthGoalsModalOnSync() {
+  const overlay = document.getElementById('modal-overlay');
+  const modal = document.getElementById('detail-modal');
+  if (!overlay?.classList?.contains('show') || modal?.dataset?.syncRefreshKind !== 'healthGoals') return;
+  if (hasDirtyFormFields(modal)) return;
+  renderHealthGoalsModal(modal);
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('labcharts-sync-applied', refreshOpenHealthGoalsModalOnSync);
+}
 
 export function configureLifestyleContextEditors({ recordChange, saveAndRefresh } = {}) {
   if (typeof recordChange === 'function') recordContextChange = recordChange;
@@ -517,6 +532,7 @@ export function openHealthGoalsEditor() {
 }
 
 export function renderHealthGoalsModal(modal) {
+  if (modal?.dataset) modal.dataset.syncRefreshKind = 'healthGoals';
   const goals = state.importedData.healthGoals || [];
   let html = '';
   if (goals.length > 0) {
@@ -570,8 +586,7 @@ export function addHealthGoal() {
 
 export function deleteHealthGoal(idx) {
   if (!state.importedData.healthGoals) return;
-  recordArrayItemTombstone(state.importedData, 'healthGoals', state.importedData.healthGoals[idx]);
-  state.importedData.healthGoals.splice(idx, 1);
+  deleteImportedArrayItem(state.importedData, 'healthGoals', idx);
   recordContextChange('healthGoals');
   saveImportedData();
   renderHealthGoalsModal(document.getElementById("detail-modal"));
@@ -585,10 +600,7 @@ export function closeHealthGoals() {
 }
 
 export function clearHealthGoals() {
-  for (const goal of state.importedData.healthGoals || []) {
-    recordArrayItemTombstone(state.importedData, 'healthGoals', goal);
-  }
-  state.importedData.healthGoals = [];
+  clearImportedArray(state.importedData, 'healthGoals');
   recordContextChange('healthGoals');
   saveImportedData();
   window.closeModal();

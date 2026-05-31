@@ -1,11 +1,13 @@
 // supplements.js — Supplement/medication editor and dashboard section
 
 import { state } from './state.js';
-import { escapeHTML, showNotification, isDebugMode } from './utils.js';
+import { escapeHTML, hasDirtyFormFields, showNotification, isDebugMode } from './utils.js';
 import { saveImportedData } from './data.js';
 import {
+  appendImportedArrayItem,
+  deleteImportedArrayItem,
   getConfiguredArrayItemId,
-  recordArrayItemTombstone,
+  replaceImportedArrayItem,
 } from './data-merge.js';
 import { callClaudeAPI, hasAIProvider, supportsVision } from './api.js';
 import { resizeImage, isValidImageType, formatImageBlock, buildVisionContent } from './image-utils.js';
@@ -51,6 +53,29 @@ function _sourceUrlParts(raw) {
     url: parsed.toString(),
     host: parsed.hostname.replace(/^www\./, '')
   };
+}
+
+function refreshOpenSupplementsEditorOnSync() {
+  const overlay = document.getElementById('modal-overlay');
+  const modal = document.getElementById('detail-modal');
+  if (!overlay?.classList?.contains('show') || modal?.dataset?.syncRefreshKind !== 'supplements') return;
+  if (hasDirtyFormFields(modal)) return;
+  const idx = Number.parseInt(modal.dataset.syncRefreshEditIdx || '', 10);
+  const itemId = modal.dataset.syncRefreshItemId || '';
+  const supps = state.importedData.supplements || [];
+  let nextIdx = -1;
+  if (Number.isInteger(idx) && supps[idx]) {
+    const idxItemId = getConfiguredArrayItemId('supplements', supps[idx]);
+    if (!itemId || idxItemId === itemId) nextIdx = idx;
+  }
+  if (nextIdx < 0 && itemId) {
+    nextIdx = supps.findIndex(s => getConfiguredArrayItemId('supplements', s) === itemId);
+  }
+  openSupplementsEditor(nextIdx >= 0 ? nextIdx : undefined);
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('labcharts-sync-applied', refreshOpenSupplementsEditorOnSync);
 }
 
 export function renderSupplementsSection() {
@@ -500,6 +525,9 @@ export function openSupplementsEditor(editIdx) {
     <div id="supp-add-form-area"></div>
   </div>`;
   modal.innerHTML = html;
+  modal.dataset.syncRefreshKind = 'supplements';
+  modal.dataset.syncRefreshEditIdx = isEdit ? String(editIdx) : '';
+  modal.dataset.syncRefreshItemId = isEdit ? (getConfiguredArrayItemId('supplements', supps[editIdx]) || '') : '';
   overlay.classList.add("show");
   if (isEdit) {
     const expanded = document.querySelector('.supp-list-expanded');
@@ -569,15 +597,9 @@ export function saveSupplement(idx) {
   if (isFinite(timesNum) && timesNum > 0) entry.timesPerDay = timesNum;
   if (parsedSourceUrl) entry.sourceUrl = parsedSourceUrl.toString();
   if (idx >= 0) {
-    const existing = state.importedData.supplements[idx];
-    const existingId = getConfiguredArrayItemId('supplements', existing);
-    const nextId = getConfiguredArrayItemId('supplements', entry);
-    if (existingId && existingId !== nextId) {
-      recordArrayItemTombstone(state.importedData, 'supplements', existing);
-    }
-    state.importedData.supplements[idx] = entry;
+    replaceImportedArrayItem(state.importedData, 'supplements', idx, entry);
   } else {
-    state.importedData.supplements.push(entry);
+    appendImportedArrayItem(state.importedData, 'supplements', entry);
   }
   saveImportedData();
   showNotification(idx >= 0 ? 'Supplement updated' : 'Supplement added', 'success');
@@ -592,8 +614,7 @@ export function saveSupplement(idx) {
 export function deleteSupplement(idx) {
   if (!state.importedData.supplements || !state.importedData.supplements[idx]) return;
   const name = state.importedData.supplements[idx].name;
-  recordArrayItemTombstone(state.importedData, 'supplements', state.importedData.supplements[idx]);
-  state.importedData.supplements.splice(idx, 1);
+  deleteImportedArrayItem(state.importedData, 'supplements', idx);
   saveImportedData();
   showNotification(`"${name}" removed`, 'info');
   // Re-render dashboard supplements section

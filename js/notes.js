@@ -1,11 +1,41 @@
 // notes.js — Standalone note editor
 import { state } from './state.js';
-import { escapeHTML, showNotification, showConfirmDialog } from './utils.js';
+import { escapeHTML, hasDirtyFormFields, showNotification, showConfirmDialog } from './utils.js';
 import { saveImportedData } from './data.js';
 import {
-  getConfiguredArrayItemId,
-  recordArrayItemTombstone,
+  appendImportedArrayItem,
+  deleteImportedArrayItem,
+  ensureImportedArray,
+  replaceImportedArrayItem,
 } from './data-merge.js';
+
+function refreshOpenNoteEditorOnSync() {
+  const overlay = document.getElementById('modal-overlay');
+  const modal = document.getElementById('detail-modal');
+  if (!overlay?.classList?.contains('show') || modal?.dataset?.syncRefreshKind !== 'note') return;
+  if (hasDirtyFormFields(modal)) return;
+  if (modal.dataset.syncRefreshMode !== 'edit') {
+    openNoteEditor(modal.dataset.syncRefreshDate || undefined);
+    return;
+  }
+  const idx = Number.parseInt(modal.dataset.syncRefreshIndex || '', 10);
+  const date = modal.dataset.syncRefreshDate || '';
+  const noteAtIdx = state.importedData.notes?.[idx];
+  if (Number.isInteger(idx) && noteAtIdx && (!date || noteAtIdx.date === date)) {
+    openNoteEditor(null, idx);
+    return;
+  }
+  const nextIdx = (state.importedData.notes || []).findIndex(n => n?.date === date);
+  if (nextIdx >= 0) {
+    openNoteEditor(null, nextIdx);
+  } else {
+    window.closeModal?.();
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('labcharts-sync-applied', refreshOpenNoteEditorOnSync);
+}
 
 export function openNoteEditor(date, existingIdx) {
   const modal = document.getElementById("detail-modal");
@@ -28,6 +58,10 @@ export function openNoteEditor(date, existingIdx) {
       <button class="import-btn import-btn-secondary" onclick="closeModal()">Cancel</button>
       ${isEditing ? `<button class="import-btn import-btn-secondary" style="color:var(--red);border-color:var(--red);margin-left:auto" onclick="deleteNote(${existingIdx})">Delete</button>` : ''}
     </div>`;
+  modal.dataset.syncRefreshKind = 'note';
+  modal.dataset.syncRefreshMode = isEditing ? 'edit' : 'add';
+  modal.dataset.syncRefreshIndex = isEditing ? String(existingIdx) : '';
+  modal.dataset.syncRefreshDate = defaultDate || '';
   overlay.classList.add("show");
   setTimeout(() => {
     const ta = document.getElementById('note-textarea');
@@ -42,18 +76,12 @@ export function saveNote(idx) {
   const text = ta ? ta.value.trim() : '';
   if (!date) { showNotification('Please select a date', 'error'); return; }
   if (!text) { showNotification('Please enter note text', 'error'); return; }
-  if (!state.importedData.notes) state.importedData.notes = [];
+  ensureImportedArray(state.importedData, 'notes');
   const nextNote = { date, text };
   if (idx !== null && idx !== undefined) {
-    const existing = state.importedData.notes[idx];
-    const existingId = getConfiguredArrayItemId('notes', existing);
-    const nextId = getConfiguredArrayItemId('notes', nextNote);
-    if (existingId && existingId !== nextId) {
-      recordArrayItemTombstone(state.importedData, 'notes', existing);
-    }
-    state.importedData.notes[idx] = nextNote;
+    replaceImportedArrayItem(state.importedData, 'notes', idx, nextNote);
   } else {
-    state.importedData.notes.push(nextNote);
+    appendImportedArrayItem(state.importedData, 'notes', nextNote);
   }
   saveImportedData();
   window.closeModal();
@@ -65,8 +93,7 @@ export function saveNote(idx) {
 export async function deleteNote(idx) {
   if (!state.importedData.notes) return;
   if (await showConfirmDialog("Delete this note? This can't be undone.")) {
-    recordArrayItemTombstone(state.importedData, 'notes', state.importedData.notes[idx]);
-    state.importedData.notes.splice(idx, 1);
+    deleteImportedArrayItem(state.importedData, 'notes', idx);
     saveImportedData();
     window.closeModal();
     const activeNav = document.querySelector(".nav-item.active");

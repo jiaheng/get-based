@@ -7,7 +7,12 @@ import { saveImportedData } from './data.js';
 import { callClaudeAPI, getActiveModelDisplay, getActiveModelId, getAIProvider, hasAIProvider, isAIPaused } from './api.js';
 import { renderThreadList, saveChatThreadIndex } from './chat-threads.js';
 import { renderMarkdown } from './markdown.js';
-import { recordArrayItemTombstone } from './data-merge.js';
+import {
+  appendImportedArrayItem,
+  deleteImportedArrayItems,
+  ensureImportedArray,
+  replaceImportedArrayItem,
+} from './data-merge.js';
 
 const SUMMARY_PROMPT = `You are a concise medical note-taker. Summarize this health consultation into a structured note.
 
@@ -159,13 +164,13 @@ function _getSavedSummaries() {
 }
 
 async function _saveSummaryToProfile(summary) {
-  if (!state.importedData.chatSummaries) state.importedData.chatSummaries = [];
-  const idx = state.importedData.chatSummaries.findIndex(s => s.threadId === summary.threadId);
+  const summaries = ensureImportedArray(state.importedData, 'chatSummaries');
+  const idx = summaries.findIndex(s => s.threadId === summary.threadId);
   if (idx >= 0) {
-    summary.id = state.importedData.chatSummaries[idx].id;
-    state.importedData.chatSummaries[idx] = summary;
+    summary.id = summaries[idx].id;
+    replaceImportedArrayItem(state.importedData, 'chatSummaries', idx, summary);
   } else {
-    state.importedData.chatSummaries.push(summary);
+    appendImportedArrayItem(state.importedData, 'chatSummaries', summary);
   }
   await saveImportedData();
 }
@@ -174,11 +179,27 @@ function _getLatestSavedSummary(threadId) {
   return _getSavedSummaries().find(s => s.threadId === threadId);
 }
 
+function refreshOpenSummaryModalOnSync() {
+  const overlay = document.getElementById('summary-modal-overlay');
+  if (!overlay?.classList?.contains('show') || overlay.dataset.syncRefreshKind !== 'chat-summary') return;
+  const id = overlay.dataset.syncRefreshSummaryId || '';
+  renderSavedSummaries();
+  if (!id) return;
+  const summary = _getSavedSummaries().find(s => s.id === id);
+  if (summary) {
+    viewSavedSummary(id);
+  } else {
+    _closeSummaryModal();
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('labcharts-sync-applied', refreshOpenSummaryModalOnSync);
+}
+
 export async function deleteSavedSummary(id) {
   if (!state.importedData.chatSummaries) return;
-  const summary = state.importedData.chatSummaries.find(s => s.id === id);
-  recordArrayItemTombstone(state.importedData, 'chatSummaries', summary);
-  state.importedData.chatSummaries = state.importedData.chatSummaries.filter(s => s.id !== id);
+  deleteImportedArrayItems(state.importedData, 'chatSummaries', s => s.id === id);
   await saveImportedData();
   renderSavedSummaries();
   _closeSummaryModal();
@@ -231,6 +252,8 @@ function _showSummaryModal(summaryText, thread, loading = false, usageInfo = nul
   } else {
     overlay.className = 'modal-overlay show';
   }
+  overlay.dataset.syncRefreshKind = 'chat-summary';
+  overlay.dataset.syncRefreshSummaryId = thread?._savedId || '';
 
   const threadName = thread ? escapeHTML(thread.name) : 'Conversation';
   const dateStr = thread?.summaryDate ? new Date(thread.summaryDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
