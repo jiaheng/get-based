@@ -27,6 +27,60 @@ getbased is deployed on Vercel. The app is static — no server-side code, no AP
 | `/docs/*` | `dist-docs/*` — VitePress documentation assets and pages |
 | Everything else | Served as-is from the filesystem (JS, CSS, images, manifest) |
 
+
+## Docker deployments
+
+Docker deployments use the repository `Dockerfile` and run the same static Node server used for local development. Build the image from the repository root:
+
+```bash
+docker build -t getbased .
+```
+
+Run the container locally:
+
+```bash
+docker run --rm -p 8000:8000 getbased
+```
+
+Open `http://localhost:8000`. The Docker image sets `HOST=0.0.0.0` and `PORT=8000` by default, exposes port `8000`, and starts with `npm start`, which runs `dev-server.js`. In Docker, `dev-server.js` is the production static server for the containerized app and provides the app routes plus local API/proxy endpoints. Vercel remains supported by `vercel.json`; it serves the static files and applies the Vercel route/header configuration instead of running the Docker container.
+
+Runtime environment variables:
+
+| Variable | Purpose |
+|---|---|
+| `HOST` | Bind address. Use `0.0.0.0` so Docker can publish the server. |
+| `PORT` | HTTP port. Use `8000` to match the image `EXPOSE` and examples. |
+| `OURA_CLIENT_ID` | Optional Oura OAuth client ID override surfaced by `dev-server.js`. |
+| `WITHINGS_CLIENT_ID` | Optional Withings OAuth client ID override surfaced by `dev-server.js`. |
+| `ULTRAHUMAN_CLIENT_ID` | Optional Ultrahuman OAuth client ID override surfaced by `dev-server.js`. |
+| `POLAR_CLIENT_ID` | Optional Polar OAuth client ID override surfaced by `dev-server.js`. |
+| `WHOOP_CLIENT_ID` | Optional WHOOP OAuth client ID override surfaced by `dev-server.js`. |
+| `FITBIT_CLIENT_ID` | Optional Fitbit OAuth client ID override surfaced by `dev-server.js`. |
+
+Production run example with catalog deployment hooks and wearable OAuth secrets:
+
+```bash
+docker run -d --name getbased \
+  -p 8000:8000 \
+  -e HOST=0.0.0.0 \
+  -e PORT=8000 \
+  -e CATALOG_GIT_REPO=/catalog \
+  -e VERCEL_DEPLOY_HOOK_URL="$VERCEL_DEPLOY_HOOK_URL" \
+  -e OURA_CLIENT_ID="$OURA_CLIENT_ID" \
+  -e OURA_CLIENT_SECRET="$OURA_CLIENT_SECRET" \
+  -e WITHINGS_CLIENT_ID="$WITHINGS_CLIENT_ID" \
+  -e WITHINGS_CLIENT_SECRET="$WITHINGS_CLIENT_SECRET" \
+  -e ULTRAHUMAN_CLIENT_ID="$ULTRAHUMAN_CLIENT_ID" \
+  -e ULTRAHUMAN_CLIENT_SECRET="$ULTRAHUMAN_CLIENT_SECRET" \
+  -e POLAR_CLIENT_ID="$POLAR_CLIENT_ID" \
+  -e POLAR_CLIENT_SECRET="$POLAR_CLIENT_SECRET" \
+  -e WHOOP_CLIENT_ID="$WHOOP_CLIENT_ID" \
+  -e FITBIT_CLIENT_ID="$FITBIT_CLIENT_ID" \
+  getbased
+```
+
+The current `Dockerfile` has no `ARG` instructions and no BuildKit `RUN --mount=type=secret` steps, so there are no supported build-time catalog secrets and no need for `docker build --build-arg`. Keep catalog, deploy-hook, and OAuth values out of the image; inject them at runtime with your orchestrator/CI secret store, `--env-file`, or mounted secret files that export environment variables before `npm start`.
+
 ## Domain layout
 
 The app and landing page are deployed as two separate Vercel projects on the same domain:

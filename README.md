@@ -103,14 +103,56 @@ Open `http://localhost:8000`. You need an AI provider API key or local AI server
 
 ## Docker
 
-Build and run the Node-based server image:
+Build the Docker image from the repository root:
 
 ```bash
 docker build -t getbased .
-docker run --rm -p 8000:8000 -e HOST=0.0.0.0 -e PORT=8000 getbased
 ```
 
-The container uses `npm start`, which runs `dev-server.js` so local API and proxy routes remain available.
+Run it locally and open `http://localhost:8000`:
+
+```bash
+docker run --rm -p 8000:8000 getbased
+```
+
+The image sets `HOST=0.0.0.0` and `PORT=8000` by default so the server binds to the container network interface. The container starts with `npm start`, which runs `dev-server.js`; for Docker deployments, `dev-server.js` is the production static server and keeps the local API/proxy routes available. Vercel deployments remain supported separately through `vercel.json`.
+
+Runtime configuration is supplied with environment variables (or a secret-backed `.env.local` mounted/read by your runtime):
+
+| Variable | Purpose |
+|---|---|
+| `HOST` | Bind address; use `0.0.0.0` in containers. |
+| `PORT` | HTTP port; the Docker image exposes `8000`. |
+| `OURA_CLIENT_ID` | Optional Oura OAuth client ID override. |
+| `WITHINGS_CLIENT_ID` | Optional Withings OAuth client ID override. |
+| `ULTRAHUMAN_CLIENT_ID` | Optional Ultrahuman OAuth client ID override. |
+| `POLAR_CLIENT_ID` | Optional Polar OAuth client ID override. |
+| `WHOOP_CLIENT_ID` | Optional WHOOP OAuth client ID override. |
+| `FITBIT_CLIENT_ID` | Optional Fitbit OAuth client ID override. |
+
+Production example with catalog deployment hooks and wearable OAuth secrets:
+
+```bash
+docker run -d --name getbased \
+  -p 8000:8000 \
+  -e HOST=0.0.0.0 \
+  -e PORT=8000 \
+  -e CATALOG_GIT_REPO=/catalog \
+  -e VERCEL_DEPLOY_HOOK_URL="$VERCEL_DEPLOY_HOOK_URL" \
+  -e OURA_CLIENT_ID="$OURA_CLIENT_ID" \
+  -e OURA_CLIENT_SECRET="$OURA_CLIENT_SECRET" \
+  -e WITHINGS_CLIENT_ID="$WITHINGS_CLIENT_ID" \
+  -e WITHINGS_CLIENT_SECRET="$WITHINGS_CLIENT_SECRET" \
+  -e ULTRAHUMAN_CLIENT_ID="$ULTRAHUMAN_CLIENT_ID" \
+  -e ULTRAHUMAN_CLIENT_SECRET="$ULTRAHUMAN_CLIENT_SECRET" \
+  -e POLAR_CLIENT_ID="$POLAR_CLIENT_ID" \
+  -e POLAR_CLIENT_SECRET="$POLAR_CLIENT_SECRET" \
+  -e WHOOP_CLIENT_ID="$WHOOP_CLIENT_ID" \
+  -e FITBIT_CLIENT_ID="$FITBIT_CLIENT_ID" \
+  getbased
+```
+
+The current `Dockerfile` does not define build arguments or BuildKit `RUN --mount=type=secret` steps, so do not pass catalog or OAuth secrets with `docker build --build-arg`. Inject secrets at runtime with your orchestrator/CI secret store, `--env-file`, or mounted secret files that populate environment variables before `npm start`.
 
 ## Tech stack
 
